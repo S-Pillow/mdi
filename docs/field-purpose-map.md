@@ -264,6 +264,96 @@ Job persistence and recovery are out of scope for MDI-06.
 
 ---
 
+## EstimateResponse fields (MDI-07)
+
+`EstimateResponse` is the response body for `POST /api/mdi/jobs/estimate`.
+This endpoint performs no external calls, creates no jobs, and mutates no runtime files.
+
+### Parse-count fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `accepted_count` | `int` | display | Items accepted by the input parser. |
+| `rejected_count` | `int` | display | Items that failed normalization or exceeded `max_items`. |
+| `duplicate_count` | `int` | display | Tokens whose normalized form was already accepted. |
+
+### Eligibility fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `eligible_vt_count` | `int` | display | Items eligible for VT checks. Equals `accepted_count` for paste input (hold status is NOT_CHECKED). |
+| `held_skipped_count` | `int` | display | Items confirmed-held that contribute 0 VT calls. Always `0` for paste input. Reserved for future upload-items path. |
+
+### Input-type breakdown fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `domain_count` | `int` | display | Eligible items classified as bare domains. |
+| `url_count` | `int` | display | Eligible items classified as full URLs. |
+| `domain_report_mode_count` | `int` | display | Bare domains using the VT domain-report endpoint (1 call max, only when `use_domain_reports=True`). |
+| `url_report_mode_count` | `int` | display | Items using the VT URL-report path (up to 3 calls each). Includes full URLs and bare domains when `use_domain_reports=False`. |
+
+### VT call estimate fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `estimated_vt_calls_min` | `int` | display | Optimistic estimate: all VT reports already cached. 1 call per item regardless of type or mode. |
+| `estimated_vt_calls_max` | `int` | display | Conservative estimate: no cached reports. Domain-mode items = 1; URL-mode items = 3 (GET + POST submit + GET). This value is also used by the submit endpoint's quota hard-stop. |
+
+### Quota fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `quota_remaining_now` | `int` | display | Shared VT quota remaining as of this request. Read from `vt_usage.json` (read-only, no increment). |
+| `will_exceed_quota` | `bool` | display, workflow | `True` when `estimated_vt_calls_max > quota_remaining_now`. The submit endpoint will hard-stop if this is `True`. |
+| `quota_headroom` | `int` | display | `quota_remaining_now - estimated_vt_calls_max`. Negative = over-quota. Zero = at limit. |
+
+### Runtime estimate fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `estimated_duration_seconds_min` | `float` | display | Optimistic runtime. Formula: `max(0, (calls_min - 1) × 15.0)`. |
+| `estimated_duration_seconds_max` | `float` | display | Conservative runtime. Formula: `max(0, (calls_max - 1) × 15.0)`. |
+
+### Informational note fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `rate_limit_note` | `str` | display | Human-readable explanation of the VT free-tier rate limit (4 req/min, 15s intervals). |
+| `job_state_note` | `str` | display | Warning that jobs are in-memory only and lost on service restart (MDI-06/08 limitation). |
+
+### Audit/safety flags
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `external_calls_made` | `bool` | audit | Always `False`. Estimate never contacts external services. |
+| `quota_consumed` | `bool` | audit | Always `False`. Estimate does not consume VT quota. |
+| `mutated` | `bool` | audit | Always `False`. Estimate does not write any runtime file. |
+
+### Detail lists
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `rejected` | `List[RejectedItemResponse]` | display | Rejected items with parse error details. Same structure as parse-preview. |
+| `duplicates` | `List[DuplicateItemResponse]` | display | Duplicate tokens. Same structure as parse-preview. |
+
+### Estimate formula summary
+
+The estimate formula in `services/estimate.py` is the single authoritative source
+shared between `POST /api/mdi/jobs/estimate` and `POST /api/mdi/jobs/submit`.
+Both endpoints call `estimate_job()` to guarantee frontend/backend parity.
+
+| Item type | `use_domain_reports` | calls_min | calls_max |
+|---|---|---|---|
+| Bare domain | `True` (domain-report mode) | 1 | 1 |
+| Bare domain | `False` (URL-report mode) | 1 | 3 |
+| Full URL | any | 1 | 3 |
+| Confirmed hold | any | 0 | 0 |
+
+Runtime formula: `max(0, (calls - 1) × 15.0)` seconds per bound.
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |

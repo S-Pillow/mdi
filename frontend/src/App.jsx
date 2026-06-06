@@ -26,6 +26,16 @@ function IconSearch() {
   )
 }
 
+function IconCalculator() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
+      <line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/>
+      <line x1="8" y1="18" x2="12" y2="18"/>
+    </svg>
+  )
+}
+
 function IconEye() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -52,6 +62,7 @@ function InputSection({
   rawInput, setRawInput, onPreview, previewing, onClear,
   fileRef, selectedFile, onFileChange, onUploadPreview, uploadPreviewing,
   onRunJob, submitting, canRunJob,
+  onEstimate, estimating,
 }) {
   return (
     <div className="card">
@@ -69,7 +80,7 @@ function InputSection({
             className="input-area"
             style={{ cursor: 'text', color: 'var(--text)' }}
             value={rawInput}
-            onChange={e => setRawInput(e.target.value)}
+            onChange={e => handleRawInputChange(e.target.value)}
             placeholder="One per line, comma-separated, or space-separated."
             spellCheck={false}
             autoComplete="off"
@@ -81,6 +92,14 @@ function InputSection({
               disabled={previewing || !rawInput.trim()}
             >
               <IconEye /> {previewing ? 'Parsing…' : 'Parse Preview'}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={onEstimate}
+              disabled={estimating || !rawInput.trim()}
+              style={{ background: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            >
+              <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate Quota & Runtime'}
             </button>
             <button
               className="btn btn-ghost"
@@ -315,6 +334,162 @@ function PreviewResultsSection({ preview, error }) {
     </div>
   )
 }
+
+// ── Estimate section ──────────────────────────────────────────────────────────
+
+function fmtDuration(secs) {
+  if (secs < 60) return `${Math.round(secs)}s`
+  const m = Math.floor(secs / 60)
+  const s = Math.round(secs % 60)
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
+
+function EstimateSection({ estimate, error, stale }) {
+  if (error) {
+    return (
+      <div className="card">
+        <div className="card-header"><span className="card-label">Quota &amp; Runtime Estimate</span></div>
+        <div className="card-body">
+          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Estimate error: {error}</p>
+        </div>
+      </div>
+    )
+  }
+  if (!estimate) return null
+
+  const {
+    accepted_count, rejected_count, duplicate_count,
+    eligible_vt_count, held_skipped_count,
+    domain_count, url_count, domain_report_mode_count, url_report_mode_count,
+    estimated_vt_calls_min, estimated_vt_calls_max,
+    quota_remaining_now, will_exceed_quota, quota_headroom,
+    estimated_duration_seconds_min, estimated_duration_seconds_max,
+    rate_limit_note, job_state_note,
+  } = estimate
+
+  return (
+    <div className="card" style={{ borderColor: will_exceed_quota ? 'var(--danger)' : stale ? 'var(--warn)' : undefined }}>
+      <div className="card-header">
+        <span className="card-label">Quota &amp; Runtime Estimate</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          Estimate only — no VT calls, no job created, no quota consumed
+        </span>
+        {stale && (
+          <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>
+            ⚠ Input changed — estimate may be outdated
+          </span>
+        )}
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {will_exceed_quota && (
+          <div style={{
+            padding: '10px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+            background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger)',
+            color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center',
+          }}>
+            <span>⛔</span>
+            <span>
+              Worst-case estimate ({estimated_vt_calls_max} VT calls) exceeds remaining quota
+              ({quota_remaining_now}). Submission will be blocked. Reduce input or wait until UTC midnight.
+            </span>
+          </div>
+        )}
+
+        {/* Parse counts */}
+        <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          {[
+            { label: 'Accepted',   value: accepted_count,   color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
+            { label: 'Eligible VT',value: eligible_vt_count, color: eligible_vt_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
+            { label: 'Rejected',   value: rejected_count,   color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Duplicates', value: duplicate_count,  color: duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
+          ].map(t => (
+            <div key={t.label} className="summary-tile">
+              <span className="tile-label">{t.label}</span>
+              <span className="tile-value" style={{ color: t.color }}>{t.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Type breakdown */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Input type breakdown</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Row label="Bare domains" value={domain_count} />
+              <Row label="Full URLs" value={url_count} />
+              <Row label="Domain-report mode" value={domain_report_mode_count} note="1 call max" />
+              <Row label="URL-report mode" value={url_report_mode_count} note="up to 3 calls" />
+              {held_skipped_count > 0 && <Row label="Hold-skipped" value={held_skipped_count} note="0 calls" warn />}
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>VT call estimate</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Row label="Best case (all cached)" value={`${estimated_vt_calls_min} call${estimated_vt_calls_min !== 1 ? 's' : ''}`} />
+              <Row label="Worst case (none cached)" value={`${estimated_vt_calls_max} call${estimated_vt_calls_max !== 1 ? 's' : ''}`} bold />
+              <Row label="Quota remaining" value={quota_remaining_now} />
+              <Row
+                label="Headroom (worst case)"
+                value={quota_headroom >= 0 ? `+${quota_headroom}` : String(quota_headroom)}
+                color={quota_headroom >= 0 ? 'var(--ok)' : 'var(--danger)'}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Runtime estimate */}
+        <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
+          <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>
+            Estimated runtime <span style={{ fontWeight: 400, fontSize: 11 }}>(approximate)</span>
+          </p>
+          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>Best case: </span>
+              <span style={{ fontFamily: 'monospace', color: 'var(--ok)' }}>
+                {fmtDuration(estimated_duration_seconds_min)}
+              </span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-muted)' }}>Worst case: </span>
+              <span style={{ fontFamily: 'monospace', color: will_exceed_quota ? 'var(--danger)' : 'var(--text)' }}>
+                {fmtDuration(estimated_duration_seconds_max)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            <strong style={{ color: 'var(--text-muted)' }}>Rate limit:</strong> {rate_limit_note}
+          </p>
+          <p style={{ fontSize: 11, color: 'var(--warn)' }}>
+            <strong>Job state:</strong> {job_state_note}
+          </p>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+function Row({ label, value, note, bold, color, warn }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{
+        fontFamily: 'monospace',
+        fontWeight: bold ? 700 : 400,
+        color: color || (warn ? 'var(--warn)' : 'var(--text)'),
+      }}>
+        {value}{note && <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 4 }}>{note}</span>}
+      </span>
+    </div>
+  )
+}
+
 
 // ── Upload preview results ────────────────────────────────────────────────────
 
@@ -770,6 +945,12 @@ export default function App() {
   const [preview, setPreview] = useState(null)
   const [previewError, setPreviewError] = useState(null)
 
+  // Estimate state
+  const [estimating, setEstimating] = useState(false)
+  const [estimateResult, setEstimateResult] = useState(null)
+  const [estimateError, setEstimateError] = useState(null)
+  const [estimateStale, setEstimateStale] = useState(false)
+
   // Upload preview state
   const fileRef = useRef(null)
   const [selectedFile, setSelectedFile] = useState(null)
@@ -785,6 +966,37 @@ export default function App() {
   const pollRef = useRef(null)
 
   const canRunJob = !!(preview && preview.accepted_count > 0)
+
+  async function handleEstimate() {
+    if (!rawInput.trim()) return
+    setEstimating(true)
+    setEstimateResult(null)
+    setEstimateError(null)
+    setEstimateStale(false)
+    try {
+      const resp = await fetch(`${API_BASE}/api/mdi/jobs/estimate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
+      })
+      if (!resp.ok) {
+        const text = await resp.text()
+        setEstimateError(`HTTP ${resp.status}: ${text}`)
+        return
+      }
+      setEstimateResult(await resp.json())
+    } catch (err) {
+      setEstimateError(err.message || 'Network error')
+    } finally {
+      setEstimating(false)
+    }
+  }
+
+  function handleRawInputChange(val) {
+    setRawInput(val)
+    // Mark existing estimate as stale when input changes
+    if (estimateResult) setEstimateStale(true)
+  }
 
   async function handlePreview() {
     if (!rawInput.trim()) return
@@ -814,6 +1026,9 @@ export default function App() {
     setRawInput('')
     setPreview(null)
     setPreviewError(null)
+    setEstimateResult(null)
+    setEstimateError(null)
+    setEstimateStale(false)
   }
 
   function handleFileChange(e) {
@@ -913,7 +1128,7 @@ export default function App() {
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI — VT core checks active (MDI-06). WHOIS, DNS, and live checks not yet implemented.
+          MDI — VT core checks (MDI-06) + quota estimate preview (MDI-07) active. WHOIS, DNS, and live checks not yet implemented.
         </div>
 
         <div className="page-header">
@@ -925,7 +1140,7 @@ export default function App() {
 
         <InputSection
           rawInput={rawInput}
-          setRawInput={setRawInput}
+          setRawInput={handleRawInputChange}
           onPreview={handlePreview}
           previewing={previewing}
           onClear={handleClear}
@@ -937,8 +1152,11 @@ export default function App() {
           onRunJob={handleRunJob}
           submitting={submitting}
           canRunJob={canRunJob}
+          onEstimate={handleEstimate}
+          estimating={estimating}
         />
 
+        <EstimateSection estimate={estimateResult} error={estimateError} stale={estimateStale} />
         <PreviewResultsSection preview={preview} error={previewError} />
         <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
 
