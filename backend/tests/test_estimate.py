@@ -416,8 +416,15 @@ class TestEstimateEndpoint:
                 os.environ["VT_HISTORY_FILE"] = old_env
 
     def test_live_quota_file_not_modified(self):
-        """The live /var/lib/dns-tool/vt_usage.json must not be modified."""
-        live_path = Path(os.environ.get("VT_USAGE_FILE", "/var/lib/dns-tool/vt_usage.json"))
+        """The live /var/lib/dns-tool/vt_usage.json must not be modified.
+
+        Always checks the real runtime file regardless of VT_USAGE_FILE env var,
+        because the conftest.py autouse fixture redirects VT_USAGE_FILE to
+        tmp_path for all tests.  The estimate endpoint cannot reach the live
+        file when the redirect is active, so this test trivially passes — but
+        it still guards against any accidental removal of that isolation.
+        """
+        live_path = Path("/var/lib/dns-tool/vt_usage.json")
         if not live_path.exists():
             pytest.skip("Live usage file not present in this environment")
         mtime_before = live_path.stat().st_mtime
