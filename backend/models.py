@@ -750,6 +750,29 @@ class JobStatusResponse(BaseModel):
     use_domain_reports: bool
     stale_threshold_days: int
     results: List[MdiResultItem] = Field(default_factory=list)
+    # ── MDI-11 enrichment counters ─────────────────────────────────────────────
+    rdap_enriched_count: int = Field(
+        0, description="[display] Items enriched via RDAP/WHOIS before VT."
+    )
+    rdap_failed_count: int = Field(
+        0, description="[display] Items where RDAP/WHOIS enrichment failed (non-fatal)."
+    )
+    whois_fallback_count: int = Field(
+        0, description="[display] Items where WHOIS fallback was used instead of RDAP."
+    )
+    hold_detected_by_enrichment_count: int = Field(
+        0, description="[display] Items where live RDAP/WHOIS detected a domain hold."
+    )
+    # ── MDI-12 live-check counters ─────────────────────────────────────────────
+    live_check_count: int = Field(
+        0, description="[display] Items that received a live HTTP check."
+    )
+    live_check_skipped_count: int = Field(
+        0, description="[display] Items skipped by live-check eligibility rules (clean, held, error)."
+    )
+    live_check_error_count: int = Field(
+        0, description="[display] Items where the live check returned a structured error."
+    )
 
 
 # ─── Estimate API models ──────────────────────────────────────────────────────

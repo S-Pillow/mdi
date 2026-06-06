@@ -871,3 +871,86 @@ the estimate response explaining the conditional timing overhead.
 
 `live_check` duration is **not** added to `estimated_duration_seconds_min` or
 `estimated_duration_seconds_max` because the count is unknown at estimate time.
+
+---
+
+## MDI-12A — Quota refresh and live-check counter exposure
+
+### Frontend quota state
+
+The `App` component maintains a `quotaState` object:
+
+| Field | Type | Description |
+|---|---|---|
+| `daily_lookups_used` | int | Calls consumed today across all MDI + VT Bulk Check tools |
+| `remaining` | int | Calls remaining today before the 500/day cap is hit |
+| `daily_limit` | int | Total daily cap (typically 500) |
+| `checkedAt` | timestamp (ms) | Local epoch-ms when the quota was last fetched |
+
+`quotaLoading` / `quotaError` track fetch state.
+
+### QuotaWidget display
+
+A compact row above the main page header shows:
+
+- **VT quota: X / 500** — current usage out of daily cap  
+- **(Y remaining)** — coloured green/amber/red by threshold  
+- A thin progress bar  
+- **Last checked: HH:MM:SS** — local time of the last fetch
+
+If the quota fetch fails, a non-blocking warning replaces the display. Input
+and parse-preview are never blocked by quota fetch failures.
+
+### Quota refresh triggers
+
+| Trigger | Action |
+|---|---|
+| App mount (component load) | `GET /api/mdi/usage` called immediately |
+| `handleEstimate` | Refresh if `quotaState.checkedAt` is missing or > 60 s old (stale threshold) |
+| `handleRunJob` (before submit) | Always refresh; block submit if `remaining <= 0` |
+| Poll detects `done` or `error` | Refresh to reflect quota consumed by the completed job |
+
+The 60-second staleness constant (`QUOTA_STALE_MS`) is defined at module level
+in `App.jsx` and applies only to the pre-estimate refresh. Submit always
+performs a fresh fetch.
+
+### Submit quota guard
+
+If `GET /api/mdi/usage` returns `remaining <= 0` immediately before a job
+submission, the submit is blocked client-side with a clear error message. The
+backend also enforces this as a hard stop, so this is defense-in-depth.
+
+### live-check counters in `JobStatusResponse`
+
+Three counter fields were added to `backend/models.py → JobStatusResponse` and
+populated by both `GET /api/mdi/jobs/{job_id}` and `GET /api/mdi/jobs/latest`:
+
+| Field | Default | Description |
+|---|---|---|
+| `live_check_count` | 0 | Items that received a live HTTP check |
+| `live_check_skipped_count` | 0 | Items skipped by eligibility rules |
+| `live_check_error_count` | 0 | Items where the live check returned an error |
+
+These counters were already tracked in `InMemoryJob` (MDI-12); MDI-12A exposes
+them in the API response.
+
+### Job persistence (round-trip)
+
+`backend/services/job_persistence.py` `serialize_job` / `deserialize_job` now
+include the MDI-11 enrichment counters and MDI-12 live-check counters.  Jobs
+persisted before MDI-12A will deserialize the missing keys as `0` (backward
+compatible).
+
+### Frontend live-check counter display
+
+After job processing completes (or during `running` state), the `JobSection`
+renders a compact summary row if any enrichment or live-check counters are
+non-zero:
+
+- RDAP enriched: N  
+- Live checks run: N  
+- Live checks skipped: N  
+- Live-check errors: N (only shown if > 0)
+
+This is rendered via an IIFE in JSX and is suppressed entirely when all counters
+are zero.

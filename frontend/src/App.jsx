@@ -364,7 +364,7 @@ function EstimateSection({ estimate, error, stale }) {
     estimated_vt_calls_min, estimated_vt_calls_max,
     quota_remaining_now, will_exceed_quota, quota_headroom,
     estimated_duration_seconds_min, estimated_duration_seconds_max,
-    rate_limit_note, job_state_note,
+    rate_limit_note, job_state_note, live_check_note,
   } = estimate
 
   return (
@@ -468,6 +468,11 @@ function EstimateSection({ estimate, error, stale }) {
           <p style={{ fontSize: 11, color: 'var(--warn)' }}>
             <strong>Job state:</strong> {job_state_note}
           </p>
+          {live_check_note && (
+            <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              <strong style={{ color: 'var(--text-muted)' }}>Live checks:</strong> {live_check_note}
+            </p>
+          )}
         </div>
 
       </div>
@@ -876,6 +881,47 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
           </div>
         )}
 
+        {/* Live-check and enrichment counter summary (MDI-12A) */}
+        {job && (job.status === 'done' || job.status === 'running') && (
+          (() => {
+            const lcc  = job.live_check_count ?? 0
+            const lcsk = job.live_check_skipped_count ?? 0
+            const lce  = job.live_check_error_count ?? 0
+            const rdap = job.rdap_enriched_count ?? 0
+            const anyLive = lcc > 0 || lcsk > 0 || lce > 0
+            const anyRdap = rdap > 0
+            if (!anyLive && !anyRdap) return null
+            return (
+              <div style={{
+                fontSize: 11, color: 'var(--text-dim)', padding: '6px 10px',
+                background: 'var(--bg-elevated)', borderRadius: 4,
+                display: 'flex', flexWrap: 'wrap', gap: '6px 20px',
+              }}>
+                {anyRdap && (
+                  <span title="Domains enriched via RDAP/WHOIS before VT processing">
+                    RDAP enriched: <strong style={{ color: 'var(--text-muted)' }}>{rdap}</strong>
+                  </span>
+                )}
+                {anyLive && (
+                  <>
+                    <span title="Items that received a live HTTP activity check">
+                      Live checks run: <strong style={{ color: lcc > 0 ? 'var(--accent)' : 'var(--text-dim)' }}>{lcc}</strong>
+                    </span>
+                    <span title="Items skipped by live-check eligibility (clean, held, or error)">
+                      Live checks skipped: <strong style={{ color: 'var(--text-dim)' }}>{lcsk}</strong>
+                    </span>
+                    {lce > 0 && (
+                      <span title="Items where the live check returned an error">
+                        Live-check errors: <strong style={{ color: 'var(--warn)' }}>{lce}</strong>
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })()
+        )}
+
         {/* Results table */}
         {results.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
@@ -1098,9 +1144,115 @@ function DashboardSection() {
   )
 }
 
+// ── Quota widget ──────────────────────────────────────────────────────────────
+
+function QuotaWidget({ quota, loading, error }) {
+  if (loading) {
+    return (
+      <div style={{
+        fontSize: 11, color: 'var(--text-dim)', padding: '4px 0',
+        display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <span style={{ opacity: 0.6 }}>⏳ Checking VT quota…</span>
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div style={{
+        fontSize: 11, color: 'var(--warn)', padding: '4px 0',
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        ⚠ Quota check failed: {error}
+      </div>
+    )
+  }
+  if (!quota) return null
+
+  const pct = quota.remaining != null && quota.daily_limit != null
+    ? Math.round(((quota.daily_limit - quota.remaining) / quota.daily_limit) * 100)
+    : null
+  const barColor = quota.remaining <= 0 ? 'var(--danger)'
+    : quota.remaining < 50 ? 'var(--warn)' : 'var(--ok)'
+  const checkedStr = quota.checkedAt
+    ? new Date(quota.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      fontSize: 11, color: 'var(--text-muted)',
+      padding: '5px 0', flexWrap: 'wrap',
+    }}>
+      <span title="Shared VT quota — used by MDI and VT Bulk Check">
+        <span style={{ color: 'var(--text-dim)' }}>VT quota: </span>
+        <span style={{ fontFamily: 'monospace', color: quota.remaining <= 0 ? 'var(--danger)' : 'var(--text)' }}>
+          {quota.daily_lookups_used ?? '?'} / {quota.daily_limit ?? '500'}
+        </span>
+        {' '}
+        <span style={{ color: barColor, fontWeight: 600 }}>
+          ({quota.remaining ?? '?'} remaining)
+        </span>
+      </span>
+      {pct != null && (
+        <span style={{
+          display: 'inline-block', width: 60, height: 6,
+          background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden',
+          verticalAlign: 'middle',
+        }}>
+          <span style={{
+            display: 'block', height: '100%',
+            width: `${Math.min(pct, 100)}%`,
+            background: barColor, borderRadius: 3,
+          }} />
+        </span>
+      )}
+      {checkedStr && (
+        <span style={{ color: 'var(--text-dim)' }}>
+          Last checked: {checkedStr}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
+// How old a quota reading can be before estimate/submit forces a refresh (ms).
+const QUOTA_STALE_MS = 60_000
+
 export default function App() {
+  // Shared VT quota state (MDI-12A — refreshed on load, before submit, after completion)
+  const [quotaState, setQuotaState] = useState(null)    // { daily_lookups_used, remaining, daily_limit, checkedAt }
+  const [quotaLoading, setQuotaLoading] = useState(false)
+  const [quotaError, setQuotaError] = useState(null)
+
+  async function refreshQuota() {
+    setQuotaLoading(true)
+    setQuotaError(null)
+    try {
+      const resp = await fetch(`${API_BASE}/api/mdi/usage`)
+      if (!resp.ok) {
+        setQuotaError(`HTTP ${resp.status}`)
+        return null
+      }
+      const data = await resp.json()
+      const next = { ...data, checkedAt: Date.now() }
+      setQuotaState(next)
+      return next
+    } catch (err) {
+      setQuotaError(err.message || 'Network error')
+      return null
+    } finally {
+      setQuotaLoading(false)
+    }
+  }
+
+  function isQuotaStale() {
+    if (!quotaState?.checkedAt) return true
+    return Date.now() - quotaState.checkedAt > QUOTA_STALE_MS
+  }
+
   // Paste preview state
   const [rawInput, setRawInput] = useState('')
   const [previewing, setPreviewing] = useState(false)
@@ -1150,6 +1302,8 @@ export default function App() {
 
   async function handleEstimate() {
     if (!rawInput.trim()) return
+    // Refresh shared quota first if stale — for operator visibility before the estimate renders
+    if (isQuotaStale()) await refreshQuota()
     setEstimating(true)
     setEstimateResult(null)
     setEstimateError(null)
@@ -1246,7 +1400,7 @@ export default function App() {
     }
   }
 
-  // Poll job status until done/error
+  // Poll job status until done/error; refresh shared quota on completion
   const pollJob = useCallback(async (id) => {
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/${id}`)
@@ -1255,12 +1409,26 @@ export default function App() {
       setJob(data)
       if (data.status === 'done' || data.status === 'error') {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+        // Refresh quota to reflect consumption by the completed job
+        refreshQuota()
       }
     } catch (_) { /* ignore poll errors */ }
-  }, [])
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleRunJob() {
     if (!rawInput.trim() || submitting) return
+
+    // Always refresh shared quota immediately before submit so the UI shows current usage
+    // and we can block if quota is exhausted.
+    const freshQuota = await refreshQuota()
+    if (freshQuota && freshQuota.remaining <= 0) {
+      setJobError(
+        `VT quota exhausted — ${freshQuota.daily_lookups_used ?? '?'} / ` +
+        `${freshQuota.daily_limit ?? 500} used today. Wait until UTC midnight to reset.`
+      )
+      return
+    }
+
     setSubmitting(true)
     setJob(null)
     setJobId(null)
@@ -1297,6 +1465,11 @@ export default function App() {
   useEffect(() => {
     if (estimateResult) setEstimateStale(true)
   }, [useDomainReports, staleThresholdDays])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch shared VT quota on app load (MDI-12A)
+  useEffect(() => {
+    refreshQuota()
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recovery: on mount, attempt to restore the latest completed job
   useEffect(() => {
@@ -1341,8 +1514,11 @@ export default function App() {
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI — VT core + quota estimate + job recovery + settings (MDI-09) active. WHOIS, DNS, live checks, and exports not yet implemented.
+          MDI — VT core + RDAP/WHOIS enrichment + live checks (MDI-12) active.
         </div>
+
+        {/* Shared VT quota display (MDI-12A) */}
+        <QuotaWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
 
         <div className="page-header">
           <h1 className="page-title">Malicious Domain Identifier</h1>

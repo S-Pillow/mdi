@@ -493,6 +493,13 @@ async def latest_job() -> JobStatusResponse:
         use_domain_reports=job.use_domain_reports,
         stale_threshold_days=job.stale_threshold_days,
         results=results_ordered,
+        rdap_enriched_count=job.rdap_enriched_count,
+        rdap_failed_count=job.rdap_failed_count,
+        whois_fallback_count=job.whois_fallback_count,
+        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
+        live_check_count=job.live_check_count,
+        live_check_skipped_count=job.live_check_skipped_count,
+        live_check_error_count=job.live_check_error_count,
     )
 
 
@@ -537,6 +544,13 @@ async def job_status(job_id: str) -> JobStatusResponse:
         use_domain_reports=job.use_domain_reports,
         stale_threshold_days=job.stale_threshold_days,
         results=results_ordered,
+        rdap_enriched_count=job.rdap_enriched_count,
+        rdap_failed_count=job.rdap_failed_count,
+        whois_fallback_count=job.whois_fallback_count,
+        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
+        live_check_count=job.live_check_count,
+        live_check_skipped_count=job.live_check_skipped_count,
+        live_check_error_count=job.live_check_error_count,
     )
 
 
