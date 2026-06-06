@@ -954,3 +954,165 @@ non-zero:
 
 This is rendered via an IIFE in JSX and is suppressed entirely when all counters
 are zero.
+
+---
+
+## MDI-13 — Triage UI (summary cards, priority table, filters, settings gear)
+
+### Overview
+
+MDI-13 is a frontend-only enhancement. No backend APIs, endpoints, or runtime
+files were changed. All sorting, filtering, and card-counting logic runs
+client-side on the already-received `job.results` array.
+
+### Settings placement
+
+The standalone bottom `SettingsSection` card and the `DashboardSection`
+placeholder are removed. Settings are now accessible via a **Settings gear
+button** in the `<nav>` bar (right-aligned).
+
+- `settingsOpen: boolean` state in `App` controls the panel.
+- The gear button sets `aria-expanded` and `aria-controls` (pointing to the
+  panel element ID) for accessibility.
+- The `CollapsibleSettingsPanel` renders inline below the nav (via CSS
+  `settings-panel` class), collapsed by default (zero vertical space).
+- Panel contents: VT Report Mode toggle, Stale Threshold input, plus disabled
+  placeholders for Auto-rescan, URL activity check, and Export options.
+- `settingsLocked` behavior is preserved: controls are greyed out while a job
+  is active or a recovered job is shown.
+
+### Header / QuotaWidget
+
+The nav bar now includes three zones:
+1. Left: back link + brand name + subtitle
+2. Center: `QuotaNavWidget` — compact inline quota display (used/limit + bar)
+3. Right: Settings gear button
+
+`QuotaNavWidget` renders the shared VT quota as `used/limit` with a thin bar.
+All four refresh triggers from MDI-12A are preserved (mount, pre-estimate,
+pre-submit, post-completion).
+
+### Pure helper functions
+
+All triage logic is implemented as pure functions at the top of `App.jsx`. They
+accept only result/job data and make no network calls.
+
+| Function | Purpose |
+|---|---|
+| `isFlagged(r)` | `triage_bucket` in malicious/suspicious |
+| `isLive(r)` | `live_status` in active/redirect/forbidden |
+| `isNoLive(r)` | `live_status` in not_found/gone/dns_failure/connection_refused/timeout |
+| `isRecentAge(r)` | `age_bucket` in very_new/new |
+| `isStaleFreshness(r)` | `freshness` in stale/very_stale |
+| `getVirtualBucketKey(r)` | Returns mutually-exclusive virtual bucket key |
+| `getItemPriority(r)` | Numeric priority rank (1 = highest) |
+| `comparePriority(a, b)` | Comparator for `Array.sort` — mirrors triage_rules.py |
+| `getFilteredResults(results, key)` | Returns items matching the named filter |
+| `getFilterCount(results, key)` | Count of items matching a filter |
+| `getTriageCardCounts(results)` | Returns `{ flr, fl, fr, fs, fnl, flagged, unknown, clean, held }` counts |
+| `formatPercent(count, total)` | `"X.X%"` string |
+| `formatDate(val)` | `"YYYY-MM-DD"` or `"—"` |
+| `formatAgeBucket(val)` | Human label for age_bucket enum |
+| `formatVtRatio(r)` | VT ratio string from vt_ratio or vt_hits/vt_total_engines |
+| `formatLiveStatus(val)` | Display string for live_status enum value |
+
+### Virtual bucket keys (mutually exclusive, priority order)
+
+| Key | Condition | Priority |
+|---|---|---|
+| `held` | `triage_bucket === 'held'` | 1 |
+| `unknown` | bucket in error/unresolvable/pending | 2 |
+| `flr` | flagged AND live AND recent | 3 |
+| `fl` | flagged AND live | 4 |
+| `fr` | flagged AND recent | 5 |
+| `fs` | flagged AND stale freshness | 6 |
+| `fnl` | flagged AND no-live | 7 |
+| `flagged` | flagged catch-all | 8 |
+| `clean` | `triage_bucket === 'clean'` | 9 |
+
+Cards use these mutually-exclusive keys so totals add up to total items without
+double-counting. Filter predicates are **inclusive** (a row may match multiple
+filters), consistent with how operators would expect `Flagged + Live` to include
+items that are also `Flagged + Live + Recent`.
+
+### Priority sort
+
+`comparePriority(a, b)` mirrors the 11-level priority in
+`backend/services/triage_rules.py`. Secondary sort: confidence (high→medium→low
+→clean→unknown). Tertiary: submission position.
+
+> **Important:** If `triage_rules.py` priority changes, `PRIORITY_RANK` in
+> `App.jsx` must be updated to match.
+
+### Triage summary cards (`TriageSummaryCards`)
+
+Seven clickable cards rendered above the results table, one per virtual bucket
+in priority order. Each card shows: uppercase bucket label, item count, and
+percentage of total. A colored left-border accent identifies the bucket. Cards
+are real `<button>` elements with `aria-pressed`.
+
+Clicking a card sets `activeFilter` to that bucket's filter key. Clicking an
+active card resets to `'all'`. No API calls, no quota use.
+
+### Filter bar (`FilterBar`)
+
+A secondary row of pill-style filter buttons below the cards. Named filters:
+All / Domain On Hold / Flagged + Live + Recent / Flagged + Live / Flagged +
+Recent / Flagged + Stale / Flagged + No-Live / All Flagged / Unknown·Errors /
+Clean. Each shows a count badge. Active filter highlighted. Empty filter state
+shows a message with a "clear filter" button.
+
+### Results table (`ResultsTable`)
+
+Polished operations-console table replacing the flat debug table. Columns:
+
+1. Checkbox (visual/preparatory only — selection tracked but no action connected)
+2. `#` (position)
+3. Domain / URL (monospace, truncated, tooltip)
+4. Triage Bucket (colored badge + collapsible triage reasons `<details>`)
+5. Confidence (colored text)
+6. Recommended Action (formatted text)
+7. VT Ratio (monospace, colored if flagged)
+8. Freshness (badge)
+9. Live (badge)
+10. Created (YYYY-MM-DD)
+11. Age (age_bucket label)
+12. Evidence Status (badge)
+13. Actions (disabled eye + kebab stubs for MDI-14)
+
+Row left-border accents identify priority tier (critical/high/medium/low/info/
+clean). Row hover state. Scrollable with `max-height: 520px`.
+
+### Checkbox selection
+
+Row checkboxes and a header select-all are present and tracked in `selectedIds`
+state. They do not connect to any backend action. Bulk buttons remain disabled
+even when rows are selected. Selection is preparatory for MDI-16 export/rescan.
+
+### Bulk controls (`BulkControls`)
+
+Five disabled-but-visible buttons above the table:
+- Bulk actions dropdown
+- Export Flagged (MDI-16)
+- Export All (MDI-16)
+- Rescan Selected (future)
+- Rescan Stale (future)
+
+All have `disabled` attribute and `aria-disabled="true"`.
+
+### Disabled row action stubs
+
+Each row has an eye icon button and a kebab-menu button. Both are `disabled`
+with tooltips ("Detail view — coming soon (MDI-14)" and "More actions — coming
+soon"). No detail drawer in MDI-13.
+
+### What is deferred
+
+| Feature | Target ticket |
+|---|---|
+| Detail drawer / per-item panel | MDI-14 |
+| Export (CSV/XLSX) | MDI-16 |
+| Rescan selected items | Future |
+| Rescan stale items | Future |
+| Pagination (rows-per-page) | MDI-14+ |
+| Per-row WHOIS / Open in VT links | MDI-14 |
