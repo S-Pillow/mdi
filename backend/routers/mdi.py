@@ -23,6 +23,7 @@ from models import (
     AgeBucket,
     DomainHoldType,
     DomainStatusSource,
+    DuplicateItemResponse,
     EvidenceStatus,
     Freshness,
     InputType,
@@ -30,12 +31,16 @@ from models import (
     MdiJobOptions,
     MdiJobStatus,
     MdiProcessingStatus,
+    ParsePreviewRequest,
+    ParsePreviewResponse,
     RecommendedAction,
+    RejectedItemResponse,
     TriageBucket,
     TriageConfidence,
     VtModeUsed,
 )
 from services.vt_quota import get_usage_summary
+from services.input_parser import parse_raw_input
 
 router = APIRouter(prefix="/api/mdi")
 
@@ -71,6 +76,49 @@ async def usage() -> Dict[str, Any]:
       error              — null on success; error description if file is missing/malformed
     """
     return get_usage_summary()
+
+
+# ── Parse preview ─────────────────────────────────────────────────────────────
+
+@router.post("/jobs/parse-preview", tags=["Input"], response_model=ParsePreviewResponse)
+async def parse_preview(req: ParsePreviewRequest) -> ParsePreviewResponse:
+    """
+    Parse raw pasted input and return normalized items without running any checks.
+
+    No external calls are made.  No VT, WHOIS, DNS, or URL activity lookups.
+    No quota is consumed.  No job is created.  No runtime files are written.
+
+    Use this endpoint to preview what MDI will accept before submitting a real job.
+    """
+    result = parse_raw_input(
+        req.raw_input,
+        default_scheme=req.default_scheme,
+        max_items=req.max_items,
+    )
+    return ParsePreviewResponse(
+        accepted_count=len(result.accepted),
+        rejected_count=len(result.rejected),
+        duplicate_count=len(result.duplicates),
+        items=result.accepted,
+        rejected=[
+            RejectedItemResponse(
+                input_original=r.input_original,
+                position=r.position,
+                error=r.error,
+            )
+            for r in result.rejected
+        ],
+        duplicates=[
+            DuplicateItemResponse(
+                input_original=d.input_original,
+                position=d.position,
+                duplicate_of=d.duplicate_of,
+            )
+            for d in result.duplicates
+        ],
+        external_calls_made=False,
+        quota_consumed=False,
+    )
 
 
 # ── Schema summary ─────────────────────────────────────────────────────────────

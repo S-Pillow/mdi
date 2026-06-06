@@ -442,6 +442,72 @@ class MdiJobSummary(BaseModel):
     )
 
 
+# ─── Parse-preview API models ─────────────────────────────────────────────────
+
+
+class ParsePreviewRequest(BaseModel):
+    """Request body for POST /api/mdi/jobs/parse-preview."""
+    raw_input: str = Field(
+        ...,
+        description="[audit] Raw pasted text containing domains and/or URLs."
+    )
+    default_scheme: str = Field(
+        "http",
+        description="[workflow] Scheme prepended to domain/path tokens that lack one.",
+        pattern=r"^https?$",
+    )
+    max_items: int = Field(
+        500,
+        ge=1,
+        le=500,
+        description="[workflow] Maximum items to accept. Excess items are rejected.",
+    )
+
+
+class RejectedItemResponse(BaseModel):
+    """A single item that failed normalization or exceeded limits."""
+    input_original: str = Field(..., description="[display] Raw token as submitted.")
+    position: int = Field(..., description="[display] 1-based position in the raw token list.")
+    error: MdiError = Field(..., description="[display] Structured parse error.")
+
+
+class DuplicateItemResponse(BaseModel):
+    """A token whose normalized form was already accepted."""
+    input_original: str = Field(..., description="[display] Raw token as submitted.")
+    position: int = Field(..., description="[display] 1-based position in the raw token list.")
+    duplicate_of: str = Field(..., description="[display] Normalized form it duplicates.")
+
+
+class ParsePreviewResponse(BaseModel):
+    """Response body for POST /api/mdi/jobs/parse-preview."""
+    accepted_count: int = Field(..., description="[display] Items accepted for lookup.")
+    rejected_count: int = Field(..., description="[display] Items that failed parsing.")
+    duplicate_count: int = Field(..., description="[display] Items deduplicated.")
+    items: List[MdiInputItem] = Field(
+        ...,
+        description="[display] Accepted, normalized items in first-seen order."
+    )
+    rejected: List[RejectedItemResponse] = Field(
+        ...,
+        description="[display] Rejected items with error details."
+    )
+    duplicates: List[DuplicateItemResponse] = Field(
+        ...,
+        description="[display] Duplicate tokens."
+    )
+    external_calls_made: bool = Field(
+        False,
+        description="[audit] Always false — parse-preview never contacts external services."
+    )
+    quota_consumed: bool = Field(
+        False,
+        description="[audit] Always false — parse-preview does not consume VT quota."
+    )
+
+
+# ─── Job state ─────────────────────────────────────────────────────────────────
+
+
 class MdiJobState(BaseModel):
     """
     In-memory and disk-persisted job state for a running or completed MDI job.
