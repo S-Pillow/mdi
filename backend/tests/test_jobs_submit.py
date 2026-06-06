@@ -1621,3 +1621,158 @@ def test_mdi12_url_input_type_triggers_live_check(tmp_path):
     # Must pass the normalized input and the correct InputType
     assert call_args[0][0] == "https://evil.com/malware"
     assert call_args[0][1] == InputType.URL
+
+
+# ── MDI-12A: live-check counters exposed in JobStatusResponse ─────────────────
+
+
+def test_mdi12a_job_status_response_has_live_check_count():
+    """MDI-12A: GET /api/mdi/jobs/{job_id} response includes live_check_count field."""
+    resp = client.post("/api/mdi/jobs/submit", json={"raw_input": "mdi12a-count.com"})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status_resp = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert "live_check_count" in data
+    assert isinstance(data["live_check_count"], int)
+
+
+def test_mdi12a_job_status_response_has_live_check_skipped_count():
+    """MDI-12A: GET /api/mdi/jobs/{job_id} response includes live_check_skipped_count field."""
+    resp = client.post("/api/mdi/jobs/submit", json={"raw_input": "mdi12a-skipped.com"})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status_resp = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert "live_check_skipped_count" in data
+    assert isinstance(data["live_check_skipped_count"], int)
+
+
+def test_mdi12a_job_status_response_has_live_check_error_count():
+    """MDI-12A: GET /api/mdi/jobs/{job_id} response includes live_check_error_count field."""
+    resp = client.post("/api/mdi/jobs/submit", json={"raw_input": "mdi12a-error.com"})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status_resp = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert "live_check_error_count" in data
+    assert isinstance(data["live_check_error_count"], int)
+
+
+def test_mdi12a_job_status_response_model_has_counter_fields():
+    """MDI-12A: JobStatusResponse Pydantic model includes live_check counter fields."""
+    from models import JobStatusResponse
+    fields = JobStatusResponse.model_fields
+    assert "live_check_count" in fields
+    assert "live_check_skipped_count" in fields
+    assert "live_check_error_count" in fields
+    # Confirm defaults are 0
+    assert fields["live_check_count"].default == 0
+    assert fields["live_check_skipped_count"].default == 0
+    assert fields["live_check_error_count"].default == 0
+
+
+def test_mdi12a_live_counters_populated_after_processing(tmp_path):
+    """MDI-12A: After processing a flagged item, live_check_count > 0 in status response."""
+    job_id = "test-mdi12a-counter-" + str(time.time_ns())
+    _make_job(job_id, [("evil-mdi12a.com", "evil-mdi12a.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=3)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item",
+                     new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    # Verify via the status endpoint — counters must be visible in the response
+    status_resp = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data["live_check_count"] == 1
+    assert data["live_check_skipped_count"] == 0
+    assert data["live_check_error_count"] == 0
+
+
+def test_mdi12a_skipped_count_incremented_for_clean_items(tmp_path):
+    """MDI-12A: Clean items (skip live check) increment live_check_skipped_count."""
+    job_id = "test-mdi12a-skip-" + str(time.time_ns())
+    _make_job(job_id, [("clean-mdi12a.com", "clean-mdi12a.com", InputType.DOMAIN)])
+
+    # Clean VT body — zero malicious/suspicious
+    clean_body = {
+        "data": {
+            "attributes": {
+                "last_analysis_stats": {"malicious": 0, "suspicious": 0, "harmless": 70, "undetected": 5},
+                "last_analysis_date": int(time.time()) - 86400,
+                "last_http_response_code": 200,
+            }
+        }
+    }
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.NOT_CHECKED))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, clean_body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    # live_check_item must NOT have been called (clean item is skipped before live_check_item)
+    lc_mock.assert_not_called()
+
+    status_resp = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status_resp.status_code == 200
+    data = status_resp.json()
+    assert data["live_check_count"] == 0
+    assert data["live_check_skipped_count"] == 1
+    assert data["live_check_error_count"] == 0
+
+
+def test_mdi12a_latest_job_endpoint_returns_live_counters(tmp_path):
+    """MDI-12A: GET /api/mdi/jobs/latest returns live-check counter fields from in-memory job."""
+    job_id = "test-mdi12a-latest-" + str(time.time_ns())
+    _make_job(job_id, [("latest-mdi12a.com", "latest-mdi12a.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=2)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item",
+                     new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    # The /jobs/latest endpoint should also expose the counters
+    latest_resp = client.get("/api/mdi/jobs/latest")
+    assert latest_resp.status_code == 200
+    data = latest_resp.json()
+    assert "live_check_count" in data
+    assert "live_check_skipped_count" in data
+    assert "live_check_error_count" in data
+    # This job ran a live check on a flagged domain
+    assert data["live_check_count"] >= 1

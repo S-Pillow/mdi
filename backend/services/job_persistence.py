@@ -86,6 +86,16 @@ def serialize_job(job: "job_store.InMemoryJob") -> Dict[str, Any]:  # type: igno
         "item_order": job.item_order,
         "results": results_serialized,
         "usage_history_written": job.usage_history_written,
+        # MDI-11 enrichment counters (metadata-only — counts survive recovery)
+        "rdap_enriched_count": job.rdap_enriched_count,
+        "rdap_failed_count": job.rdap_failed_count,
+        "whois_fallback_count": job.whois_fallback_count,
+        "hold_detected_by_enrichment_count": job.hold_detected_by_enrichment_count,
+        "enrichment_skipped_uploaded_hold_count": job.enrichment_skipped_uploaded_hold_count,
+        # MDI-12 live-check counters (metadata-only — counts survive recovery)
+        "live_check_count": job.live_check_count,
+        "live_check_skipped_count": job.live_check_skipped_count,
+        "live_check_error_count": job.live_check_error_count,
     }
 
 
@@ -120,6 +130,16 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
         item_order=list(data.get("item_order") or []),
         results=results,
         usage_history_written=bool(data.get("usage_history_written", False)),
+        # MDI-11 enrichment counters — default 0 for jobs persisted before MDI-11
+        rdap_enriched_count=int(data.get("rdap_enriched_count", 0)),
+        rdap_failed_count=int(data.get("rdap_failed_count", 0)),
+        whois_fallback_count=int(data.get("whois_fallback_count", 0)),
+        hold_detected_by_enrichment_count=int(data.get("hold_detected_by_enrichment_count", 0)),
+        enrichment_skipped_uploaded_hold_count=int(data.get("enrichment_skipped_uploaded_hold_count", 0)),
+        # MDI-12 live-check counters — default 0 for jobs persisted before MDI-12
+        live_check_count=int(data.get("live_check_count", 0)),
+        live_check_skipped_count=int(data.get("live_check_skipped_count", 0)),
+        live_check_error_count=int(data.get("live_check_error_count", 0)),
     )
 
 
