@@ -108,6 +108,38 @@ until a future column-addition ticket updates that exporter.
 
 ---
 
+## MDI-07 runtime file access summary
+
+### MDI-07 runtime behavior
+
+MDI-07 adds `POST /api/mdi/jobs/estimate`.  This endpoint is **strictly read-only
+and produces no side effects**.
+
+| File | MDI-07 Access | Notes |
+|---|---|---|
+| `vt_usage.json` | **READ ONLY** | `read_remaining_quota()` reads the current daily counter to populate `quota_remaining_now`. No write. No increment. mtime is unchanged after any estimate call. |
+| `vt_usage_history.jsonl` | **None** | No job is created; no history record is appended. |
+| `vt_daily_history.json` | **None** | Not touched. |
+| `vt_latest_job.json` | **NEVER** | MDI hard rule — unchanged. |
+| `mdi_latest_job.json` | **None** | Does not exist. Job persistence deferred to MDI-08. |
+
+### MDI-07 estimate endpoint guarantees
+
+- `external_calls_made: false` — no VT, WHOIS, DNS, or URL Activity Scanner calls.
+- `quota_consumed: false` — no quota is incremented.
+- `mutated: false` — no runtime file is written.
+- Uploaded file bytes: none — the estimate endpoint accepts only `raw_input` (JSON string).
+
+### MDI-07 test isolation
+
+All MDI-07 estimate tests that assert `quota_remaining_now` inject a `tmp_path`-based
+usage file via the `VT_USAGE_FILE` environment variable.  The live
+`/var/lib/dns-tool/vt_usage.json` file is **never written** by any MDI-07 test.
+`test_live_quota_file_not_modified` in `test_estimate.py` asserts that the mtime
+of the live file is unchanged after each estimate endpoint call.
+
+---
+
 ## MDI-06 runtime file access summary
 
 ### MDI-06 runtime behavior

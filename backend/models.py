@@ -721,6 +721,189 @@ class JobStatusResponse(BaseModel):
     results: List[MdiResultItem] = Field(default_factory=list)
 
 
+# ─── Estimate API models ──────────────────────────────────────────────────────
+
+
+class EstimateRequest(BaseModel):
+    """Request body for POST /api/mdi/jobs/estimate."""
+    raw_input: str = Field(
+        ...,
+        description="[audit] Raw pasted text containing domains and/or URLs.",
+    )
+    default_scheme: str = Field(
+        "http",
+        description="[workflow] Scheme prepended to tokens that lack one.",
+        pattern=r"^https?$",
+    )
+    max_items: int = Field(
+        500,
+        ge=1,
+        le=500,
+        description="[workflow] Maximum items accepted. Excess items are rejected.",
+    )
+    use_domain_reports: bool = Field(
+        False,
+        description=(
+            "[workflow] When True, bare domains use the VT domain-report endpoint "
+            "(1 call max). When False, bare domains use the URL-report path (up to 3 calls)."
+        ),
+    )
+    stale_threshold_days: int = Field(
+        5,
+        ge=1,
+        le=90,
+        description="[workflow] Informational only for estimate; affects VT freshness at job time.",
+    )
+
+
+class EstimateResponse(BaseModel):
+    """
+    Response body for POST /api/mdi/jobs/estimate.
+
+    This endpoint performs no external calls, creates no jobs, and mutates
+    no runtime files.  All three audit flags below are always False.
+    """
+    # ── Parse counts ──────────────────────────────────────────────────────────
+    accepted_count: int = Field(
+        ...,
+        description="[display] Items accepted by the input parser.",
+    )
+    rejected_count: int = Field(
+        ...,
+        description="[display] Items that failed normalization or exceeded limits.",
+    )
+    duplicate_count: int = Field(
+        ...,
+        description="[display] Tokens whose normalized form was already accepted.",
+    )
+
+    # ── Eligibility breakdown ─────────────────────────────────────────────────
+    eligible_vt_count: int = Field(
+        ...,
+        description=(
+            "[display] Items eligible for VT checks. For paste input this equals "
+            "accepted_count because hold status is not known until WHOIS/RDAP runs."
+        ),
+    )
+    held_skipped_count: int = Field(
+        0,
+        description=(
+            "[display] Items that would be skipped due to a confirmed hold. "
+            "Always 0 for paste input — hold status is NOT_CHECKED at estimate time."
+        ),
+    )
+
+    # ── Input type breakdown ──────────────────────────────────────────────────
+    domain_count: int = Field(
+        ...,
+        description="[display] Eligible items classified as bare domains.",
+    )
+    url_count: int = Field(
+        ...,
+        description="[display] Eligible items classified as full URLs.",
+    )
+    domain_report_mode_count: int = Field(
+        ...,
+        description=(
+            "[display] Bare domains that will use the VT domain-report endpoint "
+            "(1 call max). Only > 0 when use_domain_reports=True."
+        ),
+    )
+    url_report_mode_count: int = Field(
+        ...,
+        description=(
+            "[display] Items that will use the VT URL-report path (up to 3 calls each). "
+            "Includes full URLs and bare domains when use_domain_reports=False."
+        ),
+    )
+
+    # ── VT call estimate ──────────────────────────────────────────────────────
+    estimated_vt_calls_min: int = Field(
+        ...,
+        description=(
+            "[display] Optimistic estimate: all VT reports already exist. "
+            "1 call per item regardless of type or mode."
+        ),
+    )
+    estimated_vt_calls_max: int = Field(
+        ...,
+        description=(
+            "[display] Conservative estimate: no cached reports. "
+            "Domain-mode items = 1 call; URL-mode items = 3 calls (GET + POST submit + GET)."
+        ),
+    )
+
+    # ── Quota ─────────────────────────────────────────────────────────────────
+    quota_remaining_now: int = Field(
+        ...,
+        description="[display] Shared VT quota remaining as of this request (read-only).",
+    )
+    will_exceed_quota: bool = Field(
+        ...,
+        description=(
+            "[display] True when estimated_vt_calls_max > quota_remaining_now. "
+            "The submit endpoint will hard-stop if this condition is met."
+        ),
+    )
+    quota_headroom: int = Field(
+        ...,
+        description=(
+            "[display] quota_remaining_now minus estimated_vt_calls_max. "
+            "Negative values indicate over-quota. Zero means exactly at limit."
+        ),
+    )
+
+    # ── Runtime estimate ──────────────────────────────────────────────────────
+    estimated_duration_seconds_min: float = Field(
+        ...,
+        description=(
+            "[display] Optimistic runtime in seconds. "
+            "Formula: max(0, (calls_min - 1) × 15.0)"
+        ),
+    )
+    estimated_duration_seconds_max: float = Field(
+        ...,
+        description=(
+            "[display] Conservative runtime in seconds. "
+            "Formula: max(0, (calls_max - 1) × 15.0)"
+        ),
+    )
+
+    # ── Informational notes ───────────────────────────────────────────────────
+    rate_limit_note: str = Field(
+        ...,
+        description="[display] Human-readable rate-limit explanation.",
+    )
+    job_state_note: str = Field(
+        ...,
+        description="[display] Warning that jobs are in-memory only (MDI-06/08 limitation).",
+    )
+
+    # ── Audit / safety flags ──────────────────────────────────────────────────
+    external_calls_made: bool = Field(
+        False,
+        description="[audit] Always False — estimate never contacts external services.",
+    )
+    quota_consumed: bool = Field(
+        False,
+        description="[audit] Always False — estimate does not consume VT quota.",
+    )
+    mutated: bool = Field(
+        False,
+        description="[audit] Always False — estimate does not write any runtime file.",
+    )
+
+    # ── Rejected / duplicate detail ───────────────────────────────────────────
+    rejected: List["RejectedItemResponse"] = Field(
+        default_factory=list,
+        description="[display] Rejected items with error details.",
+    )
+    duplicates: List["DuplicateItemResponse"] = Field(
+        default_factory=list,
+        description="[display] Duplicate tokens.",
+    )
+
+
 # ─── Job state ─────────────────────────────────────────────────────────────────
 
 

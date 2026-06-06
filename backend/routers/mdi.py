@@ -16,6 +16,9 @@ MDI-06 endpoints:
   POST /api/mdi/jobs/submit         — submit VT job; returns job_id
   GET  /api/mdi/jobs/{job_id}       — poll job status and results
 
+MDI-07 endpoints:
+  POST /api/mdi/jobs/estimate       — quota and runtime estimate preview; no VT calls, no job created
+
 Future endpoints (not yet implemented):
   GET  /api/mdi/jobs/{job_id}/export
   POST /api/mdi/jobs/{job_id}/rescan
@@ -36,6 +39,8 @@ from models import (
     DomainHoldType,
     DomainStatusSource,
     DuplicateItemResponse,
+    EstimateRequest,
+    EstimateResponse,
     EvidenceStatus,
     Freshness,
     InputType,
@@ -63,6 +68,7 @@ from services.upload_parser import parse_upload
 from services.job_store import InMemoryJob, create_job, get_job
 from services import job_processor
 from services.quota_writer import read_remaining_quota
+from services.estimate import estimate_job
 
 router = APIRouter(prefix="/api/mdi")
 
@@ -188,21 +194,97 @@ async def upload_preview(
     )
 
 
+# ── Estimate endpoint ──────────────────────────────────────────────────────────
+
+@router.post("/jobs/estimate", tags=["Jobs"], response_model=EstimateResponse)
+async def estimate(req: EstimateRequest) -> EstimateResponse:
+    """
+    Return a quota and runtime estimate for the provided raw input.
+
+    Parses raw_input using the standard input parser, then computes:
+      - accepted / rejected / duplicate counts
+      - per-type item breakdown (domain vs URL)
+      - conservative min/max VT API call estimates
+      - min/max runtime estimates based on the 4 req/min rate limit
+      - current shared quota remaining (read-only)
+      - quota warning when max estimate exceeds remaining quota
+
+    No external calls are made.  No VT, WHOIS, DNS, or URL activity lookups.
+    No quota is consumed.  No job is created.  No runtime files are written.
+
+    held_skipped_count is always 0 for paste input because hold status is
+    NOT_CHECKED until WHOIS/RDAP runs (which happens during job processing,
+    not at estimate time).
+    """
+    parse_result = parse_raw_input(
+        req.raw_input,
+        default_scheme=req.default_scheme,
+        max_items=req.max_items,
+    )
+
+    accepted = parse_result.accepted
+    rejected = parse_result.rejected
+    duplicates = parse_result.duplicates
+
+    # For paste input, all accepted items are eligible — hold status is unknown.
+    eligible_items = accepted
+    held_skipped_count = 0
+
+    est = estimate_job(eligible_items, req.use_domain_reports)
+    remaining = read_remaining_quota()
+    calls_max = est["estimated_vt_calls_max"]
+    headroom = remaining - calls_max
+
+    return EstimateResponse(
+        accepted_count=len(accepted),
+        rejected_count=len(rejected),
+        duplicate_count=len(duplicates),
+        eligible_vt_count=len(eligible_items),
+        held_skipped_count=held_skipped_count,
+        domain_count=est["domain_count"],
+        url_count=est["url_count"],
+        domain_report_mode_count=est["domain_report_mode_count"],
+        url_report_mode_count=est["url_report_mode_count"],
+        estimated_vt_calls_min=est["estimated_vt_calls_min"],
+        estimated_vt_calls_max=calls_max,
+        quota_remaining_now=remaining,
+        will_exceed_quota=calls_max > remaining,
+        quota_headroom=headroom,
+        estimated_duration_seconds_min=est["estimated_duration_seconds_min"],
+        estimated_duration_seconds_max=est["estimated_duration_seconds_max"],
+        rate_limit_note=est["rate_limit_note"],
+        job_state_note=est["job_state_note"],
+        external_calls_made=False,
+        quota_consumed=False,
+        mutated=False,
+        rejected=[
+            RejectedItemResponse(
+                input_original=r.input_original,
+                position=r.position,
+                error=r.error,
+            )
+            for r in rejected
+        ],
+        duplicates=[
+            DuplicateItemResponse(
+                input_original=d.input_original,
+                position=d.position,
+                duplicate_of=d.duplicate_of,
+            )
+            for d in duplicates
+        ],
+    )
+
+
 # ── Job submit ─────────────────────────────────────────────────────────────────
 
 def _estimate_requests(items: list, use_domain_reports: bool) -> int:
     """
-    Conservative VT API call estimate:
-      - domain report mode:  1 call per domain item
-      - URL report mode:     3 calls per item (GET + possible POST submit + GET again)
+    Conservative (max) VT API call estimate for the submit flow.
+    Delegates to the shared estimate_job helper to guarantee parity with
+    the /estimate endpoint.
     """
-    total = 0
-    for item in items:
-        if item.input_type == InputType.DOMAIN and use_domain_reports:
-            total += 1
-        else:
-            total += 3
-    return total
+    return estimate_job(items, use_domain_reports)["estimated_vt_calls_max"]
 
 
 def _make_pending_result(item, input_type: InputType) -> MdiResultItem:
