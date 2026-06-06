@@ -185,50 +185,58 @@ def test_parse_vt_response_missing_date():
 # ── classify_triage ───────────────────────────────────────────────────────────
 
 def test_classify_triage_malicious():
+    """MDI-10: shim delegates to triage_rules. FRESH + NOT_CHECKED live + UNKNOWN age → VERIFY_INVESTIGATE (catch-all)."""
     r = VtLookupResult(vt_malicious=3, vt_suspicious=0, vt_total_engines=70,
                        freshness=Freshness.FRESH, error=None)
     bucket, conf, action, evidence = classify_triage(r)
     assert bucket == TriageBucket.MALICIOUS
-    assert action == RecommendedAction.INVESTIGATE
+    assert action == RecommendedAction.VERIFY_INVESTIGATE
     assert evidence == EvidenceStatus.COMPLETE
 
 
 def test_classify_triage_suspicious():
+    """MDI-10: suspicious + FRESH + NOT_CHECKED + UNKNOWN age → VERIFY_INVESTIGATE (catch-all)."""
     r = VtLookupResult(vt_malicious=0, vt_suspicious=2, vt_total_engines=70,
                        freshness=Freshness.FRESH, error=None)
     bucket, conf, action, evidence = classify_triage(r)
     assert bucket == TriageBucket.SUSPICIOUS
-    assert action == RecommendedAction.MANUAL_REVIEW
+    assert action == RecommendedAction.VERIFY_INVESTIGATE
     assert evidence == EvidenceStatus.COMPLETE
 
 
 def test_classify_triage_clean():
+    """MDI-10: clean + FRESH → NO_ACTION_BASED_ON_VT (replaced CLEAR)."""
     r = VtLookupResult(vt_malicious=0, vt_suspicious=0, vt_total_engines=70,
                        freshness=Freshness.FRESH, error=None)
     bucket, conf, action, evidence = classify_triage(r)
     assert bucket == TriageBucket.CLEAN
-    assert action == RecommendedAction.CLEAR
+    assert action == RecommendedAction.NO_ACTION_BASED_ON_VT
 
 
 def test_classify_triage_error():
+    """MDI-10: error → RETRY_LOOKUP (replaced MANUAL_REVIEW)."""
     err = MdiError(code="vt_429", message="Rate limited", source="vt_service", retriable=True)
     r = VtLookupResult(error=err)
     bucket, conf, action, evidence = classify_triage(r)
     assert bucket == TriageBucket.ERROR
-    assert action == RecommendedAction.MANUAL_REVIEW
+    assert action == RecommendedAction.RETRY_LOOKUP
     assert evidence == EvidenceStatus.PARTIAL
 
 
 def test_classify_triage_stale_degrades_confidence():
+    """MDI-10: STALE malicious → MEDIUM confidence, REFRESH_REPORT."""
     r = VtLookupResult(vt_malicious=1, vt_total_engines=70, freshness=Freshness.STALE, error=None)
-    _, conf, _, _ = classify_triage(r)
+    _, conf, action, _ = classify_triage(r)
     assert conf == TriageConfidence.MEDIUM
+    assert action == RecommendedAction.REFRESH_REPORT
 
 
 def test_classify_triage_very_stale_degrades_confidence():
+    """MDI-10: VERY_STALE malicious → LOW confidence (was MEDIUM), REQUEST_NEW_SCAN."""
     r = VtLookupResult(vt_malicious=1, vt_total_engines=70, freshness=Freshness.VERY_STALE, error=None)
-    _, conf, _, _ = classify_triage(r)
-    assert conf == TriageConfidence.MEDIUM
+    _, conf, action, _ = classify_triage(r)
+    assert conf == TriageConfidence.LOW
+    assert action == RecommendedAction.REQUEST_NEW_SCAN
 
 
 # ── fetch_report: success paths ────────────────────────────────────────────────

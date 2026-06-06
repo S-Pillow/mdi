@@ -35,23 +35,27 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from models import (
+    AgeBucket,
     EvidenceStatus,
     Freshness,
     InputType,
+    LiveStatus,
     MdiError,
+    MdiProcessingStatus,
     RecommendedAction,
     TriageBucket,
     TriageConfidence,
     VtModeUsed,
 )
+from services import triage_rules
 
 logger = logging.getLogger("mdi.vt_service")
 
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
 
 # Stale threshold in days — report older than this is STALE.
-# 5 days matches VT Bulk Check default.
-DEFAULT_STALE_THRESHOLD_DAYS: int = 5
+# Default is 7 days (corrected MDI-09 / MDI-09A); aligns with Pydantic model defaults.
+DEFAULT_STALE_THRESHOLD_DAYS: int = 7
 VERY_STALE_THRESHOLD_DAYS: int = 30
 
 
@@ -243,55 +247,29 @@ def classify_triage(result: VtLookupResult) -> Tuple[
     TriageBucket, TriageConfidence, RecommendedAction, EvidenceStatus
 ]:
     """
-    Derive triage fields from a VtLookupResult.
+    Compatibility shim — delegates to triage_rules.decide().
 
-    Returns: (triage_bucket, triage_confidence, recommended_action, evidence_status)
+    Callers should prefer using triage_rules.decide() directly with a full
+    TriageInput, which supports age_bucket, live_status, and triage_reason.
+    This shim is kept for any legacy call sites; job_processor uses decide() directly.
     """
-    if result.error:
-        return (
-            TriageBucket.ERROR,
-            TriageConfidence.UNKNOWN,
-            RecommendedAction.MANUAL_REVIEW,
-            EvidenceStatus.PARTIAL,
-        )
-
-    total = result.vt_total_engines
-    conf = (
-        TriageConfidence.HIGH
-        if result.freshness == Freshness.FRESH
-        else TriageConfidence.MEDIUM
-        if result.freshness in (Freshness.STALE, Freshness.VERY_STALE)
-        else TriageConfidence.LOW
+    errors = [result.error] if result.error else []
+    processing_status = (
+        MdiProcessingStatus.ERROR if result.error else MdiProcessingStatus.DONE
     )
-
-    if result.vt_malicious > 0:
-        return (
-            TriageBucket.MALICIOUS,
-            conf,
-            RecommendedAction.INVESTIGATE,
-            EvidenceStatus.COMPLETE,
-        )
-    if result.vt_suspicious > 0:
-        return (
-            TriageBucket.SUSPICIOUS,
-            conf,
-            RecommendedAction.MANUAL_REVIEW,
-            EvidenceStatus.COMPLETE,
-        )
-    if total > 0:
-        return (
-            TriageBucket.CLEAN,
-            conf,
-            RecommendedAction.CLEAR,
-            EvidenceStatus.COMPLETE,
-        )
-    # total == 0 — never scanned or no engines ran
-    return (
-        TriageBucket.PENDING,
-        TriageConfidence.LOW,
-        RecommendedAction.NONE,
-        EvidenceStatus.PARTIAL,
+    inp = triage_rules.TriageInput(
+        domain_hold_has_hold=False,
+        processing_status=processing_status,
+        vt_hits=result.vt_malicious,
+        vt_suspicious=result.vt_suspicious,
+        vt_total_engines=result.vt_total_engines,
+        freshness=result.freshness,
+        live_status=LiveStatus.NOT_CHECKED,
+        age_bucket=AgeBucket.UNKNOWN,
+        errors=errors,
     )
+    dec = triage_rules.decide(inp)
+    return (dec.triage_bucket, dec.triage_confidence, dec.recommended_action, dec.evidence_status)
 
 
 # ── Core fetch functions ───────────────────────────────────────────────────────

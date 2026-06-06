@@ -8,8 +8,9 @@ Processing flow for each eligible item:
   1. Check mid-run remaining quota (soft check; race with VT Bulk Check is accepted MVP risk).
   2. Call vt_service.fetch_report() — all HTTP mocked in tests via _vt_request patch.
   3. Increment shared quota file by calls_made.
-  4. Parse result into MdiResultItem fields and classify triage.
-  5. Update in-memory job state.
+  4. Build TriageInput from VT result + item fields.
+  5. Call triage_rules.decide() — single authoritative triage decision.
+  6. Update in-memory job state.
 
 On completion, append a metadata-only record to the usage JSONL.
 Usage JSONL records NEVER contain raw domains, URLs, or item-level result data.
@@ -23,26 +24,34 @@ from pathlib import Path
 from typing import Optional
 
 from models import (
+    AgeBucket,
     DomainHold,
     DomainHoldType,
-    EvidenceStatus,
     InputType,
     LiveStatus,
     MdiError,
     MdiProcessingStatus,
     MdiResultItem,
-    RecommendedAction,
-    TriageBucket,
-    TriageConfidence,
     VtModeUsed,
 )
-from services import job_persistence, job_store, quota_writer, vt_service
+from services import job_persistence, job_store, quota_writer, triage_rules, vt_service
 
 logger = logging.getLogger("mdi.job_processor")
 
 
-def _make_held_result(job: job_store.InMemoryJob, normalized: str, position: int, original: str, input_type: InputType) -> MdiResultItem:
-    """Build a fully-populated hold-skipped result item."""
+def _make_held_result(
+    job: job_store.InMemoryJob,
+    normalized: str,
+    position: int,
+    original: str,
+    input_type: InputType,
+) -> MdiResultItem:
+    """Build a fully-populated hold-skipped result item via the rules engine."""
+    import models as _m
+
+    inp = triage_rules.TriageInput(domain_hold_has_hold=True)
+    dec = triage_rules.decide(inp)
+
     return MdiResultItem(
         input_original=original,
         input_normalized=normalized,
@@ -52,13 +61,14 @@ def _make_held_result(job: job_store.InMemoryJob, normalized: str, position: int
         domain_hold=DomainHold(
             has_hold=True,
             hold_types=[DomainHoldType.CLIENT_HOLD],
-            source=__import__("models").DomainStatusSource.UNKNOWN,
+            source=_m.DomainStatusSource.UNKNOWN,
         ),
         vt_mode_used=VtModeUsed.SKIPPED_HOLD,
-        triage_bucket=TriageBucket.HELD,
-        triage_confidence=TriageConfidence.HIGH,
-        recommended_action=RecommendedAction.ACTION_ALREADY_TAKEN,
-        evidence_status=EvidenceStatus.SKIPPED_HOLD,
+        triage_bucket=dec.triage_bucket,
+        triage_confidence=dec.triage_confidence,
+        recommended_action=dec.recommended_action,
+        evidence_status=dec.evidence_status,
+        triage_reason=dec.triage_reason,
         live_status=LiveStatus.NOT_CHECKED,
     )
 
@@ -116,19 +126,28 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
         remaining = quota_writer.read_remaining_quota(usage_file)
         if remaining <= 0:
             job.quota_blocked_count += 1
+            quota_err = MdiError(
+                code="quota_exhausted",
+                message="VT daily quota exhausted before this item was processed.",
+                source="job_processor",
+                retriable=True,
+            )
+            dec = triage_rules.decide(triage_rules.TriageInput(
+                domain_hold_has_hold=False,
+                processing_status=MdiProcessingStatus.ERROR,
+                errors=[quota_err],
+                age_bucket=result.age_bucket,
+                live_status=result.live_status,
+            ))
             job.results[normalized] = result.model_copy(update={
                 "processing_status": MdiProcessingStatus.ERROR,
                 "vt_mode_used": VtModeUsed.SKIPPED_QUOTA,
-                "triage_bucket": TriageBucket.ERROR,
-                "triage_confidence": TriageConfidence.UNKNOWN,
-                "recommended_action": RecommendedAction.MANUAL_REVIEW,
-                "evidence_status": EvidenceStatus.PARTIAL,
-                "errors": [MdiError(
-                    code="quota_exhausted",
-                    message="VT daily quota exhausted before this item was processed.",
-                    source="job_processor",
-                    retriable=True,
-                )],
+                "triage_bucket": dec.triage_bucket,
+                "triage_confidence": dec.triage_confidence,
+                "recommended_action": dec.recommended_action,
+                "evidence_status": dec.evidence_status,
+                "triage_reason": dec.triage_reason,
+                "errors": [quota_err],
             })
             job.processed += 1
             continue
@@ -149,18 +168,24 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             except Exception as exc:
                 logger.error("Failed to increment quota for job %s: %s", job.job_id, exc)
 
-        # Classify triage
-        triage_bucket, triage_conf, recommended_action, evidence_status = vt_service.classify_triage(vt_result)
+        # Build triage input from VT result + existing item fields (age, live status)
+        errors = [vt_result.error] if vt_result.error else []
+        processing_status = MdiProcessingStatus.ERROR if vt_result.error else MdiProcessingStatus.DONE
 
-        # Determine processing_status
-        if vt_result.error:
-            processing_status = MdiProcessingStatus.ERROR
-            errors = [vt_result.error]
-        else:
-            processing_status = MdiProcessingStatus.DONE
-            errors = []
+        inp = triage_rules.TriageInput(
+            domain_hold_has_hold=False,
+            processing_status=processing_status,
+            vt_hits=vt_result.vt_malicious,
+            vt_suspicious=vt_result.vt_suspicious,
+            vt_total_engines=vt_result.vt_total_engines,
+            freshness=vt_result.freshness,
+            live_status=result.live_status,        # NOT_CHECKED until MDI-12
+            age_bucket=result.age_bucket,          # UNKNOWN for raw input until MDI-11
+            errors=errors,
+            stale_threshold_days=job.stale_threshold_days,
+        )
+        dec = triage_rules.decide(inp)
 
-        # Update result
         job.results[normalized] = result.model_copy(update={
             "processing_status": processing_status,
             "vt_mode_used": vt_result.vt_mode_used,
@@ -170,10 +195,11 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             "vt_ratio": vt_result.vt_ratio,
             "vt_scan_date": vt_result.vt_scan_date,
             "freshness": vt_result.freshness,
-            "triage_bucket": triage_bucket,
-            "triage_confidence": triage_conf,
-            "recommended_action": recommended_action,
-            "evidence_status": evidence_status,
+            "triage_bucket": dec.triage_bucket,
+            "triage_confidence": dec.triage_confidence,
+            "recommended_action": dec.recommended_action,
+            "evidence_status": dec.evidence_status,
+            "triage_reason": dec.triage_reason,
             "errors": errors,
         })
         job.processed += 1

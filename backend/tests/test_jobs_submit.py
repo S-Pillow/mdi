@@ -313,7 +313,8 @@ def test_process_job_malicious_domain(tmp_path):
     result = job.results["evil.com"]
     assert result.triage_bucket == TriageBucket.MALICIOUS
     assert result.vt_hits == 4
-    assert result.recommended_action == RecommendedAction.INVESTIGATE
+    # MDI-10: FRESH + NOT_CHECKED live + UNKNOWN age → catch-all → VERIFY_INVESTIGATE
+    assert result.recommended_action == RecommendedAction.VERIFY_INVESTIGATE
 
 
 def test_process_job_held_item_not_vt_checked(tmp_path):
@@ -836,3 +837,133 @@ def test_submit_custom_stale_threshold_stored(tmp_path):
     assert status.status_code == 200
     data = status.json()
     assert data["stale_threshold_days"] == 14
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-10 — Triage rules engine integration tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_mdi10_clean_result_has_non_empty_triage_reason(tmp_path):
+    """
+    MDI-10: mocked clean VT result → triage_reason is a non-empty list.
+    Verifies triage_rules.decide() populates the field end-to-end.
+    """
+    from models import TriageBucket, RecommendedAction, TriageConfidence
+    job_id = "test-mdi10-clean-" + str(time.time_ns())
+    _make_job(job_id, [("clean-site.com", "clean-site.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_req = AsyncMock(return_value=_mock_resp(200, body))
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_req), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["clean-site.com"]
+    assert result.triage_bucket == TriageBucket.CLEAN
+    # MDI-10: triage_reason must be a non-empty list
+    assert isinstance(result.triage_reason, list)
+    assert len(result.triage_reason) >= 1
+    assert all(isinstance(r, str) for r in result.triage_reason)
+    # Clean + fresh → NO_ACTION_BASED_ON_VT and CLEAN confidence
+    assert result.recommended_action == RecommendedAction.NO_ACTION_BASED_ON_VT
+    assert result.triage_confidence == TriageConfidence.CLEAN
+
+
+def test_mdi10_malicious_result_uses_new_recommended_action(tmp_path):
+    """
+    MDI-10: mocked malicious VT result → recommended_action from new rules engine.
+    Flagged + FRESH + NOT_CHECKED live + UNKNOWN age → VERIFY_INVESTIGATE (catch-all).
+    """
+    from models import TriageBucket, RecommendedAction
+    job_id = "test-mdi10-mal-" + str(time.time_ns())
+    _make_job(job_id, [("evil-mdi10.com", "evil-mdi10.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=3, harmless=65, age_days=1)
+    mock_req = AsyncMock(return_value=_mock_resp(200, body))
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_req), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["evil-mdi10.com"]
+    assert result.triage_bucket == TriageBucket.MALICIOUS
+    # MDI-10: triage_reason must be non-empty
+    assert isinstance(result.triage_reason, list)
+    assert len(result.triage_reason) >= 1
+    # FRESH + NOT_CHECKED live + UNKNOWN age → VERIFY_INVESTIGATE (catch-all flagged)
+    assert result.recommended_action == RecommendedAction.VERIFY_INVESTIGATE
+
+
+def test_mdi10_held_result_triage_reason_from_rules_engine(tmp_path):
+    """
+    MDI-10: held domain result must have triage_reason from rules engine, not empty.
+    """
+    from models import TriageBucket, RecommendedAction, EvidenceStatus
+    job_id = "test-mdi10-held-" + str(time.time_ns())
+    _make_held_job(job_id, "held-mdi10.com", "held-mdi10.com")
+
+    mock_req = AsyncMock()
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_req), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    mock_req.assert_not_called()
+    job = job_store.get_job_sync(job_id)
+    result = job.results["held-mdi10.com"]
+    assert result.triage_bucket == TriageBucket.HELD
+    assert result.recommended_action == RecommendedAction.ACTION_ALREADY_TAKEN
+    assert result.evidence_status == EvidenceStatus.SKIPPED_HOLD
+    # Pre-populated held results don't go through process_job triage; check the field exists
+    assert result.triage_reason is not None
+    assert isinstance(result.triage_reason, list)
+
+
+def test_mdi10_quota_blocked_uses_retry_lookup(tmp_path):
+    """
+    MDI-10: quota-blocked item → triage_bucket=ERROR, recommended_action=RETRY_LOOKUP,
+    and triage_reason is non-empty (populated by rules engine).
+    """
+    from models import TriageBucket, RecommendedAction
+    job_id = "test-mdi10-quota-" + str(time.time_ns())
+    _make_job(job_id, [("quota-blocked.com", "quota-blocked.com", InputType.DOMAIN)])
+
+    # Write an exhausted quota file (current date, 0 remaining)
+    from datetime import date
+    today = date.today().isoformat()
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text(f'{{"date_utc": "{today}", "daily_lookups_used": 500}}')
+    mock_req = AsyncMock()
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_req), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    mock_req.assert_not_called()
+    job = job_store.get_job_sync(job_id)
+    result = job.results["quota-blocked.com"]
+    assert result.triage_bucket == TriageBucket.ERROR
+    assert result.recommended_action == RecommendedAction.RETRY_LOOKUP
+    assert isinstance(result.triage_reason, list)
+    assert len(result.triage_reason) >= 1

@@ -496,6 +496,86 @@ MDI-09 adds no new runtime files. `mdi_latest_job.json` written by new jobs afte
 
 ---
 
+---
+
+## MDI-10 — Centralized Triage Rules Engine
+
+### Authoritative engine
+
+`backend/services/triage_rules.py` is the **single authoritative source** for all per-item triage decisions. All callers — held-domain path, quota-blocked path, VT error path, VT success path — route through `decide(TriageInput) -> TriageDecision`.
+
+No triage logic exists outside `triage_rules.py`. `vt_service.classify_triage()` is kept as a compatibility shim that delegates to `decide()`.
+
+### Key dimension definitions
+
+| Term | Field | Meaning |
+|---|---|---|
+| **Recent** | `age_bucket in (VERY_NEW, NEW)` | Domain registered within ~180 days |
+| **Stale** | `freshness in (STALE, VERY_STALE)` | VT report is older than `stale_threshold_days` |
+| **Live** | `live_status in (ACTIVE, REDIRECT, FORBIDDEN)` | Live check confirms domain is responding |
+| **No-Live** | `live_status in (NOT_FOUND, GONE, DNS_FAILURE, ...)` | Live check confirmed domain is down |
+
+These dimensions are **independent**. A domain can be recently registered AND have a stale VT report simultaneously. In that case, Recent wins in priority order, but `triage_reason` must mention the stale evidence.
+
+### `triage_reason` field (MDI-10 change)
+
+- **Type changed:** `Optional[str]` → `List[str]` with `default_factory=list`.
+- **Validator:** `MdiResultItem` has a `field_validator` that coerces legacy `null` → `[]` and plain `str` → `[str]` for backward compatibility with persisted jobs.
+- **Content:** 2–4 short declarative bullet strings. Always at least one bullet for any processed item. Empty list only for items in PENDING state before processing.
+
+### New enum values (MDI-10 additions)
+
+**`TriageConfidence`:**
+- `CLEAN = "clean"` — all checks passed cleanly; used for confirmed-clean FRESH items.
+
+**`RecommendedAction` (new PRD-aligned values):**
+
+| Value | When used |
+|---|---|
+| `review_for_action` | Flagged + recently-registered domain; review before actioning |
+| `verify_investigate` | Ambiguous signals (unknown age/live/freshness); verify then investigate |
+| `refresh_report` | VT report is STALE; refresh evidence before actioning |
+| `request_new_scan` | VT report is VERY_STALE; request a new VT scan |
+| `retry_lookup` | Processing error or quota block; retry when resources allow |
+| `no_action_based_on_vt` | VT clean (FRESH), or flagged but domain appears down |
+
+Legacy values (`investigate`, `clear`, `manual_review`, `none`, etc.) are **preserved** for backward compatibility with persisted jobs.
+
+### Triage priority order
+
+| Priority | Condition | `triage_bucket` | `recommended_action` |
+|---|---|---|---|
+| 1 | `domain_hold.has_hold == True` | HELD | ACTION_ALREADY_TAKEN |
+| 2 | `processing_status == ERROR` or errors non-empty | ERROR | RETRY_LOOKUP |
+| 3 | Flagged + ACTIVE + Recent | MALICIOUS | INVESTIGATE |
+| 4 | Flagged + ACTIVE | MALICIOUS | INVESTIGATE |
+| 5 | Flagged + Recent | MALICIOUS | REVIEW_FOR_ACTION |
+| 6 | Flagged + STALE | MALICIOUS | REFRESH_REPORT |
+| 7 | Flagged + VERY_STALE | MALICIOUS | REQUEST_NEW_SCAN |
+| 8 | Flagged + No-Live | MALICIOUS | NO_ACTION_BASED_ON_VT |
+| 9 | Flagged (catch-all) | MALICIOUS | VERIFY_INVESTIGATE |
+| 10 | Suspicious (same sub-rules 3–9) | SUSPICIOUS | *(mirrors malicious)* |
+| 11 | Clean + FRESH | CLEAN | NO_ACTION_BASED_ON_VT |
+| 12 | Clean + STALE | CLEAN | REFRESH_REPORT |
+| 13 | Clean + VERY_STALE | CLEAN | REQUEST_NEW_SCAN |
+| 14 | Clean + UNKNOWN freshness | CLEAN | VERIFY_INVESTIGATE |
+| 15 | No engines, or PENDING | PENDING | RETRY_LOOKUP |
+
+### Roadmap readiness
+
+| Field | State now (MDI-10) | Activates fully |
+|---|---|---|
+| `age_bucket` | UNKNOWN for raw-text; set from CSV/XLSX `created_at` | MDI-11 (WHOIS/RDAP) |
+| `live_status` | NOT_CHECKED always | MDI-12 (URL Activity Scanner) |
+| `freshness` | Set correctly from VT scan date | Already active ✓ |
+| `domain_hold` | Set from upload offline detection | MDI-11 supplements with RDAP |
+
+### MDI-10 runtime file impact
+
+MDI-10 adds no new runtime files. No quota logic was changed. Only in-memory triage outputs differ.
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |
