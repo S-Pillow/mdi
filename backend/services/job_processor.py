@@ -36,7 +36,7 @@ from models import (
     TriageConfidence,
     VtModeUsed,
 )
-from services import job_store, quota_writer, vt_service
+from services import job_persistence, job_store, quota_writer, vt_service
 
 logger = logging.getLogger("mdi.job_processor")
 
@@ -69,6 +69,7 @@ async def process_job(
     usage_file: Optional[Path] = None,
     history_file: Optional[Path] = None,
     daily_file: Optional[Path] = None,
+    job_file: Optional[Path] = None,
 ) -> None:
     """
     Process all eligible (non-held) items in an MDI job.
@@ -77,7 +78,7 @@ async def process_job(
     When None, quota_writer uses its own environment-variable-based defaults.
 
     This function is safe to call directly from tests:
-        asyncio.run(process_job(job_id, usage_file=tmp, history_file=tmp2))
+        asyncio.run(process_job(job_id, usage_file=tmp, history_file=tmp2, job_file=tmp3))
     """
     job = job_store.get_job_sync(job_id)
     if job is None:
@@ -96,7 +97,9 @@ async def process_job(
         job.status = "done"
     finally:
         job.completed_at = time.time()
+        # Order matters: metadata-only usage history first, full recovery snapshot second.
         _write_history(job, history_file=history_file, daily_file=daily_file)
+        await _write_persistence(job, job_file=job_file)
 
 
 async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) -> None:
@@ -174,6 +177,22 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             "errors": errors,
         })
         job.processed += 1
+
+
+async def _write_persistence(
+    job: job_store.InMemoryJob,
+    *,
+    job_file: Optional[Path],
+) -> None:
+    """Write the latest completed job snapshot for recovery. Failure is logged and swallowed."""
+    try:
+        await job_persistence.write_latest_job(job, job_file=job_file)
+    except Exception as exc:
+        logger.error(
+            "process_job: failed to persist latest job %s: %s — "
+            "job is still valid in memory for this session.",
+            job.job_id, exc,
+        )
 
 
 def _write_history(

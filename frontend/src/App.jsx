@@ -743,7 +743,7 @@ function triageColor(bucket) {
 
 // ── Job section (VT job processing — early implementation) ────────────────────
 
-function JobSection({ job, jobError, jobId }) {
+function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestore }) {
   if (jobError) {
     return (
       <div className="card">
@@ -777,6 +777,22 @@ function JobSection({ job, jobError, jobId }) {
     <div className="card">
       <div className="card-header">
         <span className="card-label">VT Job</span>
+        {restoredFromSession && (
+          <span style={{
+            fontSize: 11, color: 'var(--ok)', fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            ↩ Restored from last session
+            <button
+              onClick={onDismissRestore}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-dim)', fontSize: 11, padding: '0 2px',
+              }}
+              title="Dismiss"
+            >✕</button>
+          </span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>
           VT job processing — early implementation
         </span>
@@ -963,6 +979,7 @@ export default function App() {
   const [jobId, setJobId] = useState(null)
   const [job, setJob] = useState(null)
   const [jobError, setJobError] = useState(null)
+  const [restoredFromSession, setRestoredFromSession] = useState(false)
   const pollRef = useRef(null)
 
   const canRunJob = !!(preview && preview.accepted_count > 0)
@@ -1084,6 +1101,7 @@ export default function App() {
     setJob(null)
     setJobId(null)
     setJobError(null)
+    setRestoredFromSession(false)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/submit`, {
@@ -1111,6 +1129,32 @@ export default function App() {
     }
   }
 
+  // Recovery: on mount, attempt to restore the latest completed job
+  useEffect(() => {
+    let cancelled = false
+    async function tryRecover() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/mdi/jobs/latest`)
+        if (cancelled) return
+        if (resp.status === 404) return  // no prior job — silent
+        if (!resp.ok) return             // unexpected error — non-blocking
+        const data = await resp.json()
+        if (cancelled) return
+        setJob(data)
+        setJobId(data.job_id)
+        setRestoredFromSession(true)
+        // If the recovered job is still running, resume polling
+        if (data.status === 'queued' || data.status === 'running') {
+          pollRef.current = setInterval(() => pollJob(data.job_id), 2000)
+        }
+      } catch (_) {
+        // Network error on mount — do not block the UI
+      }
+    }
+    tryRecover()
+    return () => { cancelled = true }
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup on unmount
   useEffect(() => () => {
     if (pollRef.current) clearInterval(pollRef.current)
@@ -1128,7 +1172,7 @@ export default function App() {
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI — VT core checks (MDI-06) + quota estimate preview (MDI-07) active. WHOIS, DNS, and live checks not yet implemented.
+          MDI — VT core (MDI-06) + quota estimate (MDI-07) + job recovery (MDI-08) active. WHOIS, DNS, and live checks not yet implemented.
         </div>
 
         <div className="page-header">
@@ -1160,7 +1204,13 @@ export default function App() {
         <PreviewResultsSection preview={preview} error={previewError} />
         <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
 
-        <JobSection job={job} jobError={jobError} jobId={jobId} />
+        <JobSection
+          job={job}
+          jobError={jobError}
+          jobId={jobId}
+          restoredFromSession={restoredFromSession}
+          onDismissRestore={() => setRestoredFromSession(false)}
+        />
 
         <SettingsSection />
         <DashboardSection />

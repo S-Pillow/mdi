@@ -2,8 +2,10 @@
 MDI in-memory job store.
 
 Stores InMemoryJob instances in a process-local dict protected by asyncio.Lock.
-Jobs are NOT persisted to disk. On service restart, all in-flight and completed
-jobs are lost. This is a documented MDI-06 limitation; job recovery is out of scope.
+Jobs are NOT persisted to disk by this module.  Disk persistence is handled by
+job_persistence.py which writes the latest completed job to mdi_latest_job.json.
+On service restart the in-memory store is empty; the recovery endpoint reads
+mdi_latest_job.json and re-registers the job here via register_recovered_job().
 
 Usage from async context:
     job = InMemoryJob(job_id=..., ...)
@@ -70,6 +72,32 @@ def get_job_sync(job_id: str) -> Optional[InMemoryJob]:
     Do not call from concurrent async contexts; use get_job() instead.
     """
     return _JOBS.get(job_id)
+
+
+def get_latest_completed_job_sync() -> Optional[InMemoryJob]:
+    """
+    Return the most recently completed (done/error) job from the store, or None.
+
+    Synchronous — safe for single-threaded use and endpoint handlers.
+    Returns None if no completed job exists.  Never returns queued/running jobs.
+    """
+    completed = [
+        j for j in _JOBS.values()
+        if j.status in ("done", "error") and j.completed_at is not None
+    ]
+    if not completed:
+        return None
+    return max(completed, key=lambda j: j.completed_at)  # type: ignore[return-value]
+
+
+def register_recovered_job(job: InMemoryJob) -> None:
+    """
+    Insert a job recovered from disk back into the store using its original job_id.
+
+    Preserves all original fields: job_id, status, results, counts, timestamps.
+    Safe to call from synchronous endpoint handlers.
+    """
+    _JOBS[job.job_id] = job
 
 
 def clear_all_jobs() -> None:
