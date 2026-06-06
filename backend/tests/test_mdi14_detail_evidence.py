@@ -126,8 +126,21 @@ def _make_job(job_id: str, items: list) -> InMemoryJob:
 
 @pytest.fixture(autouse=True)
 def isolate_persistence(tmp_path, monkeypatch):
-    """Redirect all job persistence to tmp_path; mock enrichment and live check."""
-    monkeypatch.setenv("MDI_LATEST_JOB_FILE", str(tmp_path / "mdi_latest_job.json"))
+    """
+    Redirect all job persistence AND VT quota files to tmp_path.
+
+    Covers two write paths:
+      1. Direct process_job() calls that receive explicit file args.
+      2. TestClient background tasks that resolve paths from env vars.
+
+    Without redirecting VT_USAGE_FILE / VT_USAGE_HISTORY_FILE / VT_DAILY_HISTORY_FILE,
+    TestClient background tasks (which cannot receive injected file paths) will fall
+    through to _default_usage_file() and write to the live /var/lib/dns-tool/ files.
+    """
+    monkeypatch.setenv("MDI_LATEST_JOB_FILE",       str(tmp_path / "mdi_latest_job.json"))
+    monkeypatch.setenv("VT_USAGE_FILE",             str(tmp_path / "vt_usage.json"))
+    monkeypatch.setenv("VT_USAGE_HISTORY_FILE",     str(tmp_path / "vt_usage_history.jsonl"))
+    monkeypatch.setenv("VT_DAILY_HISTORY_FILE",     str(tmp_path / "vt_daily_history.json"))
     with (
         patch.object(
             domain_enrichment, "enrich_domain",
