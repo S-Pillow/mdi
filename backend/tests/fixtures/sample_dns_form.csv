@@ -1,0 +1,9 @@
+DNS Form,Create Date,EPP Status,Registrar Name,Assigned Nameservers
+example.com,2021-03-15,clientTransferProhibited,Example Registrar Inc.,ns1.example.com ns2.example.com
+phishing.net,2024-11-01,clientHold,Bad Registrar LLC.,ns1.bad.net ns2.bad.net
+double-held.org,2019-05-20,"clientHold, serverHold",Some Registrar LLC,ns1.double.org
+clean.biz,2020-01-10,clientTransferProhibited serverDeleteProhibited,Clean Registrar Inc,ns1.clean.biz
+new-domain.io,2026-05-30,clientTransferProhibited,Fresh Registrar,,
+nodate.net,,clientTransferProhibited,NoDate Registrar,
+"UPPERCASE.COM",2022-06-01,clientTransferProhibited,Case Registrar,ns1.upper.com
+example.com,2021-03-15,clientTransferProhibited,Example Registrar Inc.,ns1.example.com

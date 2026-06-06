@@ -1,0 +1,6 @@
+Domain,Created,Domain Status,Registrar,Nameservers
+good-domain.com,2018-07-22,clientTransferProhibited,Old Registrar,ns1.old.com ns2.old.com
+server-held.net,2023-02-14,serverHold,Server Registrar,ns1.server.net
+https://url-entry.org/path,2022-01-01,clientTransferProhibited,URL Registrar,
+bad@@invalid!domain,2022-01-01,clientTransferProhibited,Error Registrar,
+good-domain.com,2018-07-22,clientTransferProhibited,Old Registrar,ns1.old.com
