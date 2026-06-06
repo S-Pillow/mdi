@@ -111,7 +111,7 @@ def _run(coro):
 
 
 def _make_job(job_id: str, items: list, use_domain_reports: bool = False,
-              stale_threshold_days: int = 5) -> InMemoryJob:
+              stale_threshold_days: int = 7) -> InMemoryJob:
     """Create and register an InMemoryJob with pending items."""
     job = InMemoryJob(
         job_id=job_id,
@@ -786,3 +786,53 @@ def test_regression_usage_endpoint_still_works():
     data = resp.json()
     assert "daily_lookups_used" in data
     assert data.get("mutated") is False
+
+
+# ── MDI-09 settings defaults in submit endpoint ────────────────────────────────
+
+def test_submit_default_stale_threshold_is_7():
+    """POST /api/mdi/jobs/submit without stale_threshold_days → status shows 7."""
+    resp = client.post("/api/mdi/jobs/submit", json={"raw_input": "example.com"})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status.status_code == 200
+    data = status.json()
+    assert data["stale_threshold_days"] == 7
+
+
+def test_submit_use_domain_reports_stored(tmp_path):
+    """
+    use_domain_reports=True submitted via endpoint → stored in job and echoed by status.
+    Uses the submit endpoint (TestClient) which spawns a background task.
+    The redirect_job_persistence autouse fixture prevents live-file writes.
+    """
+    resp = client.post("/api/mdi/jobs/submit", json={
+        "raw_input": "domainreport-test.com",
+        "use_domain_reports": True,
+    })
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status.status_code == 200
+    data = status.json()
+    assert data["use_domain_reports"] is True
+
+
+def test_submit_custom_stale_threshold_stored(tmp_path):
+    """
+    Custom stale_threshold_days=14 → stored in job and echoed by status.
+    """
+    resp = client.post("/api/mdi/jobs/submit", json={
+        "raw_input": "custom-stale.com",
+        "stale_threshold_days": 14,
+    })
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    status = client.get(f"/api/mdi/jobs/{job_id}")
+    assert status.status_code == 200
+    data = status.json()
+    assert data["stale_threshold_days"] == 14

@@ -824,6 +824,19 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
           </div>
         )}
 
+        {/* Saved job settings summary */}
+        {job && (job.status === 'done' || job.status === 'error') && (
+          <div style={{
+            fontSize: 11, color: 'var(--text-dim)', padding: '6px 10px',
+            background: 'var(--bg-elevated)', borderRadius: 4, lineHeight: 1.7,
+          }}>
+            <strong>Job ran with:</strong>{' '}
+            {job.use_domain_reports ? 'Domain report mode' : 'URL report mode'}{' '}
+            · Stale after {job.stale_threshold_days ?? 7} days
+            {restoredFromSession && <span style={{ marginLeft: 8, color: 'var(--ok)', fontStyle: 'italic' }}>(recovered)</span>}
+          </div>
+        )}
+
         {/* Count tiles */}
         {job && (
           <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
@@ -911,28 +924,135 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
   )
 }
 
-function SettingsSection() {
-  const settings = [
-    { name: 'Skip clientHold / serverHold domains', desc: 'Domains with registry hold status skip VT and live checks. On by default.', },
-    { name: 'Auto-rescan stale results', desc: 'Auto-request fresh VT scans for results older than 7 days. Off by default.', },
-    { name: 'Domain report mode', desc: 'Use VT domain reports instead of URL reports for bare domains.', },
-    { name: 'Include URL activity check', desc: 'Perform a live HEAD request to check if the URL appears active (SSRF-safe).', },
-  ]
+function SettingsSection({ useDomainReports, setUseDomainReports, staleThresholdDays, setStaleThresholdDays, locked }) {
+  const lockedStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
   return (
     <div className="card">
-      <div className="card-header"><span className="card-label">Settings</span></div>
+      <div className="card-header">
+        <span className="card-label">Settings</span>
+        {locked && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+            Locked — start a new job to change settings
+          </span>
+        )}
+      </div>
       <div className="card-body">
-        <div className="settings-list">
-          {settings.map(s => (
-            <div key={s.name} className="setting-row">
+
+        {/* ── Group 1: Functional settings ──────────────────────────────── */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            VT Processing Options
+          </div>
+          <div className="settings-list" style={lockedStyle}>
+
+            {/* VT Report Mode */}
+            <div className="setting-row">
               <div className="setting-info">
-                <span className="setting-name">{s.name}</span>
-                <span className="setting-desc">{s.desc}</span>
+                <span className="setting-name">VT Report Mode</span>
+                <span className="setting-desc">
+                  {useDomainReports
+                    ? 'Domain report mode — 1 VT call per bare domain. Less detail than URL mode.'
+                    : 'URL report mode (recommended) — up to 3 VT calls per bare domain. Better coverage.'}
+                </span>
               </div>
-              <div className="toggle-placeholder" title="Not yet implemented" />
+              <button
+                className={`btn ${useDomainReports ? 'btn-secondary' : 'btn-primary'}`}
+                style={{ fontSize: 11, padding: '4px 12px', minWidth: 130, whiteSpace: 'nowrap' }}
+                onClick={() => setUseDomainReports(v => !v)}
+                disabled={locked}
+                title={locked ? 'Settings locked while a job is active' : undefined}
+              >
+                {useDomainReports ? '⚙ Domain report' : '⚙ URL report'}
+              </button>
             </div>
-          ))}
+
+            {/* Stale threshold */}
+            <div className="setting-row">
+              <div className="setting-info">
+                <span className="setting-name">Stale Threshold</span>
+                <span className="setting-desc">
+                  VT reports older than this many days are classified as <strong>STALE</strong> (lower confidence). Default: 7 days.
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={90}
+                  value={staleThresholdDays}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10)
+                    if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
+                  }}
+                  disabled={locked}
+                  style={{
+                    width: 60, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border)',
+                    background: 'var(--surface)', color: 'var(--text)', fontSize: 13,
+                    opacity: locked ? 0.55 : 1,
+                  }}
+                  title={locked ? 'Settings locked while a job is active' : 'Stale threshold in days (1–90)'}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>days</span>
+              </div>
+            </div>
+
+          </div>
         </div>
+
+        {/* ── Group 2: Disabled placeholders (not yet implemented) ───────── */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            Advanced Options <span style={{ fontSize: 10, fontWeight: 400, textTransform: 'none' }}>(not yet implemented)</span>
+          </div>
+          <div className="settings-list">
+
+            <div className="setting-row" style={{ opacity: 0.5 }}>
+              <div className="setting-info">
+                <span className="setting-name">Auto-Rescan Stale Results</span>
+                <span className="setting-desc">
+                  Automatically request fresh VT scans for stale items. <strong>Not yet implemented.</strong>{' '}
+                  When enabled, will consume additional VT quota per stale item.
+                </span>
+              </div>
+              <div className="toggle-placeholder" title="Not yet implemented — auto-rescan coming in a future release" />
+            </div>
+
+            <div className="setting-row" style={{ opacity: 0.5 }}>
+              <div className="setting-info">
+                <span className="setting-name">URL Activity Check</span>
+                <span className="setting-desc">
+                  Live HEAD-request probe for each item (SSRF-safe). <strong>Coming in a future release.</strong>
+                </span>
+              </div>
+              <div className="toggle-placeholder" title="Not yet implemented — URL activity check coming in a future release" />
+            </div>
+
+            <div className="setting-row" style={{ opacity: 0.5 }}>
+              <div className="setting-info">
+                <span className="setting-name">Export Results</span>
+                <span className="setting-desc">
+                  Download results as CSV or JSON. <strong>Coming soon.</strong>
+                </span>
+              </div>
+              <div className="toggle-placeholder" title="Not yet implemented — export coming in a future release" />
+            </div>
+
+          </div>
+        </div>
+
+        {/* ── Group 3: Info rows (read-only) ────────────────────────────── */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            Current Behavior (read-only)
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.8 }}>
+            <div><strong>VT hit definition:</strong> MALICIOUS ≥ 1 engine → Malicious · SUSPICIOUS ≥ 1 engine → Suspicious. Configurable threshold coming soon.</div>
+            <div><strong>Max items per job:</strong> 500</div>
+            <div><strong>Default scheme:</strong> HTTP (bare tokens treated as domains)</div>
+            <div><strong>Hold detection:</strong> clientHold / serverHold domains skip VT — enabled by default</div>
+          </div>
+        </div>
+
       </div>
     </div>
   )
@@ -974,6 +1094,10 @@ export default function App() {
   const [uploadPreview, setUploadPreview] = useState(null)
   const [uploadError, setUploadError] = useState(null)
 
+  // Settings state
+  const [useDomainReports, setUseDomainReports] = useState(false)
+  const [staleThresholdDays, setStaleThresholdDays] = useState(7)
+
   // VT job state
   const [submitting, setSubmitting] = useState(false)
   const [jobId, setJobId] = useState(null)
@@ -983,6 +1107,20 @@ export default function App() {
   const pollRef = useRef(null)
 
   const canRunJob = !!(preview && preview.accepted_count > 0)
+
+  // Settings are locked while a job is running/queued or a recovered job is shown
+  const settingsLocked = !!(
+    restoredFromSession ||
+    (job && (job.status === 'queued' || job.status === 'running'))
+  )
+
+  // Shared settings payload — single source of truth for both estimate and submit
+  const settingsPayload = {
+    default_scheme: 'http',
+    max_items: 500,
+    use_domain_reports: useDomainReports,
+    stale_threshold_days: staleThresholdDays,
+  }
 
   async function handleEstimate() {
     if (!rawInput.trim()) return
@@ -994,7 +1132,7 @@ export default function App() {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/estimate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
+        body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
       })
       if (!resp.ok) {
         const text = await resp.text()
@@ -1107,7 +1245,7 @@ export default function App() {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
+        body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
       })
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}))
@@ -1128,6 +1266,11 @@ export default function App() {
       setSubmitting(false)
     }
   }
+
+  // Mark estimate stale when settings change (same as when input changes)
+  useEffect(() => {
+    if (estimateResult) setEstimateStale(true)
+  }, [useDomainReports, staleThresholdDays])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Recovery: on mount, attempt to restore the latest completed job
   useEffect(() => {
@@ -1172,7 +1315,7 @@ export default function App() {
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI — VT core (MDI-06) + quota estimate (MDI-07) + job recovery (MDI-08) active. WHOIS, DNS, and live checks not yet implemented.
+          MDI — VT core + quota estimate + job recovery + settings (MDI-09) active. WHOIS, DNS, live checks, and exports not yet implemented.
         </div>
 
         <div className="page-header">
@@ -1209,10 +1352,16 @@ export default function App() {
           jobError={jobError}
           jobId={jobId}
           restoredFromSession={restoredFromSession}
-          onDismissRestore={() => setRestoredFromSession(false)}
+          onDismissRestore={() => { setRestoredFromSession(false); setJob(null); setJobId(null) }}
         />
 
-        <SettingsSection />
+        <SettingsSection
+          useDomainReports={useDomainReports}
+          setUseDomainReports={setUseDomainReports}
+          staleThresholdDays={staleThresholdDays}
+          setStaleThresholdDays={setStaleThresholdDays}
+          locked={settingsLocked}
+        />
         <DashboardSection />
       </main>
 

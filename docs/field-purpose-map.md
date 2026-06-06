@@ -412,6 +412,90 @@ the user submits a new job via "Run MDI Check".
 
 ---
 
+## MDI-09 Settings state and defaults
+
+### `stale_threshold_days` default correction
+
+| Location | Old default | New default (MDI-09) |
+|---|---|---|
+| `models.py` `MdiJobOptions` | 5 | **7** |
+| `models.py` `JobSubmitRequest` | 5 | **7** |
+| `models.py` `EstimateRequest` | 5 | **7** |
+| `services/job_store.py` `InMemoryJob` | 5 | **7** |
+
+The PRD/backlog specifies 7 days as the stale threshold. All code now matches.
+
+### Frontend settings state (MDI-09)
+
+| State variable | Type | Default | Purpose |
+|---|---|---|---|
+| `useDomainReports` | `bool` | `false` | Controls `use_domain_reports` in estimate/submit payloads. `true` = domain-report mode (1 call/domain); `false` = URL-report mode (up to 3 calls/domain, better coverage). |
+| `staleThresholdDays` | `int` | `7` | Controls `stale_threshold_days` in estimate/submit payloads. Range 1–90 days. |
+| `settingsLocked` | `bool` (derived) | `false` | `true` when a job is queued/running or `restoredFromSession` is true. Disables settings controls. Unlocks when user dismisses the job or starts a new run. |
+
+### `settingsPayload` — single source of truth
+
+Both `handleEstimate()` and `handleRunJob()` spread `settingsPayload` into their request bodies:
+
+```javascript
+const settingsPayload = {
+  default_scheme: 'http',   // hardcoded — not user-configurable in MDI-09
+  max_items: 500,           // hardcoded — not user-configurable in MDI-09
+  use_domain_reports: useDomainReports,
+  stale_threshold_days: staleThresholdDays,
+}
+```
+
+This guarantees estimate/submit parity — both calls always send the same settings.
+
+### SettingsSection UI groups (MDI-09)
+
+**Group 1 — Functional (wired):**
+
+| Control | Maps to | Default |
+|---|---|---|
+| VT Report Mode toggle | `useDomainReports` | URL report (false) |
+| Stale Threshold input | `staleThresholdDays` | 7 days |
+
+**Group 2 — Disabled placeholders:**
+
+| Row | Status | Note |
+|---|---|---|
+| Auto-Rescan Stale Results | Disabled/OFF | Not implemented; will consume additional VT quota when live |
+| URL Activity Check | Disabled/OFF | Deferred until URL Activity Scanner integration |
+| Export Results | Disabled | Deferred until export feature |
+
+**Group 3 — Read-only info:**
+
+- VT hit definition (MALICIOUS ≥ 1 engine / SUSPICIOUS ≥ 1 engine) — no control yet
+- Max items: 500
+- Default scheme: HTTP
+
+### Saved job settings display (MDI-09)
+
+`JobSection` shows a one-line summary from `JobStatusResponse` fields when job is done/error:
+
+> "This job used: URL report mode · Stale after 7 days (recovered)"
+
+Fields used: `job.use_domain_reports`, `job.stale_threshold_days`, `restoredFromSession`.
+These reflect the settings saved to the job at creation time — not current UI state.
+
+### `settingsLocked` behavior
+
+| Condition | `settingsLocked` |
+|---|---|
+| No active/recovered job | `false` — controls enabled |
+| Job is queued or running | `true` — controls disabled |
+| `restoredFromSession = true` | `true` — controls disabled |
+| User clicks ✕ on "Restored" notice (dismiss) | `false` — job cleared, controls re-enabled |
+| User submits new job | `false` — immediately on new submit |
+
+### MDI-09 runtime file impact
+
+MDI-09 adds no new runtime files. `mdi_latest_job.json` written by new jobs after MDI-09 will contain `stale_threshold_days: 7` by default (was 5 in earlier runs). Existing artifacts on disk are unaffected.
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |
