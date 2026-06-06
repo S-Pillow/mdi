@@ -873,6 +873,20 @@ class EstimateResponse(BaseModel):
             "Actual jobs deduplicate shared registered domains."
         ),
     )
+    estimated_enrichment_duration_seconds_min: float = Field(
+        0.0,
+        description=(
+            "[display] MDI-11A: best-case enrichment time (0 s — all items share one "
+            "registered domain; 1 lookup hits per-job cache)."
+        ),
+    )
+    estimated_enrichment_duration_seconds_max: float = Field(
+        0.0,
+        description=(
+            "[display] MDI-11A: worst-case enrichment time: N × 1.1 s "
+            "(every item is a unique registered domain; rdap.org rate limit enforced)."
+        ),
+    )
 
     # ── Quota ─────────────────────────────────────────────────────────────────
     quota_remaining_now: int = Field(
@@ -922,6 +936,14 @@ class EstimateResponse(BaseModel):
     enrichment_note: str = Field(
         "",
         description="[display] MDI-11: informational note about RDAP/WHOIS enrichment overhead.",
+    )
+    enrichment_warning: str = Field(
+        "",
+        description=(
+            "[display] MDI-11A: non-empty when enrichment_lookups > 100. "
+            "Warns that RDAP throttling may add significant runtime "
+            "(e.g. ~9+ minutes for 500 unique domains)."
+        ),
     )
 
     # ── Audit / safety flags ──────────────────────────────────────────────────

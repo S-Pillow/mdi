@@ -6,12 +6,20 @@ Populates enrichment fields for a registered domain:
 
 Lookup strategy:
   1. RDAP primary  — GET https://rdap.org/domain/{registered_domain}
+     - Rate-limited: minimum 1.1 s between requests (_rdap_acquire_slot).
      - 200: parse and return.
      - 404: domain not found in RDAP registry → try WHOIS fallback.
-     - 429: rate-limited → retry once after 5 s → try WHOIS fallback.
+     - 429: read Retry-After header (or default 5 s), wait, retry once only.
+       If retry also 429/error → WHOIS fallback.
      - 5xx / network / timeout: try WHOIS fallback.
   2. WHOIS fallback — blocking call in thread executor.
      - Failure: return partial EnrichmentResult with error; item continues to VT.
+
+Rate-limit design (rdap.org):
+  - rdap.org allows ~10 requests per 10 seconds (≈ 1 req/s).
+  - MDI enforces a 1.1 s minimum gap between RDAP requests via _rdap_acquire_slot().
+  - _rdap_acquire_slot() is a single mockable entry point for tests.
+  - The per-job domain cache (_enrich_items in job_processor) avoids repeat lookups.
 
 Hold detection:
   epp_status strings from RDAP/WHOIS are fed through the existing
@@ -22,10 +30,6 @@ Registered domain extraction:
   - URL inputs: tldextract extracts registered domain from the full URL.
   - IP addresses: skip enrichment, return NOT_CHECKED result.
   - IDN/unicode: each label is encoded to punycode before RDAP query.
-
-Rate-limit design:
-  - No in-process rate limiter for RDAP (rdap.org handles throttling).
-  - Callers should use the per-job domain cache to avoid repeat lookups.
 
 Hard guarantees:
   - No VT calls.
@@ -65,8 +69,63 @@ logger = logging.getLogger("mdi.domain_enrichment")
 # Timeout for individual RDAP requests (seconds)
 _RDAP_TIMEOUT_SECONDS: float = 10.0
 
-# How long to wait before retrying a 429 response (seconds)
-_RDAP_RETRY_DELAY_SECONDS: float = 5.0
+# Minimum interval between RDAP requests (rdap.org allows ~10 req/10s; 1.1 s gives headroom)
+_RDAP_MIN_INTERVAL_SECONDS: float = 1.1
+
+# Default wait on 429 when Retry-After header is absent or unparseable
+_RDAP_RETRY_DELAY_DEFAULT_SECONDS: float = 5.0
+
+# Maximum Retry-After to honour (cap to prevent indefinite blocking)
+_RDAP_RETRY_AFTER_MAX_SECONDS: float = 60.0
+
+# Module-level timestamp of last RDAP call (seconds, monotonic)
+_rdap_last_call_ts: float = 0.0
+
+
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+
+async def _rdap_acquire_slot() -> None:
+    """
+    Single mockable rate-limiter entry point.
+
+    Enforces _RDAP_MIN_INTERVAL_SECONDS (1.1 s) minimum gap between RDAP
+    requests to stay within rdap.org's ~10 req/10 s limit with headroom.
+
+    Monotonic time avoids event-loop-boundary issues across asyncio.run() calls.
+    Not concurrency-safe for simultaneous coroutines, but MDI enriches items
+    sequentially per job — accepted MVP risk.
+    """
+    global _rdap_last_call_ts
+    import time as _time
+    now = _time.monotonic()
+    gap = _RDAP_MIN_INTERVAL_SECONDS - (now - _rdap_last_call_ts)
+    if gap > 0:
+        await asyncio.sleep(gap)
+    _rdap_last_call_ts = _time.monotonic()
+
+
+def _parse_retry_after(headers: Any, fallback: float) -> float:
+    """
+    Parse the Retry-After response header into a safe wait duration.
+
+    Accepts a numeric seconds value only (HTTP-date format is not supported).
+    Returns fallback if the header is absent, non-numeric, or out of range.
+    Caps the returned value at _RDAP_RETRY_AFTER_MAX_SECONDS for safety.
+    """
+    raw = ""
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After") or ""
+    except Exception:
+        return fallback
+    if not raw:
+        return fallback
+    try:
+        val = float(raw)
+        if val <= 0:
+            return fallback
+        return min(val, _RDAP_RETRY_AFTER_MAX_SECONDS)
+    except (ValueError, TypeError):
+        return fallback
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
@@ -372,12 +431,14 @@ async def enrich_domain(registered_domain: str) -> EnrichmentResult:
     Look up enrichment data for a registered domain.
 
     Strategy:
-      1. RDAP via rdap.org (primary).
+      1. Acquire RDAP rate-limit slot (1.1 s minimum gap via _rdap_acquire_slot).
+      2. RDAP via rdap.org (primary).
          - 200: parse and return.
          - 404: domain not in RDAP → WHOIS fallback.
-         - 429: retry once after 5 s → WHOIS fallback.
+         - 429: read Retry-After header (or default 5 s), wait, retry once.
+           If retry still 429 or error → WHOIS fallback.
          - 5xx / timeout / network error: WHOIS fallback.
-      2. WHOIS (fallback).
+      3. WHOIS (fallback).
          - Failure: return EnrichmentResult with error set.
 
     Returns:
@@ -388,6 +449,9 @@ async def enrich_domain(registered_domain: str) -> EnrichmentResult:
 
     try:
         async with httpx.AsyncClient() as client:
+            # Enforce rate limit before initial request
+            await _rdap_acquire_slot()
+
             try:
                 resp = await _rdap_request(rdap_url, client)
             except httpx.TimeoutException:
@@ -410,15 +474,27 @@ async def enrich_domain(registered_domain: str) -> EnrichmentResult:
                 return await _whois_fallback(registered_domain)
 
             elif resp.status_code == 429:
-                logger.debug("RDAP 429 for %s — retrying in %ss", registered_domain, _RDAP_RETRY_DELAY_SECONDS)
-                await asyncio.sleep(_RDAP_RETRY_DELAY_SECONDS)
+                # Honour Retry-After when present; otherwise use default wait
+                wait = _parse_retry_after(resp.headers, _RDAP_RETRY_DELAY_DEFAULT_SECONDS)
+                logger.debug(
+                    "RDAP 429 for %s — waiting %.1fs then retrying once",
+                    registered_domain, wait,
+                )
+                await asyncio.sleep(wait)
+                # Acquire rate-limit slot before the single retry
+                await _rdap_acquire_slot()
                 try:
                     resp2 = await _rdap_request(rdap_url, client)
                     if resp2.status_code == 200:
                         data = resp2.json()
                         return _parse_rdap_response(data, registered_domain)
-                except Exception:  # noqa: BLE001
-                    pass
+                    logger.debug(
+                        "RDAP retry returned %s for %s — trying WHOIS",
+                        resp2.status_code, registered_domain,
+                    )
+                except Exception as exc2:  # noqa: BLE001
+                    logger.debug("RDAP retry error for %s: %s — trying WHOIS", registered_domain, exc2)
+                # Single retry exhausted → WHOIS fallback
                 return await _whois_fallback(registered_domain)
 
             else:

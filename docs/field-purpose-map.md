@@ -699,12 +699,33 @@ This activates the "Flagged + Recent" triage rule in `triage_rules.py`:
 a freshly registered domain flagged by VT now routes to `REVIEW_FOR_ACTION`
 instead of the catch-all `VERIFY_INVESTIGATE`.
 
-### Estimate / runtime update (MDI-11)
+### Estimate / runtime update (MDI-11 / MDI-11A)
 
 `EstimateResponse` now includes:
-- `estimated_enrichment_lookups: int` — 1 per accepted item (conservative; live jobs de-duplicate)
-- `enrichment_note: str` — informational note about RDAP overhead
-- `estimated_duration_seconds_min/max` — now includes `N × 0.5 s` enrichment overhead
+
+| Field | Description |
+|---|---|
+| `estimated_enrichment_lookups` | 1 per accepted item (conservative; live jobs de-duplicate) |
+| `estimated_enrichment_duration_seconds_min` | 0 s (best case: all items share 1 registered domain) |
+| `estimated_enrichment_duration_seconds_max` | N × 1.1 s (worst case: all unique domains) |
+| `enrichment_note` | Informational text about RDAP/WHOIS overhead |
+| `enrichment_warning` | Non-empty for N > 100; warns about extended runtime (e.g. 9+ min for 500 domains) |
+
+**MDI-11A correction:** Timing was updated from 0.5 s/item (MDI-11 gate) to 1.1 s/item
+to match rdap.org's actual throttle budget (~10 req/10 s). `estimated_duration_seconds_min`
+now equals VT-min only (enrichment best-case = 0); `estimated_duration_seconds_max`
+includes the full N × 1.1 s enrichment overhead.
+
+**RDAP rate limiter (`_rdap_acquire_slot`):** A single mockable function enforces the
+1.1-second minimum gap before each RDAP request (both initial and retry). On HTTP 429,
+the `Retry-After` header is honoured if present and numeric (capped at 60 s); otherwise
+a 5-second default wait is applied before a single retry. If the retry still fails or
+returns 429, enrichment falls through to WHOIS or returns a structured error.
+
+> **Future improvement:** IANA bootstrap routing (`https://data.iana.org/rdap/`)
+> would direct queries to TLD-specific RDAP servers rather than rdap.org, avoiding
+> the shared rate limit for large batches. Deferred pending evidence that large-batch
+> enrichment is a recurring need.
 
 ### Usage history metadata rule (strict)
 

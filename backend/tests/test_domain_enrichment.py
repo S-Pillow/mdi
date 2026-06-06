@@ -40,11 +40,27 @@ from services import domain_enrichment
 from services.domain_enrichment import (
     EnrichmentResult,
     _parse_rdap_response,
+    _parse_retry_after,
     _parse_whois_result,
     enrich_domain,
     extract_registered_domain,
+    _RDAP_MIN_INTERVAL_SECONDS,
+    _RDAP_RETRY_DELAY_DEFAULT_SECONDS,
 )
 from services.age_bucket import compute_age_bucket
+
+
+# ── Module-level autouse: suppress rate-limit waits for all enrich_domain tests ──
+
+@pytest.fixture(autouse=True)
+def mock_rdap_rate_limiter():
+    """
+    Prevent actual 1.1-second waits in every test that calls enrich_domain.
+    Tests in TestRdapRateLimiter override this with explicit mocks to verify
+    sleep duration and call counts.
+    """
+    with patch.object(domain_enrichment, "_rdap_acquire_slot", new=AsyncMock()):
+        yield
 
 
 # ── Fixtures and helpers ───────────────────────────────────────────────────────
@@ -89,6 +105,9 @@ def _make_rdap_response(status_code: int, json_data: Optional[dict] = None) -> M
     resp.status_code = status_code
     if json_data is not None:
         resp.json = MagicMock(return_value=json_data)
+    # Default headers: no Retry-After.  Tests that need specific headers override this.
+    resp.headers = MagicMock()
+    resp.headers.get = lambda key, default="": default
     return resp
 
 
@@ -725,3 +744,255 @@ class TestNoLiveCallGuard:
         """_parse_whois_result is a pure function — no network calls."""
         result = _parse_whois_result(_make_whois_dict(), "example.com")
         assert result.source == DomainStatusSource.WHOIS
+
+
+# ── MDI-11A: RDAP rate limiter and Retry-After handling ──────────────────────
+
+class TestRdapRateLimiter:
+    """
+    Tests for MDI-11A rate limiter changes.
+    Each test overrides the module-level autouse mock_rdap_rate_limiter as needed.
+    No live RDAP/WHOIS/VT calls are made.
+    """
+
+    def test_rdap_min_interval_constant_is_1_1_seconds(self):
+        """_RDAP_MIN_INTERVAL_SECONDS must be 1.1 to honour rdap.org's ~10 req/10s limit."""
+        assert _RDAP_MIN_INTERVAL_SECONDS == 1.1
+
+    def test_rdap_retry_delay_default_is_5_seconds(self):
+        """Default wait on 429 (no Retry-After header) must be 5 s."""
+        assert _RDAP_RETRY_DELAY_DEFAULT_SECONDS == 5.0
+
+    # ── _parse_retry_after unit tests ──────────────────────────────────────────
+
+    def test_parse_retry_after_numeric_string(self):
+        headers = {"Retry-After": "3"}
+        assert _parse_retry_after(headers, 5.0) == 3.0
+
+    def test_parse_retry_after_lowercase_key(self):
+        headers = {"retry-after": "7"}
+        assert _parse_retry_after(headers, 5.0) == 7.0
+
+    def test_parse_retry_after_absent_returns_fallback(self):
+        headers = {}
+        assert _parse_retry_after(headers, 5.0) == 5.0
+
+    def test_parse_retry_after_non_numeric_returns_fallback(self):
+        headers = {"Retry-After": "Fri, 06 Jun 2026 12:00:00 GMT"}
+        assert _parse_retry_after(headers, 5.0) == 5.0
+
+    def test_parse_retry_after_zero_returns_fallback(self):
+        """Zero or negative values are treated as absent (return fallback)."""
+        headers = {"Retry-After": "0"}
+        assert _parse_retry_after(headers, 5.0) == 5.0
+
+    def test_parse_retry_after_very_large_is_capped(self):
+        """Values above _RDAP_RETRY_AFTER_MAX_SECONDS (60 s) are capped."""
+        headers = {"Retry-After": "3600"}
+        result = _parse_retry_after(headers, 5.0)
+        assert result == 60.0
+
+    def test_parse_retry_after_none_dict_returns_fallback(self):
+        """Pathological headers object that raises — returns fallback."""
+
+        class BrokenHeaders:
+            def get(self, *args, **kwargs):
+                raise RuntimeError("broken")
+
+        result = _parse_retry_after(BrokenHeaders(), 5.0)
+        assert result == 5.0
+
+    # ── enrich_domain: 429 honours Retry-After ────────────────────────────────
+
+    def test_rdap_429_honours_retry_after_header(self):
+        """
+        When RDAP returns 429 with Retry-After: 3, asyncio.sleep must be called
+        with 3 seconds (not the default 5) before the single retry.
+        """
+        mock_429 = _make_rdap_response(429)
+        mock_429.headers = MagicMock()
+        mock_429.headers.get = lambda key, default="": (
+            "3" if key.lower() == "retry-after" else default
+        )
+
+        rdap_data = _make_rdap_200()
+        mock_200 = _make_rdap_response(200, rdap_data)
+
+        responses = [mock_429, mock_200]
+
+        async def _side_effect(*args, **kwargs):
+            return responses.pop(0)
+
+        sleep_calls: list = []
+
+        async def _capture_sleep(secs):
+            sleep_calls.append(secs)
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=AsyncMock()),
+            patch.object(domain_enrichment, "_rdap_request", new=AsyncMock(side_effect=_side_effect)),
+            patch("services.domain_enrichment.asyncio.sleep", new=_capture_sleep),
+        ):
+            result = _run(enrich_domain("rate-limited.com"))
+
+        assert result.source == DomainStatusSource.RDAP, "Retry should succeed with RDAP source"
+        assert len(sleep_calls) == 1, "asyncio.sleep called exactly once (for the 429 wait)"
+        assert sleep_calls[0] == 3.0, f"Expected 3 s from Retry-After header, got {sleep_calls[0]}"
+
+    def test_rdap_429_no_retry_after_uses_default_delay(self):
+        """
+        When RDAP returns 429 without Retry-After, asyncio.sleep must be called
+        with _RDAP_RETRY_DELAY_DEFAULT_SECONDS (5.0).
+        """
+        mock_429 = _make_rdap_response(429)
+        mock_429.headers = MagicMock()
+        mock_429.headers.get = lambda key, default="": default  # no Retry-After
+
+        rdap_data = _make_rdap_200()
+        mock_200 = _make_rdap_response(200, rdap_data)
+
+        responses = [mock_429, mock_200]
+
+        async def _side_effect(*args, **kwargs):
+            return responses.pop(0)
+
+        sleep_calls: list = []
+
+        async def _capture_sleep(secs):
+            sleep_calls.append(secs)
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=AsyncMock()),
+            patch.object(domain_enrichment, "_rdap_request", new=AsyncMock(side_effect=_side_effect)),
+            patch("services.domain_enrichment.asyncio.sleep", new=_capture_sleep),
+        ):
+            result = _run(enrich_domain("no-header.com"))
+
+        assert result.source == DomainStatusSource.RDAP
+        assert len(sleep_calls) == 1
+        assert sleep_calls[0] == _RDAP_RETRY_DELAY_DEFAULT_SECONDS
+
+    def test_rdap_429_retry_once_only(self):
+        """
+        On persistent 429, _rdap_request is called exactly twice:
+        once for the initial attempt and once for the single retry.
+        After that, the code falls through to WHOIS fallback — no third RDAP attempt.
+        """
+        mock_429 = _make_rdap_response(429)
+        mock_429.headers = MagicMock()
+        mock_429.headers.get = lambda key, default="": default
+
+        whois_dict = _make_whois_dict()
+        call_count = {"n": 0}
+
+        async def _always_429(*args, **kwargs):
+            call_count["n"] += 1
+            return mock_429
+
+        async def _sleep_noop(_):
+            pass
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=AsyncMock()),
+            patch.object(domain_enrichment, "_rdap_request", new=AsyncMock(side_effect=_always_429)),
+            patch.object(domain_enrichment, "_whois_query_sync", return_value=whois_dict),
+            patch("services.domain_enrichment.asyncio.sleep", new=_sleep_noop),
+        ):
+            result = _run(enrich_domain("always-429.com"))
+
+        assert call_count["n"] == 2, (
+            f"_rdap_request must be called exactly twice (initial + 1 retry), got {call_count['n']}"
+        )
+        assert result.source == DomainStatusSource.WHOIS, "Should fall back to WHOIS after retry exhausted"
+
+    def test_rdap_persistent_429_records_structured_error_and_does_not_block_vt(self):
+        """
+        When RDAP is persistently rate-limited (429 on both initial and retry)
+        and WHOIS also fails, the result must carry a structured error and have
+        UNKNOWN source — allowing VT processing to continue (enrichment is non-fatal).
+        """
+        mock_429 = _make_rdap_response(429)
+        mock_429.headers = MagicMock()
+        mock_429.headers.get = lambda key, default="": default
+
+        async def _always_429(*args, **kwargs):
+            return mock_429
+
+        async def _sleep_noop(_):
+            pass
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=AsyncMock()),
+            patch.object(domain_enrichment, "_rdap_request", new=AsyncMock(side_effect=_always_429)),
+            patch.object(domain_enrichment, "_whois_query_sync", return_value=None),
+            patch("services.domain_enrichment.asyncio.sleep", new=_sleep_noop),
+        ):
+            result = _run(enrich_domain("persistent-429.com"))
+
+        assert result.source == DomainStatusSource.UNKNOWN
+        assert result.error is not None
+        assert result.error.code == "whois_failed"
+        assert result.domain_hold.has_hold is False
+
+    def test_rdap_acquire_slot_is_called_before_initial_request(self):
+        """
+        _rdap_acquire_slot must be called before the initial RDAP request.
+        Verifies call ordering: acquire → request.
+        """
+        rdap_data = _make_rdap_200()
+        mock_200 = _make_rdap_response(200, rdap_data)
+
+        call_order: list = []
+
+        async def _acquire():
+            call_order.append("acquire")
+
+        async def _request(url, client):
+            call_order.append("request")
+            return mock_200
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=_acquire),
+            patch.object(domain_enrichment, "_rdap_request", new=_request),
+        ):
+            _run(enrich_domain("example.com"))
+
+        assert call_order[0] == "acquire", "Rate-limit slot must be acquired before RDAP request"
+        assert call_order[1] == "request"
+
+    def test_rdap_acquire_slot_called_before_retry_too(self):
+        """
+        _rdap_acquire_slot must be called both before the initial request
+        and before the single 429 retry — ensuring the retry also respects the rate limit.
+        """
+        mock_429 = _make_rdap_response(429)
+        mock_429.headers = MagicMock()
+        mock_429.headers.get = lambda key, default="": default
+
+        rdap_data = _make_rdap_200()
+        mock_200 = _make_rdap_response(200, rdap_data)
+
+        responses = [mock_429, mock_200]
+        call_order: list = []
+
+        async def _acquire():
+            call_order.append("acquire")
+
+        async def _request(*args, **kwargs):
+            call_order.append("request")
+            return responses.pop(0)
+
+        async def _sleep_noop(_):
+            pass
+
+        with (
+            patch.object(domain_enrichment, "_rdap_acquire_slot", new=_acquire),
+            patch.object(domain_enrichment, "_rdap_request", new=_request),
+            patch("services.domain_enrichment.asyncio.sleep", new=_sleep_noop),
+        ):
+            result = _run(enrich_domain("retry-order.com"))
+
+        assert call_order == ["acquire", "request", "acquire", "request"], (
+            f"Expected acquire→request→acquire→request, got {call_order}"
+        )
+        assert result.source == DomainStatusSource.RDAP

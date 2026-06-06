@@ -1,11 +1,11 @@
 """
-MDI-07/MDI-09 — Tests for POST /api/mdi/jobs/estimate.
+MDI-07/MDI-09/MDI-11A — Tests for POST /api/mdi/jobs/estimate.
 
 Guarantees enforced by every test in this module:
   - No VT calls made (no httpx, no _vt_request invocations).
   - No jobs created (job_store remains empty).
   - No runtime files written (live /var/lib/dns-tool/vt_usage.json is not modified).
-  - No external services contacted (no WHOIS, DNS, URL Activity Scanner).
+  - No external services contacted (no WHOIS, RDAP, DNS, URL Activity Scanner).
 
 Test isolation for quota reads:
   All tests that assert quota values inject a tmp_path-based usage file via the
@@ -34,6 +34,8 @@ from services.estimate import (
     VT_RATE_LIMIT_INTERVAL_SECONDS,
     VT_RATE_LIMIT_NOTE,
     JOB_STATE_NOTE,
+    RDAP_ESTIMATE_SECONDS_PER_ITEM,
+    RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD,
     estimate_calls_for_item,
     estimate_job,
 )
@@ -168,33 +170,31 @@ class TestEstimateJob:
         assert result["url_count"] == 3
 
     def test_duration_formula_single_item(self):
-        from models import MdiInputItem
-        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
-        item = MdiInputItem(input_original="a.com", input_normalized="a.com",
-                            input_type=InputType.DOMAIN, position=1)
+        # MDI-11A: enrichment_min=0 (best case), enrichment_max=N×1.1 (worst case)
+        # VT: (1-1)×15=0 min, (3-1)×15=30 max
+        item = self._make_item(InputType.DOMAIN, "a.com")
         result = estimate_job([item], use_domain_reports=False)
-        # VT: (1-1)*15=0 min, (3-1)*15=30 max; enrichment: 1×0.5=0.5
-        enrichment_overhead = 1 * RDAP_ESTIMATE_SECONDS_PER_ITEM
-        assert result["estimated_duration_seconds_min"] == pytest.approx(0.0 + enrichment_overhead)
-        assert result["estimated_duration_seconds_max"] == pytest.approx(30.0 + enrichment_overhead)
+        enrichment_max = 1 * RDAP_ESTIMATE_SECONDS_PER_ITEM  # 1.1
+        assert result["estimated_duration_seconds_min"] == pytest.approx(0.0)   # VT min + enrichment_min(0)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(30.0 + enrichment_max)
         assert result["estimated_enrichment_lookups"] == 1
+        assert result["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
+        assert result["estimated_enrichment_duration_seconds_max"] == pytest.approx(enrichment_max)
 
     def test_duration_formula_two_items(self):
-        from models import MdiInputItem
-        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
+        # MDI-11A: enrichment_min=0, enrichment_max=2×1.1=2.2
+        # VT: calls_min=2, calls_max=6 → (2-1)×15=15, (6-1)×15=75
         items = [
-            MdiInputItem(input_original="a.com", input_normalized="a.com",
-                         input_type=InputType.DOMAIN, position=1),
-            MdiInputItem(input_original="b.com", input_normalized="b.com",
-                         input_type=InputType.DOMAIN, position=2),
+            self._make_item(InputType.DOMAIN, "a.com"),
+            self._make_item(InputType.DOMAIN, "b.com"),
         ]
         result = estimate_job(items, use_domain_reports=False)
-        # VT: calls_min=2, calls_max=6 → (2-1)*15=15, (6-1)*15=75
-        # Enrichment: 2 × 0.5 = 1.0
-        enrichment_overhead = 2 * RDAP_ESTIMATE_SECONDS_PER_ITEM
-        assert result["estimated_duration_seconds_min"] == pytest.approx(15.0 + enrichment_overhead)
-        assert result["estimated_duration_seconds_max"] == pytest.approx(75.0 + enrichment_overhead)
+        enrichment_max = 2 * RDAP_ESTIMATE_SECONDS_PER_ITEM  # 2.2
+        assert result["estimated_duration_seconds_min"] == pytest.approx(15.0)  # VT min + enrichment_min(0)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(75.0 + enrichment_max)
         assert result["estimated_enrichment_lookups"] == 2
+        assert result["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
+        assert result["estimated_enrichment_duration_seconds_max"] == pytest.approx(enrichment_max)
 
     def test_notes_present(self):
         from services.estimate import ENRICHMENT_NOTE
@@ -202,6 +202,23 @@ class TestEstimateJob:
         assert result["rate_limit_note"] == VT_RATE_LIMIT_NOTE
         assert result["job_state_note"] == JOB_STATE_NOTE
         assert result["enrichment_note"] == ENRICHMENT_NOTE
+
+    def test_empty_list_has_no_enrichment_warning(self):
+        result = estimate_job([], use_domain_reports=False)
+        assert result["enrichment_warning"] == ""
+
+    def test_small_batch_no_enrichment_warning(self):
+        """Batches ≤ RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD must not produce a warning."""
+        from models import MdiInputItem
+        items = [
+            MdiInputItem(input_original=f"d{i}.com", input_normalized=f"d{i}.com",
+                         input_type=InputType.DOMAIN, position=i)
+            for i in range(1, RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD + 1)
+        ]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["enrichment_warning"] == "", (
+            "No warning expected for exactly RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD items"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,8 +353,7 @@ class TestEstimateEndpoint:
                 os.environ["VT_USAGE_FILE"] = old_env
 
     def test_duration_seconds_max_formula(self):
-        # MDI-11: duration = VT time + enrichment overhead (0.5s per eligible item)
-        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
+        # MDI-11A: total_max = VT_max + enrichment_max (N × 1.1 s)
         resp = _post_estimate("example.com")
         calls_max = resp["estimated_vt_calls_max"]
         enrichment_lookups = resp["estimated_enrichment_lookups"]
@@ -348,14 +364,10 @@ class TestEstimateEndpoint:
         assert resp["estimated_duration_seconds_max"] == pytest.approx(expected_max)
 
     def test_duration_seconds_min_formula(self):
-        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
+        # MDI-11A: total_min = VT_min + 0 (best-case enrichment = 0)
         resp = _post_estimate("example.com")
         calls_min = resp["estimated_vt_calls_min"]
-        enrichment_lookups = resp["estimated_enrichment_lookups"]
-        expected_min = (
-            max(0.0, (calls_min - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
-            + enrichment_lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM
-        )
+        expected_min = max(0.0, (calls_min - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
         assert resp["estimated_duration_seconds_min"] == pytest.approx(expected_min)
 
     def test_rate_limit_note_present(self):
@@ -663,3 +675,144 @@ class TestMdi09SettingsDefaults:
         src = inspect.getsource(est_mod)
         assert "httpx" not in src
         assert "_vt_request" not in src
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-11A — RDAP rate-limit timing and enrichment estimate fields
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMdi11aEnrichmentEstimate:
+    """
+    Verify the corrected RDAP estimate constants and new EstimateResponse fields.
+    No VT, RDAP, WHOIS, or DNS calls are made.
+    No runtime files are modified.
+    """
+
+    def _make_item(self, n: int, input_type=InputType.DOMAIN) -> "MdiInputItem":
+        from models import MdiInputItem
+        return MdiInputItem(
+            input_original=f"d{n}.com", input_normalized=f"d{n}.com",
+            input_type=input_type, position=n,
+        )
+
+    def test_rdap_estimate_seconds_per_item_is_1_1(self):
+        """MDI-11A: per-item estimate must be 1.1 s (rdap.org rate limit)."""
+        assert RDAP_ESTIMATE_SECONDS_PER_ITEM == pytest.approx(1.1)
+
+    def test_enrichment_duration_min_always_zero(self):
+        """Best-case enrichment = 0 s (all items share 1 registered domain)."""
+        items = [self._make_item(i) for i in range(1, 6)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
+
+    def test_enrichment_duration_max_is_n_times_1_1(self):
+        """Worst-case enrichment = N × 1.1 s (all items are unique registered domains)."""
+        n = 10
+        items = [self._make_item(i) for i in range(1, n + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["estimated_enrichment_duration_seconds_max"] == pytest.approx(n * 1.1)
+
+    def test_total_max_includes_enrichment_max(self):
+        """estimated_duration_seconds_max must equal VT_max + enrichment_max."""
+        n = 5
+        items = [self._make_item(i) for i in range(1, n + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(
+            result["estimated_duration_seconds_max"]  # tautological — use formula below
+        )
+        # Manual formula check:
+        vt_max_calls = result["estimated_vt_calls_max"]
+        vt_max_time = max(0.0, (vt_max_calls - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+        enrichment_max = n * RDAP_ESTIMATE_SECONDS_PER_ITEM
+        assert result["estimated_duration_seconds_max"] == pytest.approx(vt_max_time + enrichment_max)
+
+    def test_total_min_excludes_enrichment(self):
+        """estimated_duration_seconds_min must equal VT_min only (enrichment_min = 0)."""
+        n = 5
+        items = [self._make_item(i) for i in range(1, n + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+        vt_min_calls = result["estimated_vt_calls_min"]
+        vt_min_time = max(0.0, (vt_min_calls - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+        assert result["estimated_duration_seconds_min"] == pytest.approx(vt_min_time)
+
+    def test_no_enrichment_warning_below_threshold(self):
+        items = [self._make_item(i) for i in range(1, RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["enrichment_warning"] == ""
+
+    def test_enrichment_warning_above_threshold(self):
+        """Batches > 100 items must have a non-empty enrichment_warning."""
+        items = [self._make_item(i) for i in range(1, RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD + 2)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["enrichment_warning"] != "", "Warning expected for large batch"
+        assert "rdap" in result["enrichment_warning"].lower()
+
+    def test_estimate_500_items_enrichment_around_550_seconds(self):
+        """
+        For 500 unique domains, worst-case RDAP enrichment time must be ≈550 s (9+ minutes).
+        This verifies the corrected 1.1 s/item estimate from MDI-11A.
+        """
+        n = 500
+        items = [self._make_item(i) for i in range(1, n + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+
+        enrichment_max = result["estimated_enrichment_duration_seconds_max"]
+        assert enrichment_max == pytest.approx(n * 1.1)
+        # 500 × 1.1 = 550 s
+        assert enrichment_max >= 540, f"Expected ≥540 s for 500 items, got {enrichment_max}"
+        assert enrichment_max <= 560, f"Expected ≤560 s for 500 items, got {enrichment_max}"
+        # 550 s > 9 minutes
+        assert enrichment_max / 60 > 9.0, "Expected more than 9 minutes of enrichment overhead"
+
+    def test_estimate_500_items_warning_mentions_minutes(self):
+        """Warning text for 500 items must mention minutes and rate limit."""
+        n = 500
+        items = [self._make_item(i) for i in range(1, n + 1)]
+        result = estimate_job(items, use_domain_reports=False)
+        warning = result["enrichment_warning"]
+        assert "minute" in warning.lower(), f"Warning must mention minutes: {warning}"
+        assert "rate" in warning.lower(), f"Warning must mention rate limit: {warning}"
+
+    def test_estimate_endpoint_returns_enrichment_duration_fields(self):
+        """The /estimate endpoint must include all MDI-11A enrichment fields."""
+        resp = _post_estimate("example.com\nexample2.com")
+        assert "estimated_enrichment_duration_seconds_min" in resp
+        assert "estimated_enrichment_duration_seconds_max" in resp
+        assert "enrichment_warning" in resp
+        assert resp["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
+        assert resp["estimated_enrichment_duration_seconds_max"] > 0.0
+
+    def test_estimate_endpoint_no_live_calls(self):
+        """
+        Confirm estimate.py makes no external HTTP calls.
+        It may document rdap.org in comments/strings, but must never import httpx
+        or invoke _rdap_request.
+        """
+        import services.estimate as est_mod
+        import inspect
+        src = inspect.getsource(est_mod)
+        assert "httpx" not in src, "estimate.py must not import httpx"
+        assert "_rdap_request" not in src, "estimate.py must not call _rdap_request"
+        assert "import requests" not in src, "estimate.py must not import requests"
+
+    def test_no_runtime_files_modified_by_estimate(self, tmp_path):
+        """Estimate endpoint must not write any runtime file."""
+        history_file = tmp_path / "vt_usage_history.jsonl"
+        job_file = tmp_path / "mdi_latest_job.json"
+        old_hist = os.environ.get("VT_HISTORY_FILE")
+        old_job = os.environ.get("MDI_JOB_FILE")
+        try:
+            os.environ["VT_HISTORY_FILE"] = str(history_file)
+            os.environ["MDI_JOB_FILE"] = str(job_file)
+            _post_estimate("example.com")
+            assert not history_file.exists(), "Estimate must not write usage history"
+            assert not job_file.exists(), "Estimate must not write job file"
+        finally:
+            if old_hist is None:
+                os.environ.pop("VT_HISTORY_FILE", None)
+            else:
+                os.environ["VT_HISTORY_FILE"] = old_hist
+            if old_job is None:
+                os.environ.pop("MDI_JOB_FILE", None)
+            else:
+                os.environ["MDI_JOB_FILE"] = old_job

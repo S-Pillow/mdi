@@ -29,13 +29,38 @@ JOB_STATE_NOTE: str = (
     "Persistent job recovery is deferred to MDI-08."
 )
 
-# MDI-11: conservative RDAP enrichment time per item (seconds)
-RDAP_ESTIMATE_SECONDS_PER_ITEM: float = 0.5
+# MDI-11A: RDAP enrichment timing constants
+# rdap.org allows ~10 req/10s; MDI enforces 1.1 s minimum gap between requests.
+# Estimate uses 1.1 s as the per-item worst case (all unique registered domains).
+# Best-case enrichment time = 0 (all items share the same registered domain → 1 lookup).
+RDAP_ESTIMATE_SECONDS_PER_ITEM: float = 1.1
+
+# Items above this threshold trigger the enrichment_warning field.
+RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD: int = 100
+
 ENRICHMENT_NOTE: str = (
     "MDI-11: RDAP/WHOIS enrichment runs before VT. "
-    f"Estimate adds {RDAP_ESTIMATE_SECONDS_PER_ITEM}s per item for RDAP lookups. "
-    "Domains sharing the same registered domain are enriched once (deduplication in live jobs)."
+    f"Rate limit: 1.1 s minimum between requests (rdap.org ≈ 10 req/10 s). "
+    "Worst-case estimate assumes all items have unique registered domains. "
+    "Items sharing the same registered domain are enriched once (per-job cache)."
 )
+
+
+def _enrichment_warning(lookups: int) -> str:
+    """
+    Return a warning string when enrichment lookups will take significant time.
+    Returns an empty string below the threshold.
+    """
+    if lookups <= RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD:
+        return ""
+    minutes = (lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM) / 60.0
+    return (
+        f"Large batch: RDAP enrichment may add up to {minutes:.1f} minutes "
+        f"for {lookups} unique domains "
+        f"(rdap.org rate limit ~1 req/s, 1.1 s enforced gap). "
+        "De-duplication of shared registered domains reduces actual runtime. "
+        "Consider splitting large batches if enrichment latency is a concern."
+    )
 
 
 def estimate_calls_for_item(input_type: InputType, use_domain_reports: bool) -> tuple[int, int]:
@@ -66,6 +91,12 @@ def estimate_job(
     Items must already be parsed and deduplicated (i.e., from parse_raw_input().accepted).
 
     No external calls, no job creation, no file writes.
+
+    Enrichment runtime (MDI-11A):
+      - Best case (min): 0 s — all items share the same registered domain (1 lookup).
+      - Worst case (max): N × 1.1 s — every item has a unique registered domain.
+      - Total min = VT min + enrichment min.
+      - Total max = VT max + enrichment max.
     """
     domain_report_mode_count = 0
     url_report_mode_count = 0
@@ -92,14 +123,18 @@ def estimate_job(
     vt_duration_min = max(0.0, (total_min - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
     vt_duration_max = max(0.0, (total_max - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
 
-    # MDI-11: each accepted item gets one RDAP lookup before VT.
-    # For paste input all items are non-held at estimate time (hold status is NOT_CHECKED).
-    # Conservative estimate: 1 lookup per item; de-duplication reduces real-world count.
+    # MDI-11A: RDAP enrichment time estimate (separate from VT time).
+    # Conservative: 1 lookup per item (real jobs de-duplicate by registered domain).
+    # Min = 0 (best case: all items share a registered domain → 1 lookup).
+    # Max = N × 1.1 s (worst case: every item is a unique registered domain).
     estimated_enrichment_lookups = len(items)
-    enrichment_seconds = estimated_enrichment_lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM
+    enrichment_duration_min = 0.0
+    enrichment_duration_max = estimated_enrichment_lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM
 
-    duration_min = vt_duration_min + enrichment_seconds
-    duration_max = vt_duration_max + enrichment_seconds
+    duration_min = vt_duration_min + enrichment_duration_min
+    duration_max = vt_duration_max + enrichment_duration_max
+
+    warning = _enrichment_warning(estimated_enrichment_lookups)
 
     return {
         "domain_count": domain_count,
@@ -109,9 +144,12 @@ def estimate_job(
         "estimated_vt_calls_min": total_min,
         "estimated_vt_calls_max": total_max,
         "estimated_enrichment_lookups": estimated_enrichment_lookups,
+        "estimated_enrichment_duration_seconds_min": enrichment_duration_min,
+        "estimated_enrichment_duration_seconds_max": enrichment_duration_max,
         "estimated_duration_seconds_min": duration_min,
         "estimated_duration_seconds_max": duration_max,
         "rate_limit_note": VT_RATE_LIMIT_NOTE,
         "job_state_note": JOB_STATE_NOTE,
         "enrichment_note": ENRICHMENT_NOTE,
+        "enrichment_warning": warning,
     }
