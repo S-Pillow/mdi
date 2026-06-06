@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+
+# Virtual environments
+venv/
+backend/venv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Vite build output
+frontend/dist/
+
+# Environment and secrets — never commit real values
+.env
+.env.*
+!.env.example
+
+# Backup files created by deploy scripts
+*.bak
+*.bak-*
+*.bak.*
+
+# Runtime data — never commit
+/var/lib/dns-tool/
+/var/lib/mdi/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
