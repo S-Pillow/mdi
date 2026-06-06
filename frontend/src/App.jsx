@@ -253,8 +253,8 @@ function rowTierClass(r) {
   return 'tier-none'
 }
 function triageColor(bucket) {
-  return { malicious: 'var(--danger)', suspicious: 'var(--warn)', held: '#818cf8',
-    clean: 'var(--ok)', error: 'var(--danger)', unresolvable: 'var(--text-muted)', pending: 'var(--text-dim)' }[bucket] ?? 'var(--text-muted)'
+  return { malicious: 'var(--risk-critical)', suspicious: 'var(--risk-medium)', held: '#C4B5FD',
+    clean: 'var(--risk-clean)', error: 'var(--risk-critical)', unresolvable: 'var(--text-muted)', pending: 'var(--text-faint)' }[bucket] ?? 'var(--text-muted)'
 }
 
 // Card definitions
@@ -286,37 +286,41 @@ const NAMED_FILTERS = [
 
 function QuotaNavWidget({ quota, loading, error }) {
   if (loading && !quota) {
-    return <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Checking quota…</span>
+    return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Checking quota…</span>
   }
   if (error && !quota) {
-    return <span style={{ fontSize: 11, color: 'var(--warn)' }} title={error}>⚠ Quota unavailable</span>
+    return <span style={{ fontSize: 11, color: 'var(--status-warning)' }} title={error}>⚠ Quota unavailable</span>
   }
   if (!quota) return null
 
-  const used = quota.daily_lookups_used ?? 0
-  const limit = quota.daily_limit ?? 500
+  const used      = quota.daily_lookups_used ?? 0
+  const limit     = quota.daily_limit ?? 500
   const remaining = quota.remaining ?? (limit - used)
-  const pct = Math.min(Math.round((used / limit) * 100), 100)
-  const barColor = remaining <= 0 ? 'var(--danger)' : remaining < 50 ? 'var(--warn)' : 'var(--ok)'
+  const pct       = Math.min(Math.round((used / limit) * 100), 100)
+  const barColor  = remaining <= 0 ? 'var(--risk-critical)' : remaining < 25 ? 'var(--risk-critical)' : remaining < 100 ? 'var(--risk-medium)' : 'var(--risk-clean)'
+  const valColor  = remaining <= 0 ? 'var(--risk-critical)' : remaining < 25 ? 'var(--risk-critical)' : remaining < 100 ? 'var(--risk-medium)' : 'var(--text-main)'
   const checkedStr = quota.checkedAt
     ? new Date(quota.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : null
 
   return (
     <div className="quota-nav-widget" title={`VT quota — shared by MDI and VT Bulk Check${checkedStr ? `. Last checked: ${checkedStr}` : ''}`}>
-      <span style={{ color: 'var(--text-dim)' }}>VT:</span>
-      <span style={{ color: remaining <= 0 ? 'var(--danger)' : 'var(--text)', fontFamily: 'monospace' }}>
-        {used}/{limit}
+      <span className="quota-label">VT Quota</span>
+      <span className="quota-value" style={{ color: valColor }}>
+        {used}<span style={{ color: 'var(--text-faint)' }}>/{limit}</span>
       </span>
       <div className="quota-bar-wrap">
         <div className="quota-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
       </div>
-      {remaining <= 0 && <span style={{ color: 'var(--danger)', fontWeight: 700 }}>EXHAUSTED</span>}
+      {remaining <= 0
+        ? <span style={{ color: 'var(--risk-critical)', fontWeight: 700, fontSize: 11 }}>EXHAUSTED</span>
+        : <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{remaining} left</span>
+      }
     </div>
   )
 }
 
-// ── Settings panel (collapsible inline) ───────────────────────────────────────
+// ── Settings panel (compact right-anchored dropdown) ──────────────────────────
 
 function CollapsibleSettingsPanel({
   open, id,
@@ -325,63 +329,83 @@ function CollapsibleSettingsPanel({
   locked,
 }) {
   if (!open) return null
-  const lockedStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
+  const ctrlLocked = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
 
   return (
     <div className="settings-panel" id={id} role="region" aria-label="MDI Settings">
-      <div className="settings-panel-inner">
+      <div className="settings-panel-header">
+        <span className="settings-panel-title">MDI Settings</span>
+        {locked && <span style={{ fontSize: 10, color: 'var(--status-warning)', fontStyle: 'italic' }}>Locked</span>}
+      </div>
+      <div className="settings-panel-body">
         {locked && (
-          <p className="settings-panel-locked-msg" style={{ width: '100%' }}>
+          <p className="settings-panel-locked-msg">
             Settings locked while a job is active or restored. Clear current results to change settings.
           </p>
         )}
 
-        {/* VT Report Mode */}
-        <div className="settings-panel-group" style={lockedStyle}>
-          <span className="settings-panel-label">VT Report Mode:</span>
-          <button
-            className="btn btn-ghost"
-            style={{ fontSize: 11, padding: '3px 10px' }}
-            onClick={() => setUseDomainReports(v => !v)}
-            disabled={locked}
-            title={locked ? 'Locked while job active' : 'Toggle between URL report and Domain report mode'}
-          >
-            {useDomainReports ? '⚙ Domain report' : '⚙ URL report'}
-          </button>
-          <span className="settings-panel-placeholder">
-            {useDomainReports ? '1 VT call/domain' : 'Up to 3 VT calls/domain — more detail'}
-          </span>
+        {/* Section: VT Processing */}
+        <div>
+          <p className="settings-section-label">VT Processing</p>
+          <div style={ctrlLocked}>
+            <div className="settings-row" style={{ marginTop: 8 }}>
+              <div className="settings-row-info">
+                <span className="settings-row-name">VT Report Mode</span>
+                <span className="settings-row-desc">
+                  {useDomainReports
+                    ? 'Domain report — 1 VT call per domain, less detail'
+                    : 'URL report (recommended) — up to 3 VT calls, better coverage'}
+                </span>
+              </div>
+              <div className="settings-row-ctrl" style={{ marginLeft: 12 }}>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}
+                  onClick={() => setUseDomainReports(v => !v)}
+                  disabled={locked}
+                  title={locked ? 'Settings locked while a job is active' : undefined}
+                >
+                  {useDomainReports ? 'Domain' : 'URL'}
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-row" style={{ marginTop: 10 }}>
+              <div className="settings-row-info">
+                <span className="settings-row-name">Stale threshold</span>
+                <span className="settings-row-desc">VT reports older than this are classified STALE. Default: 7 days.</span>
+              </div>
+              <div className="settings-row-ctrl" style={{ marginLeft: 12, gap: 6, display: 'flex', alignItems: 'center' }}>
+                <input
+                  type="number" min={1} max={90}
+                  value={staleThresholdDays}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10)
+                    if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
+                  }}
+                  disabled={locked}
+                  className="settings-number-input"
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>days</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="settings-panel-divider" />
-
-        {/* Stale threshold */}
-        <div className="settings-panel-group" style={lockedStyle}>
-          <span className="settings-panel-label">Stale after:</span>
-          <input
-            type="number" min={1} max={90}
-            value={staleThresholdDays}
-            onChange={e => {
-              const v = parseInt(e.target.value, 10)
-              if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
-            }}
-            disabled={locked}
-            style={{
-              width: 54, background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-              borderRadius: 4, color: 'var(--text)', padding: '3px 7px', fontSize: 12, textAlign: 'center',
-            }}
-          />
-          <span className="settings-panel-placeholder">days (1–90, default 7)</span>
-        </div>
-
-        <div className="settings-panel-divider" />
-
-        {/* Disabled placeholders */}
-        <div className="settings-panel-group">
-          <span className="settings-panel-label">Coming soon:</span>
-          <span className="btn-stub" title="Auto-rescan not yet available">↺ Auto-rescan stale</span>
-          <span className="btn-stub" title="URL activity check setting not yet available">🔗 URL activity check</span>
-          <span className="btn-stub" title="Export options available in MDI-16">↑ Export options</span>
+        {/* Section: Coming soon */}
+        <div>
+          <p className="settings-section-label">Coming soon</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+            <span className="settings-placeholder" title="Auto-rescan stale items — not yet available">
+              ↺ Auto-rescan stale items
+            </span>
+            <span className="settings-placeholder" title="URL activity check setting — not yet available">
+              🔗 URL activity check
+            </span>
+            <span className="settings-placeholder" title="Export options — available in MDI-16">
+              ↑ Export options (MDI-16)
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -674,7 +698,7 @@ function EstimateSection({ estimate, error, stale }) {
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {will_exceed_quota && (
-          <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger)', color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#FCA5A5', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span>⛔</span>
             <span>Worst-case estimate ({estimated_vt_calls_max} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission will be blocked.</span>
           </div>
@@ -712,9 +736,9 @@ function EstimateSection({ estimate, error, stale }) {
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}><strong style={{ color: 'var(--text-muted)' }}>Rate limit:</strong> {rate_limit_note}</p>
-          <p style={{ fontSize: 11, color: 'var(--warn)' }}><strong>Job state:</strong> {job_state_note}</p>
-          {live_check_note && <p style={{ fontSize: 11, color: 'var(--text-dim)' }}><strong style={{ color: 'var(--text-muted)' }}>Live checks:</strong> {live_check_note}</p>}
+          <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Rate limit:</strong> {rate_limit_note}</p>
+          <p style={{ fontSize: 11, color: 'var(--status-warning)' }}><strong>Job state:</strong> {job_state_note}</p>
+          {live_check_note && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Live checks:</strong> {live_check_note}</p>}
         </div>
       </div>
     </div>
@@ -736,6 +760,7 @@ function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
         return (
           <button
             key={card.key}
+            data-key={card.key}
             className={`triage-card${isActive ? ' active' : ''}${isMuted ? ' muted' : ''}`}
             style={{ borderLeftColor: card.color }}
             onClick={() => onFilterChange(isActive ? 'all' : card.filter)}
@@ -743,7 +768,7 @@ function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
             title={`Filter by: ${card.label} (${count} item${count !== 1 ? 's' : ''})`}
           >
             <span className="tc-label">{card.label}</span>
-            <span className="tc-count" style={{ color: count > 0 ? card.color : 'var(--text-dim)' }}>{count}</span>
+            <span className="tc-count" style={{ color: count > 0 ? card.color : 'var(--text-faint)' }}>{count}</span>
             <span className="tc-pct">{formatPercent(count, total)}</span>
           </button>
         )
@@ -857,10 +882,10 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll }) {
                     title="Selection reserved for future bulk actions"
                   />
                 </td>
-                <td style={{ color: 'var(--text-dim)', textAlign: 'center' }}>{r.position}</td>
+                <td style={{ color: 'var(--text-faint)', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.position}</td>
                 <td>
                   <code
-                    style={{ fontFamily: 'monospace', fontSize: 11, display: 'block', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}
+                    style={{ fontFamily: 'Menlo,Consolas,monospace', fontSize: 11, display: 'block', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-main)' }}
                     title={r.input_normalized}
                   >
                     {r.input_normalized}
@@ -887,7 +912,7 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll }) {
                 <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   {r.recommended_action ? r.recommended_action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'}
                 </td>
-                <td style={{ fontFamily: 'monospace', color: (r.vt_hits ?? 0) > 0 ? 'var(--danger)' : 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                <td style={{ fontFamily: 'Menlo,Consolas,monospace', color: (r.vt_hits ?? 0) > 0 ? '#FCA5A5' : 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                   {formatVtRatio(r)}
                 </td>
                 <td>
@@ -998,18 +1023,18 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
   const isComplete = job?.status === 'done' || job?.status === 'error'
   const isRunning  = job?.status === 'running' || job?.status === 'queued'
 
-  const statusColor = { queued: 'var(--text-muted)', running: 'var(--accent)', done: 'var(--ok)', error: 'var(--danger)' }[job?.status] ?? 'var(--text-muted)'
+  const statusColor = { queued: 'var(--text-muted)', running: 'var(--accent-blue)', done: 'var(--risk-clean)', error: 'var(--risk-critical)' }[job?.status] ?? 'var(--text-muted)'
 
   return (
     <div className="card">
       <div className="card-header" style={{ flexWrap: 'wrap' }}>
         <span className="card-label">Triage Results</span>
         {restoredFromSession && (
-          <span style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--risk-clean)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
             ↩ Restored from last session
             <button
               onClick={onDismissRestore}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 11, padding: '0 2px' }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 11, padding: '0 2px' }}
               title="Dismiss"
             >✕</button>
           </span>
@@ -1030,26 +1055,29 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
 
         {/* Progress bar */}
         {job && total > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-secondary)' }}>
               <span>
                 {isRunning ? `Processing… ${done} / ${total} complete` : `${done} / ${total} processed`}
               </span>
-              <span>{pct}%</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{pct}%</span>
             </div>
-            <div style={{ height: 5, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
-              <div style={{ height: '100%', borderRadius: 4, width: `${pct}%`, background: isComplete && job.status === 'error' ? 'var(--danger)' : isComplete ? 'var(--ok)' : 'var(--accent)', transition: 'width 0.4s ease' }} />
+            <div className="progress-track">
+              <div className="progress-fill" style={{
+                width: `${pct}%`,
+                background: isComplete && job.status === 'error' ? 'var(--risk-critical)' : isComplete ? 'var(--risk-clean)' : 'var(--accent-blue)'
+              }} />
             </div>
           </div>
         )}
 
         {/* Job settings summary */}
         {job && isComplete && (
-          <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span><strong style={{ color: 'var(--text-muted)' }}>Mode:</strong> {job.use_domain_reports ? 'Domain report' : 'URL report'}</span>
-            <span><strong style={{ color: 'var(--text-muted)' }}>Stale after:</strong> {job.stale_threshold_days ?? 7} days</span>
-            <span><strong style={{ color: 'var(--text-muted)' }}>VT calls used:</strong> {job.lookups_used ?? 0}</span>
-            {restoredFromSession && <span style={{ color: 'var(--ok)', fontStyle: 'italic' }}>↩ recovered</span>}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 12px', background: 'var(--bg-elevated)', borderRadius: 4, border: '1px solid var(--border-soft)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span><strong style={{ color: 'var(--text-secondary)' }}>Mode:</strong> {job.use_domain_reports ? 'Domain report' : 'URL report'}</span>
+            <span><strong style={{ color: 'var(--text-secondary)' }}>Stale after:</strong> {job.stale_threshold_days ?? 7} days</span>
+            <span><strong style={{ color: 'var(--text-secondary)' }}>VT calls used:</strong> {job.lookups_used ?? 0}</span>
+            {restoredFromSession && <span style={{ color: 'var(--risk-clean)', fontStyle: 'italic' }}>↩ recovered</span>}
           </div>
         )}
 
@@ -1064,12 +1092,12 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
             const anyRdap = rdap > 0
             if (!anyLive && !anyRdap) return null
             return (
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 20px' }}>
-                {anyRdap && <span>RDAP enriched: <strong style={{ color: 'var(--text-muted)' }}>{rdap}</strong></span>}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '6px 12px', background: 'var(--bg-elevated)', borderRadius: 4, border: '1px solid var(--border-soft)', display: 'flex', flexWrap: 'wrap', gap: '4px 20px' }}>
+                {anyRdap && <span>RDAP enriched: <strong style={{ color: 'var(--text-secondary)' }}>{rdap}</strong></span>}
                 {anyLive && <>
-                  <span>Live checks run: <strong style={{ color: lcc > 0 ? 'var(--accent)' : 'var(--text-dim)' }}>{lcc}</strong></span>
-                  <span>Live checks skipped: <strong style={{ color: 'var(--text-dim)' }}>{lcsk}</strong></span>
-                  {lce > 0 && <span>Live-check errors: <strong style={{ color: 'var(--warn)' }}>{lce}</strong></span>}
+                  <span>Live checks run: <strong style={{ color: lcc > 0 ? 'var(--status-info)' : 'var(--text-muted)' }}>{lcc}</strong></span>
+                  <span>Live checks skipped: <strong style={{ color: 'var(--text-muted)' }}>{lcsk}</strong></span>
+                  {lce > 0 && <span>Live-check errors: <strong style={{ color: 'var(--status-warning)' }}>{lce}</strong></span>}
                 </>}
               </div>
             )
@@ -1105,9 +1133,9 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
             <span>
               Showing <strong>{filteredResults.length}</strong>
               {activeFilter !== 'all' ? ` of ${allResults.length}` : ''} result{filteredResults.length !== 1 ? 's' : ''}
-              {activeFilter !== 'all' && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>— filtered by: {NAMED_FILTERS.find(f => f.key === activeFilter)?.label ?? activeFilter}</span>}
+              {activeFilter !== 'all' && <span style={{ color: 'var(--accent-blue)', marginLeft: 6 }}>— filtered by: {NAMED_FILTERS.find(f => f.key === activeFilter)?.label ?? activeFilter}</span>}
             </span>
-            <span style={{ color: 'var(--text-dim)' }}>Priority sorted · {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'no selection'}</span>
+            <span style={{ color: 'var(--text-faint)' }}>Priority sorted · {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'no selection'}</span>
           </div>
         )}
 
@@ -1367,11 +1395,11 @@ export default function App() {
           <span className="nav-subtitle">Malicious Domain Identifier</span>
         </div>
 
-        <div className="nav-center">
-          <QuotaNavWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
-        </div>
+        <div className="nav-spacer" />
 
-        <div className="nav-right">
+        <QuotaNavWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
+
+        <div className="nav-settings-anchor">
           <button
             className="settings-gear-btn"
             onClick={() => setSettingsOpen(v => !v)}
@@ -1381,19 +1409,17 @@ export default function App() {
           >
             <IconGear /> Settings
           </button>
+          <CollapsibleSettingsPanel
+            open={settingsOpen}
+            id={settingsPanelId}
+            useDomainReports={useDomainReports}
+            setUseDomainReports={setUseDomainReports}
+            staleThresholdDays={staleThresholdDays}
+            setStaleThresholdDays={setStaleThresholdDays}
+            locked={settingsLocked}
+          />
         </div>
       </nav>
-
-      {/* ── Collapsible settings panel ── */}
-      <CollapsibleSettingsPanel
-        open={settingsOpen}
-        id={settingsPanelId}
-        useDomainReports={useDomainReports}
-        setUseDomainReports={setUseDomainReports}
-        staleThresholdDays={staleThresholdDays}
-        setStaleThresholdDays={setStaleThresholdDays}
-        locked={settingsLocked}
-      />
 
       <main className="main">
         <div className="shell-notice">
@@ -1401,13 +1427,9 @@ export default function App() {
           MDI — VT core + RDAP/WHOIS enrichment + live checks + triage UI active.
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)' }}>
-            Malicious Domain Identifier
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            Triage domains using VirusTotal, age context, and live-site checks to quickly identify risky infrastructure.
-          </p>
+        <div className="page-heading">
+          <h1>Malicious Domain Identifier</h1>
+          <p>Triage domains using VirusTotal, age context, and live-site checks to quickly identify risky infrastructure.</p>
         </div>
 
         <InputSection
