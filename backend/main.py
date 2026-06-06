@@ -4,6 +4,8 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routers.mdi import router as mdi_router
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -13,8 +15,8 @@ logger = logging.getLogger("mdi")
 
 app = FastAPI(
     title="MDI — Malicious Domain Identifier API",
-    description="Shell only. Functionality not yet implemented.",
-    version="shell",
+    description="Standalone Forge Forward tool. See /api/mdi/health for status.",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -24,12 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/api/mdi/health", tags=["Health"])
-async def health():
-    """Service health check. Returns ok when the backend is running."""
-    return {"status": "ok", "service": "mdi", "version": "shell"}
-
+app.include_router(mdi_router)
 
 if __name__ == "__main__":
     import uvicorn
