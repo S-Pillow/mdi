@@ -313,25 +313,59 @@ function QuotaNavWidget({ quota, loading, error }) {
   )
 }
 
-// ── Settings panel (advanced — coming soon) ───────────────────────────────────
+// ── Settings panel ────────────────────────────────────────────────────────────
 
-function CollapsibleSettingsPanel({ open, id }) {
+function CollapsibleSettingsPanel({
+  open, id,
+  staleThresholdDays, setStaleThresholdDays,
+  locked,
+}) {
   if (!open) return null
+  const ctrlStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
   return (
-    <div className="settings-panel" id={id} role="region" aria-label="Advanced MDI Settings">
+    <div className="settings-panel" id={id} role="region" aria-label="MDI Settings">
       <div className="settings-panel-header">
-        <span className="settings-panel-title">Advanced Settings</span>
+        <span className="settings-panel-title">Settings</span>
+        {locked && <span style={{ fontSize: 9, color: 'var(--status-warning)' }}>Locked</span>}
       </div>
       <div className="settings-panel-body">
-        <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Processing options (VT report mode, stale threshold) are in the sidebar.
-        </p>
+        {locked && (
+          <p className="settings-panel-locked-msg">
+            Settings locked while a job is active or restored. Clear results to change settings.
+          </p>
+        )}
+
+        <div>
+          <p className="settings-section-label">VT Processing</p>
+          <div style={{ ...ctrlStyle, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>Stale threshold</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="number" min={1} max={90}
+                  value={staleThresholdDays}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10)
+                    if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
+                  }}
+                  disabled={locked}
+                  className="settings-number-input"
+                />
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>days</span>
+              </div>
+            </div>
+            <p style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4 }}>
+              VT reports older than this are classified Stale. Default: 7 days.
+            </p>
+          </div>
+        </div>
+
         <div>
           <p className="settings-section-label">Coming soon</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
             <span className="settings-placeholder" title="Auto-rescan stale items — not yet available">↺ Auto-rescan stale items</span>
             <span className="settings-placeholder" title="Export options — available in MDI-16">↑ Export options (MDI-16)</span>
-            <span className="settings-placeholder" title="Watchlist integration — future">☆ Watchlist integration</span>
+            <span className="settings-placeholder" title="URL activity check settings — future">🔗 URL activity check settings</span>
           </div>
         </div>
       </div>
@@ -626,11 +660,7 @@ function VtUsagePanel({ quota, quotaLoading, job }) {
 
 // ── Processing Options panel ──────────────────────────────────────────────────
 
-function ProcessingOptions({
-  useDomainReports, setUseDomainReports,
-  staleThresholdDays, setStaleThresholdDays,
-  locked,
-}) {
+function ProcessingOptions({ useDomainReports, setUseDomainReports, locked }) {
   const ctrlStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
 
   return (
@@ -642,7 +672,7 @@ function ProcessingOptions({
       <div className="proc-options-body">
         {locked && (
           <p className="proc-locked-note">
-            Settings locked while a job is active. Clear results to change.
+            Locked while a job is active. Clear results to change.
           </p>
         )}
         <div style={ctrlStyle}>
@@ -657,40 +687,24 @@ function ProcessingOptions({
             />
             <div className="proc-opt-info">
               <label htmlFor="opt-domain-reports" className="proc-opt-name" style={{ cursor: locked ? 'default' : 'pointer' }}>
-                Live-domain reports for bare domains
+                Domain reports for bare domains
               </label>
               <span className="proc-opt-desc">
-                When enabled, use the domain report instead of the URL report.
+                Use domain report instead of URL report when enabled.
               </span>
             </div>
           </div>
 
           <hr className="proc-divider" />
 
-          <div className="proc-threshold-row">
-            <div className="proc-threshold-info">
-              <span className="proc-threshold-name">Stale threshold</span>
-              <span className="proc-threshold-note">
-                Older than this = Stale
+          <div className="proc-opt-row" style={{ opacity: 0.75 }}>
+            <span style={{ width: 13, flexShrink: 0, color: 'var(--risk-clean)', fontSize: 11, fontWeight: 700, textAlign: 'center' }}>✓</span>
+            <div className="proc-opt-info">
+              <span className="proc-opt-name" style={{ color: 'var(--text-secondary)' }}>
+                Live checks: flagged items only
               </span>
+              <span className="proc-opt-desc">Reduces runtime. Always enabled.</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-              <input
-                type="number" min={1} max={90}
-                value={staleThresholdDays}
-                onChange={e => {
-                  const v = parseInt(e.target.value, 10)
-                  if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
-                }}
-                disabled={locked}
-                className="settings-number-input"
-              />
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>days</span>
-            </div>
-          </div>
-
-          <div style={{ fontSize: 9, color: 'var(--text-faint)', lineHeight: 1.4, paddingTop: 2 }}>
-            Newer than this = Recent · Live checks for flagged items only (reduces runtime)
           </div>
         </div>
       </div>
@@ -1442,14 +1456,13 @@ function DetailDrawer({ selectedItem: r, onClose }) {
           </div>
         )}
 
-        {/* 7. ACTIONS (disabled stubs) */}
+        {/* 7. ACTIONS — roadmap-approved stubs only */}
         <div className="detail-section">
           <div className="detail-section-label">7. Actions</div>
-          <div className="detail-actions-grid">
-            <button className="btn-stub" disabled title="Add to watchlist — coming soon">☆ Add to watchlist</button>
-            <button className="btn-stub" disabled title="Create block rule — coming soon">⊘ Create block rule</button>
-            <button className="btn-stub" disabled title="Export evidence — available in MDI-16">↑ Export evidence (JSON)</button>
-            <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VT</button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button className="btn-stub" disabled title="Export evidence — available in MDI-16">↑ Export evidence (JSON) — MDI-16</button>
+            <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VirusTotal</button>
+            <button className="btn-stub" disabled title="Request new scan — future rescan ticket">↺ Request new scan</button>
           </div>
         </div>
       </div>
@@ -1732,7 +1745,13 @@ export default function App() {
           >
             <IconGear /> Settings
           </button>
-          <CollapsibleSettingsPanel open={settingsOpen} id={settingsPanelId} />
+          <CollapsibleSettingsPanel
+            open={settingsOpen}
+            id={settingsPanelId}
+            staleThresholdDays={staleThresholdDays}
+            setStaleThresholdDays={setStaleThresholdDays}
+            locked={settingsLocked}
+          />
         </div>
       </nav>
 
@@ -1785,8 +1804,6 @@ export default function App() {
               <ProcessingOptions
                 useDomainReports={useDomainReports}
                 setUseDomainReports={setUseDomainReports}
-                staleThresholdDays={staleThresholdDays}
-                setStaleThresholdDays={setStaleThresholdDays}
                 locked={settingsLocked}
               />
             </div>
