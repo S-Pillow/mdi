@@ -393,6 +393,8 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             "evidence_status": dec.evidence_status,
             "triage_reason": dec.triage_reason,
             "errors": errors,
+            # MDI-14: persist engine-level detections (malicious/suspicious only)
+            "vt_engine_results": vt_result.engine_detections,
         })
         job.processed += 1
 
@@ -495,6 +497,9 @@ async def _live_check_items(job: job_store.InMemoryJob) -> None:
             "evidence_status": dec.evidence_status,
             "triage_reason": dec.triage_reason,
             "errors": updated_errors,
+            # MDI-14: propagate live-check HTTP details for drawer display
+            "http_status_code": lc_result.http_status_code,
+            "redirect_count": lc_result.redirect_count,
         })
 
 

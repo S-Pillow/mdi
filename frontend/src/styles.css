@@ -1195,6 +1195,83 @@ body {
   line-height: 1.4;
 }
 
+/* ── VT engine hit-details table (MDI-14) ──────────────────── */
+.detail-empty-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
+.vt-engine-table-wrap {
+  overflow-x: auto;
+  margin-top: 4px;
+}
+.vt-engine-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.vt-engine-table th {
+  text-align: left;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 3px 6px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.vt-engine-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  vertical-align: middle;
+  line-height: 1.35;
+}
+.vt-engine-table tr:last-child td { border-bottom: none; }
+
+.vt-eng-name {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 10px;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+.vt-eng-result {
+  color: var(--text-secondary);
+  font-size: 10px;
+  word-break: break-word;
+  max-width: 140px;
+}
+.vt-eng-method {
+  color: var(--text-faint);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Category badges for VT engine table */
+.vt-cat-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px 2px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.vt-cat-malicious {
+  background: rgba(239,68,68,0.18);
+  color: #FCA5A5;
+  border: 1px solid rgba(239,68,68,0.35);
+}
+.vt-cat-suspicious {
+  background: rgba(245,158,11,0.18);
+  color: #FCD34D;
+  border: 1px solid rgba(245,158,11,0.35);
+}
+
 /* Detail action buttons */
 .detail-actions-grid {
   display: grid;

@@ -452,3 +452,113 @@ def test_no_dns_calls_in_vt_service():
 
     # socket.getaddrinfo should NOT be called (all HTTP is mocked)
     assert dns_calls == [], f"Unexpected DNS resolution: {dns_calls}"
+
+
+# ── MDI-14: engine_detections in parse_vt_response ────────────────────────────
+
+def _vt_url_report_with_engines(
+    malicious: int = 0,
+    suspicious: int = 0,
+    harmless: int = 70,
+    last_analysis_date: int = None,
+    last_analysis_results: dict = None,
+) -> dict:
+    """Build a mock VT URL report that includes last_analysis_results."""
+    report = _vt_url_report(malicious=malicious, suspicious=suspicious,
+                            harmless=harmless, last_analysis_date=last_analysis_date)
+    if last_analysis_results is not None:
+        report["data"]["attributes"]["last_analysis_results"] = last_analysis_results
+    return report
+
+
+def test_parse_vt_response_malicious_engines_extracted():
+    """Malicious and suspicious engine entries are extracted; harmless are excluded."""
+    engines = {
+        "Kaspersky":    {"category": "malicious",  "result": "Trojan.GenAI",  "method": "blacklist", "engine_update": "20240101"},
+        "ESET-NOD32":   {"category": "suspicious", "result": "Suspicious",    "method": "heuristic", "engine_update": "20240102"},
+        "Google":       {"category": "harmless",   "result": "clean",         "method": "blacklist", "engine_update": "20240101"},
+        "Comodo":       {"category": "malicious",  "result": "Malware.Gen",   "method": "blacklist", "engine_update": "20240101"},
+    }
+    report = _vt_url_report_with_engines(malicious=2, suspicious=1, last_analysis_results=engines)
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert len(result.engine_detections) == 3
+    names = {d["engine_name"] for d in result.engine_detections}
+    assert "Kaspersky" in names
+    assert "ESET-NOD32" in names
+    assert "Comodo" in names
+    assert "Google" not in names
+
+    # Check field shape on one detection
+    kas = next(d for d in result.engine_detections if d["engine_name"] == "Kaspersky")
+    assert kas["category"] == "malicious"
+    assert kas["result"] == "Trojan.GenAI"
+    assert kas["method"] == "blacklist"
+    assert kas["engine_update"] == "20240101"
+
+
+def test_parse_vt_response_clean_produces_empty_engine_list():
+    """A fully clean VT response produces engine_detections == []."""
+    engines = {
+        "Google":    {"category": "harmless",   "result": "clean", "method": "blacklist"},
+        "Microsoft": {"category": "undetected", "result": None,    "method": "blacklist"},
+    }
+    report = _vt_url_report_with_engines(malicious=0, suspicious=0, last_analysis_results=engines)
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert result.engine_detections == []
+
+
+def test_parse_vt_response_missing_last_analysis_results():
+    """Missing last_analysis_results key produces engine_detections == []."""
+    report = _vt_url_report(malicious=1)
+    # Deliberately omit last_analysis_results
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert result.engine_detections == []
+
+
+def test_parse_vt_response_none_last_analysis_results():
+    """Explicit null last_analysis_results produces engine_detections == []."""
+    report = _vt_url_report(malicious=1)
+    report["data"]["attributes"]["last_analysis_results"] = None
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert result.engine_detections == []
+
+
+def test_parse_vt_response_engine_missing_fields():
+    """Engine entries missing result/method/engine_update fields are handled gracefully."""
+    engines = {
+        "MinimalEngine": {"category": "malicious"},  # only category, no other fields
+    }
+    report = _vt_url_report_with_engines(malicious=1, last_analysis_results=engines)
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert len(result.engine_detections) == 1
+    det = result.engine_detections[0]
+    assert det["engine_name"] == "MinimalEngine"
+    assert det["category"] == "malicious"
+    assert det["result"] is None
+    assert det["method"] is None
+    assert det["engine_update"] is None
+
+
+def test_parse_vt_response_non_dict_engine_value_skipped():
+    """Non-dict engine values (malformed response) are skipped without error."""
+    engines = {
+        "BadEngine": "this-is-not-a-dict",
+        "GoodEngine": {"category": "malicious", "result": "Malware"},
+    }
+    report = _vt_url_report_with_engines(malicious=1, last_analysis_results=engines)
+    result = parse_vt_response(report, VtModeUsed.URL_REPORT)
+
+    assert len(result.engine_detections) == 1
+    assert result.engine_detections[0]["engine_name"] == "GoodEngine"
+
+
+def test_parse_vt_response_engine_detections_default_empty():
+    """VtLookupResult.engine_detections defaults to [] when not supplied."""
+    vr = VtLookupResult()
+    assert vr.engine_detections == []
+    assert isinstance(vr.engine_detections, list)
