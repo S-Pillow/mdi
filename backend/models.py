@@ -57,6 +57,7 @@ class DomainStatusSource(str, Enum):
     """Which data source provided the EPP/hold status."""
     RDAP = "rdap"
     WHOIS = "whois"
+    UPLOADED_FILE = "uploaded_file"  # Status extracted from operator-provided CSV/XLSX
     UNKNOWN = "unknown"
     NOT_CHECKED = "not_checked"
 
@@ -502,6 +503,159 @@ class ParsePreviewResponse(BaseModel):
     quota_consumed: bool = Field(
         False,
         description="[audit] Always false — parse-preview does not consume VT quota."
+    )
+
+
+# ─── Upload-preview API models ────────────────────────────────────────────────
+
+
+class UploadedInputItem(BaseModel):
+    """
+    A single row extracted from a CSV or XLSX upload.
+
+    Extends the core input-item fields with upload-derived metadata.
+    Hold detection is performed offline against the uploaded EPP status column;
+    no external lookups are made to confirm hold status.
+    """
+    # Core input identity (mirrors MdiInputItem)
+    input_original: str = Field(
+        ..., description="[audit] Raw domain/URL value from the uploaded cell."
+    )
+    input_normalized: str = Field(
+        ..., description="[display, audit] Normalized form (via input_parser rules)."
+    )
+    input_type: InputType = Field(
+        ..., description="[workflow, filtering] domain or url."
+    )
+    position: int = Field(
+        ..., description="[display] 1-based row index in the file (after deduplication)."
+    )
+
+    # Upload-extracted fields (populated when column present)
+    created_at: Optional[str] = Field(
+        None, description="[display, filtering] Raw create-date string from upload."
+    )
+    registrar: Optional[str] = Field(
+        None, description="[display, reporting] Registrar from upload."
+    )
+    epp_status: List[str] = Field(
+        default_factory=list,
+        description="[display, reporting] EPP status values extracted from upload."
+    )
+    assigned_nameservers: List[str] = Field(
+        default_factory=list,
+        description="[display, future] Nameservers extracted from upload."
+    )
+
+    # Hold detection (offline, from uploaded EPP status)
+    domain_hold: DomainHold = Field(
+        default_factory=DomainHold,
+        description="[workflow, display] Hold status derived from uploaded EPP status."
+    )
+    domain_status_source: DomainStatusSource = Field(
+        DomainStatusSource.UPLOADED_FILE,
+        description="[audit] Always UPLOADED_FILE for upload-preview items."
+    )
+
+    # Derived from create date
+    age_bucket: AgeBucket = Field(
+        AgeBucket.UNKNOWN,
+        description="[display, filtering] Age band derived from uploaded create date."
+    )
+
+    # Preview triage fields — populated only for held items during upload-preview
+    triage_bucket: TriageBucket = Field(
+        TriageBucket.PENDING,
+        description="[display] Triage bucket; HELD for items with a detected hold."
+    )
+    recommended_action: RecommendedAction = Field(
+        RecommendedAction.NONE,
+        description="[display, workflow] SKIP for held items at upload-preview time."
+    )
+    triage_confidence: TriageConfidence = Field(
+        TriageConfidence.UNKNOWN,
+        description="[display] HIGH when hold status came from uploaded file."
+    )
+    evidence_status: EvidenceStatus = Field(
+        EvidenceStatus.NONE,
+        description="[audit] NONE for all upload-preview items (no checks run)."
+    )
+    vt_mode_used: VtModeUsed = Field(
+        VtModeUsed.NOT_CHECKED,
+        description="[audit] Always NOT_CHECKED or SKIPPED_HOLD at upload-preview time."
+    )
+    live_status: LiveStatus = Field(
+        LiveStatus.NOT_CHECKED,
+        description="[audit] Always NOT_CHECKED at upload-preview time."
+    )
+
+    # Row-level parse errors
+    errors: List[MdiError] = Field(
+        default_factory=list,
+        description="[display, audit] Errors encountered parsing this row."
+    )
+
+
+class ColumnsDetected(BaseModel):
+    """Which raw column header was matched for each canonical field."""
+    domain: Optional[str] = Field(
+        None, description="[display] Header matched as the domain/URL column."
+    )
+    created_at: Optional[str] = Field(
+        None, description="[display] Header matched as the create-date column."
+    )
+    epp_status: Optional[str] = Field(
+        None, description="[display] Header matched as the EPP/domain-status column."
+    )
+    registrar: Optional[str] = Field(
+        None, description="[display] Header matched as the registrar column."
+    )
+    nameservers: Optional[str] = Field(
+        None, description="[display] Header matched as the nameservers column."
+    )
+
+
+class UploadPreviewResponse(BaseModel):
+    """Response body for POST /api/mdi/jobs/upload-preview."""
+    accepted_count: int = Field(
+        ..., description="[display] Rows accepted as valid, non-duplicate input items."
+    )
+    rejected_count: int = Field(
+        ..., description="[display] Rows that could not be parsed."
+    )
+    duplicate_count: int = Field(
+        ..., description="[display] Rows whose normalized domain was already accepted."
+    )
+    held_count: int = Field(
+        ..., description="[display] Accepted rows with clientHold or serverHold detected."
+    )
+    items: List[UploadedInputItem] = Field(
+        ..., description="[display] Accepted items in first-seen order."
+    )
+    rejected: List[RejectedItemResponse] = Field(
+        ..., description="[display] Rejected rows with structured error details."
+    )
+    duplicates: List[DuplicateItemResponse] = Field(
+        ..., description="[display] Duplicate rows."
+    )
+    held_items: List[UploadedInputItem] = Field(
+        ..., description="[display] Subset of accepted items where domain_hold.has_hold is True."
+    )
+    columns_detected: ColumnsDetected = Field(
+        default_factory=ColumnsDetected,
+        description="[display] Column mapping used during parsing."
+    )
+    missing_optional_columns: List[str] = Field(
+        default_factory=list,
+        description="[display] Optional canonical fields with no matching column in the file."
+    )
+    external_calls_made: bool = Field(
+        False,
+        description="[audit] Always false — upload-preview never contacts external services."
+    )
+    quota_consumed: bool = Field(
+        False,
+        description="[audit] Always false — upload-preview does not consume VT quota."
     )
 
 

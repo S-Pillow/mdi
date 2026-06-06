@@ -2,9 +2,15 @@
 MDI API router — /api/mdi/* endpoints.
 
 MDI-03 endpoints:
-  GET /api/mdi/health          — service liveness check
-  GET /api/mdi/usage           — read shared VT quota state (read-only)
-  GET /api/mdi/schema-summary  — enum/field summary for development verification
+  GET /api/mdi/health              — service liveness check
+  GET /api/mdi/usage               — read shared VT quota state (read-only)
+  GET /api/mdi/schema-summary      — enum/field summary for development verification
+
+MDI-04 endpoints:
+  POST /api/mdi/jobs/parse-preview — parse raw pasted text, no external calls
+
+MDI-05 endpoints:
+  POST /api/mdi/jobs/upload-preview — parse CSV/XLSX upload with hold detection
 
 Future endpoints (not yet implemented):
   POST /api/mdi/jobs/submit
@@ -17,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 
 from models import (
     AgeBucket,
@@ -37,10 +43,12 @@ from models import (
     RejectedItemResponse,
     TriageBucket,
     TriageConfidence,
+    UploadPreviewResponse,
     VtModeUsed,
 )
 from services.vt_quota import get_usage_summary
 from services.input_parser import parse_raw_input
+from services.upload_parser import parse_upload
 
 router = APIRouter(prefix="/api/mdi")
 
@@ -121,6 +129,51 @@ async def parse_preview(req: ParsePreviewRequest) -> ParsePreviewResponse:
     )
 
 
+# ── Upload preview ─────────────────────────────────────────────────────────────
+
+@router.post("/jobs/upload-preview", tags=["Input"], response_model=UploadPreviewResponse)
+async def upload_preview(
+    file: UploadFile = File(..., description="CSV or XLSX file to parse."),
+    default_scheme: str = Form("http", pattern=r"^https?$"),
+    max_items: int = Form(500, ge=1, le=500),
+) -> UploadPreviewResponse:
+    """
+    Parse a CSV or XLSX file upload and return normalized items with hold detection.
+
+    Extracts domain, create date, EPP/domain status, registrar, and nameservers
+    when the corresponding columns are present.  clientHold and serverHold are
+    detected offline from the uploaded status column — no WHOIS/RDAP calls are made.
+
+    No external calls are made.  No VT, WHOIS, DNS, or URL activity lookups.
+    No quota is consumed.  No job is created.  Uploaded file bytes are not persisted.
+    """
+    file_bytes = await file.read()
+    filename = file.filename or "upload.csv"
+
+    result = parse_upload(
+        file_bytes,
+        filename,
+        default_scheme=default_scheme,
+        max_items=max_items,
+    )
+    held_items = [item for item in result.accepted if item.domain_hold.has_hold]
+
+    return UploadPreviewResponse(
+        accepted_count=len(result.accepted),
+        rejected_count=len(result.rejected),
+        duplicate_count=len(result.duplicates),
+        held_count=len(held_items),
+        items=result.accepted,
+        rejected=result.rejected,
+        duplicates=result.duplicates,
+        held_items=held_items,
+        columns_detected=result.columns_detected,
+        missing_optional_columns=result.missing_optional_columns,
+        external_calls_made=False,
+        quota_consumed=False,
+    )
+
+
 # ── Schema summary ─────────────────────────────────────────────────────────────
 
 def _enum_values(enum_cls: type) -> List[str]:
@@ -153,6 +206,13 @@ async def schema_summary() -> Dict[str, Any]:
         },
         "models": {
             "MdiJobOptions": list(MdiJobOptions.model_fields.keys()),
+            "UploadedInputItem_top_fields": [
+                "input_original", "input_normalized", "input_type", "position",
+                "created_at", "registrar", "epp_status", "assigned_nameservers",
+                "domain_hold", "domain_status_source", "age_bucket",
+                "triage_bucket", "recommended_action", "triage_confidence",
+                "evidence_status", "vt_mode_used", "live_status",
+            ],
             "MdiResultItem_top_fields": [
                 "input_original",
                 "input_normalized",

@@ -117,6 +117,65 @@ Purpose categories:
 
 ---
 
+---
+
+## Upload-preview fields (`UploadedInputItem`) — MDI-05
+
+Fields added when input comes from a CSV or XLSX upload rather than pasted text.
+The core identity fields (`input_original`, `input_normalized`, `input_type`, `position`)
+are identical to `MdiInputItem`.
+
+### Upload-extracted metadata
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `created_at` | `str \| null` | display, filtering | Raw create-date string from the uploaded cell. Not parsed to datetime here to preserve original value. |
+| `registrar` | `str \| null` | display, reporting | Registrar name from upload; never looked up externally. |
+| `epp_status` | `List[str]` | display, reporting | Individual EPP status tokens extracted from the status column. |
+| `assigned_nameservers` | `List[str]` | display, future | Nameservers from upload; lowercase and FQDN-dot-stripped. |
+
+### Hold detection fields (offline)
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `domain_hold` | `DomainHold` | workflow, display | Hold status derived purely from uploaded EPP status column. `has_hold=true` if `clientHold` or `serverHold` present. `source=uploaded_file`. `source=not_checked` if status column absent/blank. |
+| `domain_status_source` | `DomainStatusSource` | audit | Always `uploaded_file` for upload-preview items. Distinguishes from future RDAP/WHOIS results. |
+
+### Derived fields
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `age_bucket` | `AgeBucket` | display, filtering | Derived from uploaded `created_at` date. `unknown` when date is absent or unparseable. Bands: `very_new` (<30d), `new` (30–180d), `established` (180d–2yr), `mature` (>2yr). |
+
+### Preview triage fields (populated for held items only at upload-preview time)
+
+| Field | Type | Value for held item | Value for non-held item |
+|---|---|---|---|
+| `triage_bucket` | `TriageBucket` | `held` | `pending` |
+| `recommended_action` | `RecommendedAction` | `skip` | `none` |
+| `triage_confidence` | `TriageConfidence` | `high` (status from uploaded file) | `unknown` |
+| `evidence_status` | `EvidenceStatus` | `none` (no checks run) | `none` |
+| `vt_mode_used` | `VtModeUsed` | `skipped_hold` | `not_checked` |
+| `live_status` | `LiveStatus` | `not_checked` | `not_checked` |
+
+### Column detection (`ColumnsDetected`)
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `domain` | `str \| null` | display | Which raw column header was matched as the domain/URL column. |
+| `created_at` | `str \| null` | display | Which raw column header was matched as the create-date column. |
+| `epp_status` | `str \| null` | display | Which raw column header was matched as the EPP/domain-status column. |
+| `registrar` | `str \| null` | display | Which raw column header was matched as the registrar column. |
+| `nameservers` | `str \| null` | display | Which raw column header was matched as the nameservers column. |
+
+### Enum additions — MDI-05
+
+| Enum | New value | Purpose |
+|---|---|---|
+| `DomainStatusSource` | `uploaded_file` | Marks hold status as derived from operator-provided CSV/XLSX, not RDAP/WHOIS. |
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |

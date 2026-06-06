@@ -108,6 +108,27 @@ until a future column-addition ticket updates that exporter.
 
 ---
 
+## MDI-05 runtime file access summary
+
+| File | MDI-05 Access | Notes |
+|---|---|---|
+| `vt_usage.json` | **READ** | Via `GET /api/mdi/usage` only. `POST /api/mdi/jobs/upload-preview` does NOT read this file. |
+| `vt_usage_history.jsonl` | None | Not touched |
+| `vt_daily_history.json` | None | Not touched |
+| `vt_latest_job.json` | **NEVER** | MDI must never access this file |
+| `mdi_latest_job.json` | None | Does not exist yet |
+| `mdi_daily_history.json` | None | Does not exist yet |
+
+### MDI-05 upload-preview file guarantees
+
+- **No runtime files created** by `POST /api/mdi/jobs/upload-preview`.
+- **No runtime files modified** — `/var/lib/dns-tool/vt_usage.json` mtime is unchanged after any upload-preview call.
+- **Uploaded file bytes are not persisted** — file content is read from the HTTP request body, parsed, and discarded. No temporary files are written.
+- **No external calls made** — hold detection is purely offline string matching against the uploaded status column.
+- **No quota consumed** — `quota_consumed: false` in every upload-preview response.
+
+---
+
 ## MDI-03 runtime file access summary
 
 | File | MDI-03 Access | Notes |
