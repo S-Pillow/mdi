@@ -136,7 +136,8 @@ class RecommendedAction(str, Enum):
     TAKEDOWN = "takedown"
     MONITOR = "monitor"
     CLEAR = "clear"
-    SKIP = "skip"          # Hold-skipped; no action recommended
+    ACTION_ALREADY_TAKEN = "action_already_taken"  # Registry/registrar hold is the action; operator acknowledges
+    SKIP = "skip"          # Generic processing skip (non-hold)
     MANUAL_REVIEW = "manual_review"
     NONE = "none"
 
@@ -144,8 +145,9 @@ class RecommendedAction(str, Enum):
 class EvidenceStatus(str, Enum):
     """Whether evidence collection for this item is complete."""
     COMPLETE = "complete"
-    PARTIAL = "partial"    # Some checks ran but not all
-    NONE = "none"          # No checks ran (e.g. hold skip)
+    PARTIAL = "partial"          # Some checks ran but not all
+    SKIPPED_HOLD = "skipped_hold"  # Intentionally skipped — clientHold or serverHold detected
+    NONE = "none"                # No checks ran; not yet processed or pre-check error
 
 
 # ─── Item-level models ─────────────────────────────────────────────────────────

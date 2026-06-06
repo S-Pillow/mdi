@@ -151,10 +151,10 @@ are identical to `MdiInputItem`.
 
 | Field | Type | Value for held item | Value for non-held item |
 |---|---|---|---|
-| `triage_bucket` | `TriageBucket` | `held` | `pending` |
-| `recommended_action` | `RecommendedAction` | `skip` | `none` |
+| `triage_bucket` | `TriageBucket` | `held` ("Domain On Hold") | `pending` |
+| `recommended_action` | `RecommendedAction` | `action_already_taken` ("Action Already Taken" — registry hold is the action) | `none` |
 | `triage_confidence` | `TriageConfidence` | `high` (status from uploaded file) | `unknown` |
-| `evidence_status` | `EvidenceStatus` | `none` (no checks run) | `none` |
+| `evidence_status` | `EvidenceStatus` | `skipped_hold` ("Skipped — On Hold") | `none` |
 | `vt_mode_used` | `VtModeUsed` | `skipped_hold` | `not_checked` |
 | `live_status` | `LiveStatus` | `not_checked` | `not_checked` |
 
@@ -173,6 +173,8 @@ are identical to `MdiInputItem`.
 | Enum | New value | Purpose |
 |---|---|---|
 | `DomainStatusSource` | `uploaded_file` | Marks hold status as derived from operator-provided CSV/XLSX, not RDAP/WHOIS. |
+| `RecommendedAction` | `action_already_taken` | The registry hold IS the action; operator should acknowledge and close, not investigate. Distinct from `skip` (generic non-hold skip). |
+| `EvidenceStatus` | `skipped_hold` | Evidence collection was intentionally skipped because clientHold or serverHold was detected. Distinct from `none` (not yet processed / pre-check error). |
 
 ---
 

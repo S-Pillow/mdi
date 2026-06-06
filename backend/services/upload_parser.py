@@ -300,9 +300,9 @@ def _process_row(
     # ── Preview triage fields for held items ─────────────────────────────────
     if domain_hold.has_hold:
         triage_bucket      = TriageBucket.HELD
-        recommended_action = RecommendedAction.SKIP
+        recommended_action = RecommendedAction.ACTION_ALREADY_TAKEN
         triage_confidence  = TriageConfidence.HIGH
-        evidence_status    = EvidenceStatus.NONE
+        evidence_status    = EvidenceStatus.SKIPPED_HOLD
         vt_mode_used       = VtModeUsed.SKIPPED_HOLD
         live_status        = LiveStatus.NOT_CHECKED
     else:

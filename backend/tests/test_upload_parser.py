@@ -267,10 +267,15 @@ class TestUploadParserCSV:
     def test_triage_fields_held_item(self):
         data = FIXTURES / "sample_dns_form.csv"
         result = parse_upload(data.read_bytes(), "sample_dns_form.csv")
-        from models import TriageBucket, RecommendedAction, TriageConfidence, VtModeUsed
+        from models import (
+            EvidenceStatus, RecommendedAction, TriageBucket,
+            TriageConfidence, VtModeUsed,
+        )
         phishing = next(i for i in result.accepted if i.input_normalized == "phishing.net")
-        assert phishing.triage_bucket == TriageBucket.HELD
-        assert phishing.recommended_action == RecommendedAction.SKIP
+        # PRD contract: held items must map to "Domain On Hold / Action Already Taken / Skipped - On Hold"
+        assert phishing.triage_bucket == TriageBucket.HELD                         # Domain On Hold
+        assert phishing.recommended_action == RecommendedAction.ACTION_ALREADY_TAKEN  # Action Already Taken
+        assert phishing.evidence_status == EvidenceStatus.SKIPPED_HOLD             # Skipped - On Hold
         assert phishing.triage_confidence == TriageConfidence.HIGH
         assert phishing.vt_mode_used == VtModeUsed.SKIPPED_HOLD
 
