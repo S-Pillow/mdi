@@ -585,3 +585,168 @@ MDI-10 adds no new runtime files. No quota logic was changed. Only in-memory tri
 | Full VT engine list (default) | `vt_engine_results` is present but excluded from exports by default |
 | IP address of URL target | Not collected; SSRF safety layer blocks IP-targeted requests |
 | User agent sent during live check | Not logged; privacy |
+
+---
+
+## MDI-11 — WHOIS/RDAP Domain Enrichment
+
+### Overview
+
+MDI-11 adds a live RDAP/WHOIS enrichment pass that runs **before** VT processing
+for every accepted item. Enrichment populates fields that were previously only
+available from uploaded CSV/XLSX files. When live RDAP/WHOIS confirms a domain
+hold, VT is skipped entirely — preventing wasted quota on already-actioned domains.
+
+### New service: `backend/services/domain_enrichment.py`
+
+| Symbol | Role |
+|---|---|
+| `EnrichmentResult` | Dataclass with all enriched fields + `error` + `source` + `whois_fallback_used` |
+| `_rdap_request(url, client)` | Single mockable RDAP HTTP entry point |
+| `_whois_query_sync(domain)` | Single mockable blocking WHOIS entry point (run in executor) |
+| `extract_registered_domain(normalized, input_type)` | Extracts eTLD+1 from domain or URL input; returns None for IPs |
+| `enrich_domain(registered_domain)` | RDAP primary → WHOIS fallback; returns EnrichmentResult |
+| `_parse_rdap_response(data, domain)` | Extracts fields from RDAP JSON; feeds epp_status to hold_detection |
+| `_parse_whois_result(result_dict, domain)` | Extracts fields from normalized whois dict |
+
+### Shared utility: `backend/services/age_bucket.py`
+
+Moved from `upload_parser.py` to a shared module so both the upload path
+(offline, from CSV/XLSX) and the enrichment path (live, from RDAP/WHOIS) use
+identical age bucket rules.
+
+| Function | Description |
+|---|---|
+| `compute_age_bucket(d: date) → AgeBucket` | Maps registration date to VERY_NEW/NEW/ESTABLISHED/MATURE/UNKNOWN |
+| `parse_date_string(s: str) → Optional[date]` | Tries multiple date formats; returns None on failure |
+
+**Age bucket thresholds:**
+- `0–29 days` → `VERY_NEW`
+- `30–179 days` → `NEW`
+- `180–729 days` → `ESTABLISHED`
+- `≥ 730 days` → `MATURE`
+- future date or unparseable → `UNKNOWN`
+
+### RDAP/WHOIS lookup strategy
+
+1. **RDAP primary** — `GET https://rdap.org/domain/{registered_domain}`, timeout 10 s
+   - 200: parse → return
+   - 404: WHOIS fallback
+   - 429: retry once after 5 s → WHOIS fallback
+   - 5xx / timeout / network error: WHOIS fallback
+2. **WHOIS fallback** — blocking call in thread executor via `whois.query()`
+   - Failure: return `EnrichmentResult(error=MdiError(...))` with `source=UNKNOWN`
+3. Both fail: non-fatal error; item proceeds to VT with UNKNOWN fields
+
+### Field mapping
+
+| RDAP source | MDI field |
+|---|---|
+| `events[action=registration].eventDate` | `created_at` |
+| `entities[role=registrar].vcardArray.fn` | `registrar` |
+| `status[]` (stripped of ICANN URLs) | `epp_status` |
+| `nameservers[].ldhName` | `nameservers` |
+| epp_status → `hold_detection.detect_hold()` | `domain_hold` |
+| derived from `created_at.date()` | `age_bucket` |
+
+| WHOIS source | MDI field |
+|---|---|
+| `w.creation_date` | `created_at` |
+| `w.registrar` | `registrar` |
+| `w.status` (list) | `epp_status` |
+| `w.name_servers` | `nameservers` |
+
+### Uploaded-vs-live data reconciliation
+
+| Condition | Behavior |
+|---|---|
+| `domain_hold.source == UPLOADED_FILE` and `has_hold == True` | Skip RDAP/WHOIS entirely; preserve upload values |
+| `domain_hold.source == UPLOADED_FILE` and `has_hold == False` | RDAP/WHOIS fills missing fields; uploaded hold decision preserved |
+| `result.created_at` already set (from upload) | Not overwritten by RDAP |
+| `result.registrar` already set (from upload) | Not overwritten |
+| `result.age_bucket != UNKNOWN` (from upload) | Not overwritten |
+| `result.created_at is None` (raw-text input) | Populated from RDAP/WHOIS |
+| Enrichment both-fail error | Only error appended; data fields unchanged (item stays UNKNOWN) |
+
+### Hold detection and VT-skip rules (MDI-11 extension)
+
+Previous hold detection was upload-only (offline).
+MDI-11 adds live hold detection via RDAP/WHOIS:
+
+```
+Pre-enrichment pass (before _run_items):
+  if result.processing_status == HOLD_SKIPPED: skip enrichment (upload-confirmed)
+  if domain_hold.source == UPLOADED_FILE and has_hold: skip enrichment
+  else:
+    extract registered domain from normalized input
+    check per-job domain cache (enrich once per unique registered domain)
+    call enrich_domain(registered_domain)
+    merge enrichment fields into result
+    if enrichment.domain_hold.has_hold:
+      processing_status = HOLD_SKIPPED
+      call triage_rules.decide(domain_hold_has_hold=True)
+      increment held_skipped + hold_detected_by_enrichment_count
+      → VT is skipped for this item
+```
+
+### Age bucket activation for raw/pasted input
+
+Before MDI-11: `age_bucket = UNKNOWN` for all paste/text input.
+After MDI-11: `age_bucket` is populated from RDAP `created_at` for all
+paste/text inputs that successfully resolve via RDAP or WHOIS.
+
+This activates the "Flagged + Recent" triage rule in `triage_rules.py`:
+a freshly registered domain flagged by VT now routes to `REVIEW_FOR_ACTION`
+instead of the catch-all `VERIFY_INVESTIGATE`.
+
+### Estimate / runtime update (MDI-11 / MDI-11A)
+
+`EstimateResponse` now includes:
+
+| Field | Description |
+|---|---|
+| `estimated_enrichment_lookups` | 1 per accepted item (conservative; live jobs de-duplicate) |
+| `estimated_enrichment_duration_seconds_min` | 0 s (best case: all items share 1 registered domain) |
+| `estimated_enrichment_duration_seconds_max` | N × 1.1 s (worst case: all unique domains) |
+| `enrichment_note` | Informational text about RDAP/WHOIS overhead |
+| `enrichment_warning` | Non-empty for N > 100; warns about extended runtime (e.g. 9+ min for 500 domains) |
+
+**MDI-11A correction:** Timing was updated from 0.5 s/item (MDI-11 gate) to 1.1 s/item
+to match rdap.org's actual throttle budget (~10 req/10 s). `estimated_duration_seconds_min`
+now equals VT-min only (enrichment best-case = 0); `estimated_duration_seconds_max`
+includes the full N × 1.1 s enrichment overhead.
+
+**RDAP rate limiter (`_rdap_acquire_slot`):** A single mockable function enforces the
+1.1-second minimum gap before each RDAP request (both initial and retry). On HTTP 429,
+the `Retry-After` header is honoured if present and numeric (capped at 60 s); otherwise
+a 5-second default wait is applied before a single retry. If the retry still fails or
+returns 429, enrichment falls through to WHOIS or returns a structured error.
+
+> **Future improvement:** IANA bootstrap routing (`https://data.iana.org/rdap/`)
+> would direct queries to TLD-specific RDAP servers rather than rdap.org, avoiding
+> the shared rate limit for large batches. Deferred pending evidence that large-batch
+> enrichment is a recurring need.
+
+### Usage history metadata rule (strict)
+
+Enrichment adds **counts only** to `vt_usage_history.jsonl`. No raw domain names,
+registrar names, nameservers, or EPP status values are ever written.
+
+New count fields in history records:
+- `rdap_enriched_count` — items successfully enriched via RDAP or WHOIS
+- `rdap_failed_count` — items where both RDAP and WHOIS failed
+- `whois_fallback_count` — items where RDAP failed but WHOIS succeeded
+- `hold_detected_by_enrichment_count` — items where live RDAP/WHOIS found a hold
+- `enrichment_skipped_uploaded_hold_count` — items skipped because upload already confirmed hold
+
+### `mdi_latest_job.json` impact
+
+Jobs now include enriched fields (`created_at`, `age_bucket`, `registrar`,
+`epp_status`, `nameservers`, `domain_hold`) from RDAP/WHOIS. Recovery via
+`GET /api/mdi/jobs/latest` preserves and restores all enriched fields correctly.
+These are publicly available RDAP fields — no PII.
+
+### New dependencies
+
+- `tldextract==5.3.1` — registered domain extraction from URLs
+- `whois==1.20240129.2` — WHOIS fallback lookups

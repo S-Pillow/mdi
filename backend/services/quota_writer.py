@@ -181,11 +181,19 @@ def build_usage_history_record(
     held_skipped_count: int,
     processing_options_summary: Dict[str, Any],
     status: str,
+    *,
+    rdap_enriched_count: int = 0,
+    rdap_failed_count: int = 0,
+    whois_fallback_count: int = 0,
+    hold_detected_by_enrichment_count: int = 0,
+    enrichment_skipped_uploaded_hold_count: int = 0,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
 
-    MUST NOT contain raw domains, URLs, or individual result rows.
+    MUST NOT contain raw domains, URLs, registrar names, nameservers,
+    EPP status values, or individual result rows.
+    Only aggregate counts are permitted (MDI-11 enrichment counts included).
     """
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -200,4 +208,10 @@ def build_usage_history_record(
         "held_skipped_count": held_skipped_count,
         "processing_options_summary": processing_options_summary,
         "status": status,
+        # MDI-11 enrichment counts (metadata-only — no raw domain data)
+        "rdap_enriched_count": rdap_enriched_count,
+        "rdap_failed_count": rdap_failed_count,
+        "whois_fallback_count": whois_fallback_count,
+        "hold_detected_by_enrichment_count": hold_detected_by_enrichment_count,
+        "enrichment_skipped_uploaded_hold_count": enrichment_skipped_uploaded_hold_count,
     }

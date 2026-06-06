@@ -304,3 +304,109 @@ All MDI-06 tests use `tmp_path` for quota/history files:
 | `vt_latest_job.json` | **NEVER** | MDI must never access this file |
 | `mdi_latest_job.json` | None | Does not exist yet |
 | `mdi_daily_history.json` | None | Does not exist yet |
+
+---
+
+## MDI-11 — WHOIS/RDAP Enrichment Runtime Notes
+
+### New runtime files
+
+MDI-11 adds **no new runtime files**. RDAP and WHOIS results are held in memory
+only (per-job domain cache) and are never written to disk directly.
+
+### `mdi_latest_job.json` — enriched fields added
+
+After MDI-11, completed jobs stored in `mdi_latest_job.json` include all
+enrichment fields that were populated during RDAP/WHOIS lookup:
+
+```json
+{
+  "created_at": "1995-08-14T04:00:00+00:00",
+  "age_bucket": "mature",
+  "registrar": "IANA",
+  "epp_status": ["clientTransferProhibited", "clientUpdateProhibited"],
+  "nameservers": ["a.iana-servers.net", "b.iana-servers.net"],
+  "domain_hold": {
+    "has_hold": false,
+    "hold_types": ["none"],
+    "source": "rdap",
+    "raw_statuses": ["clientTransferProhibited", "clientUpdateProhibited"]
+  }
+}
+```
+
+These are publicly available RDAP fields — no PII. The file remains `0600`
+permissions and is excluded from git via `.gitignore`.
+
+### `vt_usage_history.jsonl` — enrichment counts added
+
+MDI-11 adds five new count fields to each history record. **No raw domain names,
+registrar names, nameservers, or EPP status strings are ever written** to this file.
+
+New count-only fields per record:
+- `rdap_enriched_count` — number of items enriched via RDAP or WHOIS
+- `rdap_failed_count` — number of items where both RDAP and WHOIS failed
+- `whois_fallback_count` — number of items where RDAP failed but WHOIS succeeded
+- `hold_detected_by_enrichment_count` — items where live hold caused VT skip
+- `enrichment_skipped_uploaded_hold_count` — items whose hold was already confirmed by upload
+
+### External services used during live job processing
+
+MDI-11 introduces two new external service dependencies for live job runs:
+
+| Service | URL | Purpose | Failure behavior |
+|---|---|---|---|
+| rdap.org | `https://rdap.org/domain/{domain}` | RDAP lookups | Non-fatal; WHOIS fallback |
+| WHOIS (system) | N/A (subprocess) | Fallback if RDAP fails | Non-fatal; item proceeds to VT |
+
+These services are used **only during `process_job()` execution** — not during:
+- `POST /api/mdi/jobs/estimate` (pure estimate, no enrichment)
+- `POST /api/mdi/jobs/submit` (job creation only; enrichment happens in background task)
+- `GET /api/mdi/jobs/{id}` (status polling)
+- `GET /api/mdi/jobs/latest` (recovery)
+- Any upload/preview endpoints
+
+### Rate limiting and timeout behavior (MDI-11A)
+
+**rdap.org** allows approximately 10 requests per 10 seconds (~1 req/s).
+MDI enforces a conservative **1.1-second minimum gap** between consecutive RDAP
+requests via `_rdap_acquire_slot()` in `domain_enrichment.py`.
+
+- RDAP rate limiter: `_RDAP_MIN_INTERVAL_SECONDS = 1.1 s` enforced before each request
+  (both initial and retry).
+- RDAP timeout: 10 seconds per request.
+- RDAP 429 handling:
+  - If a `Retry-After` header is present and numeric, wait that many seconds (capped at 60 s).
+  - If the header is absent or invalid, wait the default **5 seconds**.
+  - Retry **once only**. If the retry also fails or is rate-limited, fall through to WHOIS.
+- WHOIS: blocking I/O in thread executor; no explicit timeout (relies on OS).
+- Per-job domain cache: duplicate registered domains enriched once per job, avoiding
+  redundant RDAP calls.
+
+> **Future consideration:** IANA bootstrap routing (`https://data.iana.org/rdap/`)
+> could route queries to TLD-specific RDAP servers rather than rdap.org, which
+> would eliminate the shared rate limit for large batches. This is deferred to a
+> future deliverable if large-batch enrichment becomes common.
+
+### Estimate runtime impact (MDI-11A)
+
+`POST /api/mdi/jobs/estimate` returns separate enrichment duration fields:
+
+| Field | Description |
+|---|---|
+| `estimated_enrichment_lookups` | Conservative: 1 RDAP lookup per item |
+| `estimated_enrichment_duration_seconds_min` | Best case: 0 s (all items share 1 registered domain) |
+| `estimated_enrichment_duration_seconds_max` | Worst case: N × 1.1 s (all unique registered domains) |
+| `enrichment_note` | Informational note about RDAP throttle behavior |
+| `enrichment_warning` | Non-empty when N > 100; warns about extended enrichment time |
+
+`estimated_duration_seconds_min/max` represent the **total** (VT + enrichment):
+- `total_min = VT_min + 0`
+- `total_max = VT_max + (N × 1.1 s)`
+
+**Warning threshold:** For batches larger than 100 unique domains, the estimate
+includes an `enrichment_warning` describing the expected delay:
+> *Example for 500 unique domains: "RDAP enrichment may add up to 9.2 minutes …"*
+
+The per-job domain cache means real-world enrichment time is typically lower than
+the worst-case estimate.

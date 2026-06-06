@@ -5,6 +5,17 @@ Called via asyncio.create_task() from the submit endpoint, or called directly
 in tests with mocked VT and injected file paths.
 
 Processing flow for each eligible item:
+  0. Pre-enrichment pass (MDI-11): RDAP/WHOIS before VT.
+     a. Extract registered domain from each item's normalized input.
+     b. Check per-job domain cache — enrich once per unique registered domain.
+     c. Merge enrichment fields (created_at, age_bucket, registrar, epp_status,
+        nameservers, domain_hold) into the in-memory result.
+     d. If live enrichment confirms clientHold/serverHold:
+        - Mark item HOLD_SKIPPED.
+        - Run triage_rules.decide(domain_hold_has_hold=True).
+        - Increment held_skipped counter.
+        - Exclude from VT queue.
+     e. Enrichment failures are non-fatal: item proceeds to VT with UNKNOWN fields.
   1. Check mid-run remaining quota (soft check; race with VT Bulk Check is accepted MVP risk).
   2. Call vt_service.fetch_report() — all HTTP mocked in tests via _vt_request patch.
   3. Increment shared quota file by calls_made.
@@ -14,6 +25,7 @@ Processing flow for each eligible item:
 
 On completion, append a metadata-only record to the usage JSONL.
 Usage JSONL records NEVER contain raw domains, URLs, or item-level result data.
+Enrichment counts (rdap_enriched_count, etc.) are metadata-only — no raw values.
 """
 
 from __future__ import annotations
@@ -21,12 +33,13 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from models import (
     AgeBucket,
     DomainHold,
     DomainHoldType,
+    DomainStatusSource,
     InputType,
     LiveStatus,
     MdiError,
@@ -34,7 +47,15 @@ from models import (
     MdiResultItem,
     VtModeUsed,
 )
-from services import job_persistence, job_store, quota_writer, triage_rules, vt_service
+from services import (
+    domain_enrichment,
+    job_persistence,
+    job_store,
+    quota_writer,
+    triage_rules,
+    vt_service,
+)
+from services.domain_enrichment import EnrichmentResult
 
 logger = logging.getLogger("mdi.job_processor")
 
@@ -98,6 +119,8 @@ async def process_job(
     job.status = "running"
 
     try:
+        # MDI-11: enrich all items with RDAP/WHOIS before VT processing
+        await _enrich_items(job)
         await _run_items(job, usage_file=usage_file)
     except Exception as exc:  # noqa: BLE001
         logger.exception("process_job: unexpected error in job %s: %s", job_id, exc)
@@ -111,6 +134,161 @@ async def process_job(
         _write_history(job, history_file=history_file, daily_file=daily_file)
         await _write_persistence(job, job_file=job_file)
 
+
+# ── Pre-enrichment pass (MDI-11) ───────────────────────────────────────────────
+
+def _should_skip_enrichment(result: MdiResultItem) -> bool:
+    """
+    Return True if this item should skip RDAP/WHOIS enrichment.
+
+    Skip when the uploaded file already confirmed a hold — no need to re-check.
+    Items already HOLD_SKIPPED at submit time are also skipped.
+    """
+    if result.processing_status == MdiProcessingStatus.HOLD_SKIPPED:
+        return True
+    if (
+        result.domain_hold is not None
+        and result.domain_hold.source == DomainStatusSource.UPLOADED_FILE
+        and result.domain_hold.has_hold
+    ):
+        return True
+    return False
+
+
+def _merge_enrichment_into_result(
+    result: MdiResultItem,
+    enrichment: EnrichmentResult,
+) -> dict:
+    """
+    Build a model_copy update dict that merges enrichment fields into the result.
+
+    Precedence rules:
+      - Enrichment error (both RDAP and WHOIS failed): only the error is recorded;
+        no data fields are merged — item proceeds to VT with UNKNOWN enrichment fields.
+      - Uploaded confirmed hold (source=UPLOADED_FILE, has_hold=True): already
+        handled by _should_skip_enrichment — this function is not called.
+      - Existing non-None / non-default field: PRESERVE (do not overwrite).
+      - Field is None / empty / UNKNOWN: replace with enrichment value.
+
+    Returns an update dict suitable for result.model_copy(update=...).
+    """
+    updates: dict = {}
+
+    # If enrichment completely failed, only record the error — do not merge
+    # data fields. Item proceeds to VT with UNKNOWN age_bucket and no hold data.
+    if enrichment.error is not None and enrichment.source == DomainStatusSource.UNKNOWN:
+        existing_errors = list(result.errors or [])
+        existing_errors.append(enrichment.error)
+        updates["errors"] = existing_errors
+        return updates
+
+    # created_at: only set if currently None
+    if result.created_at is None and enrichment.created_at is not None:
+        updates["created_at"] = enrichment.created_at
+
+    # age_bucket: only set if currently UNKNOWN
+    if result.age_bucket == AgeBucket.UNKNOWN and enrichment.age_bucket != AgeBucket.UNKNOWN:
+        updates["age_bucket"] = enrichment.age_bucket
+
+    # registrar: only set if currently None
+    if result.registrar is None and enrichment.registrar:
+        updates["registrar"] = enrichment.registrar
+
+    # epp_status: only set if currently empty
+    if not result.epp_status and enrichment.epp_status:
+        updates["epp_status"] = enrichment.epp_status
+
+    # nameservers: only set if currently empty
+    if not result.nameservers and enrichment.nameservers:
+        updates["nameservers"] = enrichment.nameservers
+
+    # domain_hold: only set if not already from uploaded file
+    if (
+        result.domain_hold is None
+        or result.domain_hold.source == DomainStatusSource.NOT_CHECKED
+    ):
+        updates["domain_hold"] = enrichment.domain_hold
+
+    # Append enrichment errors (non-fatal) to existing error list
+    if enrichment.error is not None:
+        existing_errors = list(result.errors or [])
+        existing_errors.append(enrichment.error)
+        updates["errors"] = existing_errors
+
+    return updates
+
+
+async def _enrich_items(job: job_store.InMemoryJob) -> None:
+    """
+    Pre-enrichment pass: run RDAP/WHOIS for all eligible items before VT.
+
+    Uses a per-job registered-domain cache to avoid redundant lookups when
+    multiple items share the same registered domain (e.g., URL variants).
+
+    Updates job enrichment counters (counts only — no raw domain values are
+    stored in these counters or in the usage history record).
+    """
+    domain_cache: Dict[str, EnrichmentResult] = {}
+
+    for normalized in job.item_order:
+        result = job.results.get(normalized)
+        if result is None:
+            continue
+
+        # Uploaded confirmed hold — skip enrichment
+        if _should_skip_enrichment(result):
+            job.enrichment_skipped_uploaded_hold_count += 1
+            continue
+
+        # Extract registered domain (None for IPs and invalid inputs)
+        reg_domain = domain_enrichment.extract_registered_domain(
+            result.input_normalized, result.input_type
+        )
+        if reg_domain is None:
+            continue
+
+        # Per-job cache — enrich once per unique registered domain
+        if reg_domain in domain_cache:
+            enrichment = domain_cache[reg_domain]
+        else:
+            enrichment = await domain_enrichment.enrich_domain(reg_domain)
+            domain_cache[reg_domain] = enrichment
+
+        # Merge enrichment fields into result
+        updates = _merge_enrichment_into_result(result, enrichment)
+        if updates:
+            job.results[normalized] = result.model_copy(update=updates)
+            result = job.results[normalized]
+
+        # Track enrichment stats (counts only)
+        if enrichment.error is not None and not enrichment.whois_fallback_used:
+            job.rdap_failed_count += 1
+        elif enrichment.error is not None and enrichment.whois_fallback_used:
+            job.rdap_failed_count += 1
+        elif enrichment.whois_fallback_used:
+            job.whois_fallback_count += 1
+            job.rdap_enriched_count += 1
+        else:
+            job.rdap_enriched_count += 1
+
+        # If live enrichment confirms hold → mark HOLD_SKIPPED before VT
+        if result.domain_hold is not None and result.domain_hold.has_hold:
+            job.hold_detected_by_enrichment_count += 1
+            inp = triage_rules.TriageInput(domain_hold_has_hold=True)
+            dec = triage_rules.decide(inp)
+            job.results[normalized] = job.results[normalized].model_copy(update={
+                "processing_status": MdiProcessingStatus.HOLD_SKIPPED,
+                "vt_mode_used": VtModeUsed.SKIPPED_HOLD,
+                "triage_bucket": dec.triage_bucket,
+                "triage_confidence": dec.triage_confidence,
+                "recommended_action": dec.recommended_action,
+                "evidence_status": dec.evidence_status,
+                "triage_reason": dec.triage_reason,
+            })
+            job.held_skipped += 1
+
+
+# ── VT processing loop ────────────────────────────────────────────────────────
 
 async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) -> None:
     """Iterate eligible items and run VT checks."""
@@ -168,8 +346,11 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             except Exception as exc:
                 logger.error("Failed to increment quota for job %s: %s", job.job_id, exc)
 
-        # Build triage input from VT result + existing item fields (age, live status)
-        errors = [vt_result.error] if vt_result.error else []
+        # Build triage input from VT result + existing item fields (age, live status).
+        # Preserve any enrichment errors accumulated by the pre-enrichment pass.
+        vt_error = [vt_result.error] if vt_result.error else []
+        enrichment_errors = list(result.errors or [])
+        errors = enrichment_errors + vt_error
         processing_status = MdiProcessingStatus.ERROR if vt_result.error else MdiProcessingStatus.DONE
 
         inp = triage_rules.TriageInput(
@@ -179,8 +360,8 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             vt_suspicious=vt_result.vt_suspicious,
             vt_total_engines=vt_result.vt_total_engines,
             freshness=vt_result.freshness,
-            live_status=result.live_status,        # NOT_CHECKED until MDI-12
-            age_bucket=result.age_bucket,          # UNKNOWN for raw input until MDI-11
+            live_status=result.live_status,           # NOT_CHECKED until MDI-12
+            age_bucket=result.age_bucket,             # Populated by MDI-11 enrichment
             errors=errors,
             stale_threshold_days=job.stale_threshold_days,
         )
@@ -204,6 +385,8 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
         })
         job.processed += 1
 
+
+# ── Persistence helpers ────────────────────────────────────────────────────────
 
 async def _write_persistence(
     job: job_store.InMemoryJob,
@@ -250,6 +433,11 @@ def _write_history(
             "stale_threshold_days": job.stale_threshold_days,
         },
         status=job.status,
+        rdap_enriched_count=job.rdap_enriched_count,
+        rdap_failed_count=job.rdap_failed_count,
+        whois_fallback_count=job.whois_fallback_count,
+        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
+        enrichment_skipped_uploaded_hold_count=job.enrichment_skipped_uploaded_hold_count,
     )
     quota_writer.append_usage_history(record, history_file)
 
