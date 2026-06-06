@@ -410,3 +410,64 @@ includes an `enrichment_warning` describing the expected delay:
 
 The per-job domain cache means real-world enrichment time is typically lower than
 the worst-case estimate.
+
+---
+
+## MDI-12 — Live-Check Runtime Impact
+
+### No new runtime files
+
+MDI-12 adds no new files to `/var/lib/dns-tool/`.  The live-check results are
+held in memory on `InMemoryJob.results[...].live_status` and written to
+`mdi_latest_job.json` via the existing persistence path.
+
+### `mdi_latest_job.json` changes
+
+`MdiResultItem.live_status` is now populated for flagged/suspicious items.
+Recovery (`GET /api/mdi/jobs/latest`) restores `live_status` correctly.
+
+**Allowed `live_status` values in persisted JSON:**
+`active`, `redirect`, `forbidden`, `not_found`, `gone`, `timeout`,
+`dns_failure`, `connection_refused`, `blocked`, `server_error`, `unknown`,
+`not_checked`.
+
+### `vt_usage_history.jsonl` changes
+
+Three new aggregate-count fields are appended per job record:
+
+| Field | Description |
+|---|---|
+| `live_check_count` | Number of items that received a live check |
+| `live_check_skipped_count` | Number of items skipped by eligibility rules |
+| `live_check_error_count` | Number of items where live check returned an error |
+
+**Privacy guarantee — must not appear in history records:**
+- Submitted URLs, domains, or hostnames
+- Resolved IP addresses from DNS
+- Redirect chain URLs or hop counts per item
+- Final resolved URLs
+- `live_status` value per item
+- HTTP status codes per item
+- Live-check error messages per item
+
+All three new fields are metadata-only aggregate integers.
+
+### Live-check estimate fields
+
+Added to `EstimateResponse` (no runtime file interaction):
+
+| Field | Value |
+|---|---|
+| `estimated_live_check_count` | Always `0` — flagged count unknown before VT runs |
+| `live_check_note` | Explanatory string about conditional timing |
+
+Live-check duration is **not** added to `estimated_duration_seconds_min/max`
+because the number of flagged items is not known at estimate time.
+
+### External services contacted at runtime
+
+Live checks contact the target URL's server directly.  MDI-12 connects only
+to public internet hosts; SSRF protections block all internal/private targets.
+
+No new third-party APIs are added.  No credentials or tokens are required for
+live checks.  No results are sent to external services.

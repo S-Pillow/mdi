@@ -946,6 +946,23 @@ class EstimateResponse(BaseModel):
         ),
     )
 
+    # ── MDI-12 live-check estimate ─────────────────────────────────────────────
+    estimated_live_check_count: int = Field(
+        0,
+        description=(
+            "[display] MDI-12: always 0 at estimate time because the number of "
+            "flagged/suspicious items is not known until VT processing completes. "
+            "Live checks run conditionally after VT."
+        ),
+    )
+    live_check_note: str = Field(
+        "",
+        description=(
+            "[display] MDI-12: informational note about live-check behaviour "
+            "and conditional timing."
+        ),
+    )
+
     # ── Audit / safety flags ──────────────────────────────────────────────────
     external_calls_made: bool = Field(
         False,

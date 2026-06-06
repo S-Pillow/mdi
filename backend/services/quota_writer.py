@@ -187,13 +187,17 @@ def build_usage_history_record(
     whois_fallback_count: int = 0,
     hold_detected_by_enrichment_count: int = 0,
     enrichment_skipped_uploaded_hold_count: int = 0,
+    live_check_count: int = 0,
+    live_check_skipped_count: int = 0,
+    live_check_error_count: int = 0,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
 
     MUST NOT contain raw domains, URLs, registrar names, nameservers,
-    EPP status values, or individual result rows.
-    Only aggregate counts are permitted (MDI-11 enrichment counts included).
+    EPP status values, resolved IPs, redirect chains, or individual result rows.
+    Only aggregate counts are permitted (MDI-11 enrichment and MDI-12 live-check
+    counts included).
     """
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -214,4 +218,8 @@ def build_usage_history_record(
         "whois_fallback_count": whois_fallback_count,
         "hold_detected_by_enrichment_count": hold_detected_by_enrichment_count,
         "enrichment_skipped_uploaded_hold_count": enrichment_skipped_uploaded_hold_count,
+        # MDI-12 live-check counts (metadata-only — no URLs, IPs, or per-item results)
+        "live_check_count": live_check_count,
+        "live_check_skipped_count": live_check_skipped_count,
+        "live_check_error_count": live_check_error_count,
     }

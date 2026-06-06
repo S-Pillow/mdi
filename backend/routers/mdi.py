@@ -265,6 +265,8 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         job_state_note=est["job_state_note"],
         enrichment_note=est["enrichment_note"],
         enrichment_warning=est["enrichment_warning"],
+        estimated_live_check_count=est["estimated_live_check_count"],
+        live_check_note=est["live_check_note"],
         external_calls_made=False,
         quota_consumed=False,
         mutated=False,
