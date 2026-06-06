@@ -19,6 +19,9 @@ MDI-06 endpoints:
 MDI-07 endpoints:
   POST /api/mdi/jobs/estimate       — quota and runtime estimate preview; no VT calls, no job created
 
+MDI-08 endpoints:
+  GET  /api/mdi/jobs/latest         — recover latest completed job; reads mdi_latest_job.json if memory empty
+
 Future endpoints (not yet implemented):
   GET  /api/mdi/jobs/{job_id}/export
   POST /api/mdi/jobs/{job_id}/rescan
@@ -65,8 +68,11 @@ from models import (
 from services.vt_quota import get_usage_summary
 from services.input_parser import parse_raw_input
 from services.upload_parser import parse_upload
-from services.job_store import InMemoryJob, create_job, get_job
-from services import job_processor
+from services.job_store import (
+    InMemoryJob, create_job, get_job,
+    get_latest_completed_job_sync, register_recovered_job,
+)
+from services import job_persistence, job_processor
 from services.quota_writer import read_remaining_quota
 from services.estimate import estimate_job
 
@@ -414,6 +420,72 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         rejected_count=rejected_count,
         estimated_requests=estimated,
         quota_remaining_before=remaining,
+    )
+
+
+# ── Latest job recovery ────────────────────────────────────────────────────────
+
+@router.get("/jobs/latest", tags=["Jobs"], response_model=JobStatusResponse)
+async def latest_job() -> JobStatusResponse:
+    """
+    Return the latest completed or errored MDI job for page-refresh/restart recovery.
+
+    Lookup order:
+      1. In-memory store — if a completed/error job exists, return it directly.
+         No disk read needed while the same process is still running.
+      2. Disk — read /var/lib/dns-tool/mdi_latest_job.json (or MDI_LATEST_JOB_FILE).
+         If found: register the job back into the in-memory store so subsequent
+         GET /api/mdi/jobs/{job_id} calls also work.
+      3. Not found — HTTP 404.
+
+    Hard guarantees:
+      - No VT calls.
+      - No job creation.
+      - No quota consumed.
+      - No usage history appended.
+      - Corrupt or missing recovery file → 404, never a crash.
+    """
+    # 1. Check in-memory store first
+    job = get_latest_completed_job_sync()
+
+    # 2. Fall back to disk recovery
+    if job is None:
+        job = job_persistence.read_latest_job()
+        if job is not None:
+            register_recovered_job(job)
+
+    # 3. Nothing available
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No recovered job found. Submit a new job to begin.",
+        )
+
+    queued = sum(
+        1 for r in job.results.values()
+        if r.processing_status == MdiProcessingStatus.PENDING
+    )
+    results_ordered = [
+        job.results[k] for k in job.item_order if k in job.results
+    ]
+
+    return JobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        submitted_at=job.submitted_at,
+        completed_at=job.completed_at,
+        total=job.total,
+        processed=job.processed,
+        held_skipped=job.held_skipped,
+        rejected_count=job.rejected_count,
+        queued=queued,
+        estimated_requests=job.estimated_requests,
+        lookups_used=job.lookups_used,
+        quota_blocked_count=job.quota_blocked_count,
+        error_message=job.error_message,
+        use_domain_reports=job.use_domain_reports,
+        stale_threshold_days=job.stale_threshold_days,
+        results=results_ordered,
     )
 
 

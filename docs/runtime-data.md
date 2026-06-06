@@ -108,6 +108,89 @@ until a future column-addition ticket updates that exporter.
 
 ---
 
+## MDI-08 runtime file access summary
+
+### MDI-08 runtime behavior
+
+MDI-08 introduces disk persistence for the latest completed MDI job.
+
+| File | MDI-08 Access | Notes |
+|---|---|---|
+| `mdi_latest_job.json` | **NEW — READ + WRITE (atomic)** | Written after each job reaches `done` or `error` status. Read by `GET /api/mdi/jobs/latest` for recovery. |
+| `vt_usage.json` | **READ ONLY** (estimate/submit checks, unchanged) | Not touched by persistence layer. |
+| `vt_usage_history.jsonl` | **APPEND** (at job completion, MDI-06 behavior unchanged) | Not changed. Recovery does not add new records. |
+| `vt_daily_history.json` | **READ + WRITE** (at job completion, MDI-06 unchanged) | Not changed. |
+| `vt_latest_job.json` | **NEVER** | MDI hard rule, unchanged. |
+
+### `mdi_latest_job.json` — MDI latest job recovery file *(created in MDI-08)*
+
+| Field | Value |
+|---|---|
+| **Full path** | `/var/lib/dns-tool/mdi_latest_job.json` |
+| **Env var override** | `MDI_LATEST_JOB_FILE` |
+| **Format** | JSON: full MDI job snapshot (see below) |
+| **MDI reads** | Yes — `job_persistence.read_latest_job()` → `GET /api/mdi/jobs/latest` |
+| **MDI writes** | Yes — `job_persistence.write_latest_job()` after job completion. Atomic: `tmp → os.replace()` |
+| **Permissions** | `0o600` applied via `os.chmod()` after write |
+| **Owner** | root (since `mdi-backend` runs as root — deferred ops hardening) |
+| **Contains item data** | **Yes** — normalized domains/URLs and per-item VT results |
+| **Data sensitivity** | Operational threat-intel data, not PII. Private to MDI operator. |
+| **Retention** | Overwritten by each subsequent completed/error job. No TTL. |
+| **Source-control** | Excluded by `.gitignore` (`/var/lib/dns-tool/`) |
+| **Cleanup** | Manual only, with operator approval |
+| **Corrupt behavior** | `read_latest_job()` returns `None` → `GET /api/mdi/jobs/latest` returns 404. Backend never crashes. |
+| **Missing behavior** | Same as corrupt: `None` → 404. |
+| **Shared with** | Not shared. Private to MDI (`vt_latest_job.json` belongs exclusively to VT Bulk Check). |
+
+**Why full item-level data is allowed in this file:**
+
+This file is **not** the shared metadata-only history log (`vt_usage_history.jsonl`).
+It is a private, single-slot, operator-owned recovery file. The operator submitted the
+data; the operator is the only consumer of this recovery. The file is:
+- git-excluded
+- overwritten (not appended) on each completed job
+- not queryable as a historical domain database
+- not accessible to other tools
+
+### MDI-08 write sequence in `job_processor.py`
+
+1. Set `job.status = "done"` or `"error"`
+2. Set `job.completed_at`
+3. `_write_history()` — appends metadata-only record to `vt_usage_history.jsonl`
+4. `_write_persistence()` — atomically writes full job to `mdi_latest_job.json`
+
+Step 4 failure is logged and swallowed — the in-memory job remains valid for the
+current session even if disk persistence fails.
+
+### MDI-08 recovery flow
+
+On `mdi-backend` restart the in-memory store is empty.  The frontend calls
+`GET /api/mdi/jobs/latest` on mount:
+1. Backend checks in-memory store (empty after restart).
+2. Backend reads `mdi_latest_job.json`.
+3. Deserializes → registers job back into in-memory store.
+4. Returns `JobStatusResponse` to frontend.
+5. Frontend shows results with "↩ Restored from last session" notice.
+
+If `mdi_latest_job.json` is missing or corrupt: endpoint returns 404, frontend
+shows nothing on mount (silent).
+
+### MDI-08 known limitation
+
+If `mdi-backend` restarts while a job is still **running**, that in-flight job is
+lost.  `mdi_latest_job.json` retains the **previous** completed job (the in-progress
+job was never written to disk).  The previous completed job will be restored instead.
+This is a documented MDI-08 limitation; mid-job checkpoint writes are deferred.
+
+### MDI-08 test isolation
+
+All MDI-08 tests inject `tmp_path`-based paths via `MDI_LATEST_JOB_FILE` env var
+and the `job_file=tmp_path/...` parameter.  The live
+`/var/lib/dns-tool/mdi_latest_job.json` is **never created or modified** by any
+MDI-08 test.
+
+---
+
 ## MDI-07 runtime file access summary
 
 ### MDI-07 runtime behavior

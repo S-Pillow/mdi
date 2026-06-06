@@ -354,6 +354,64 @@ Runtime formula: `max(0, (calls - 1) × 15.0)` seconds per bound.
 
 ---
 
+## Job persistence and recovery fields (MDI-08)
+
+### `mdi_latest_job.json` — persisted field inventory
+
+The recovery file is a JSON serialization of `InMemoryJob`.  All fields are
+preserved for exact round-trip fidelity.
+
+| Field | Type | Persisted? | Purpose |
+|---|---|---|---|
+| `job_id` | `str` | Yes | UUID — preserved exactly; never regenerated on recovery |
+| `status` | `str` | Yes | `done` or `error` — only these values are persisted |
+| `submitted_at` | `float` | Yes | Unix timestamp; preserved for age display |
+| `completed_at` | `float` | Yes | Unix timestamp; preserved for display |
+| `total` | `int` | Yes | Total eligible VT-queue items |
+| `processed` | `int` | Yes | Items where VT attempt completed |
+| `held_skipped` | `int` | Yes | Items skipped due to hold |
+| `rejected_count` | `int` | Yes | Parse-time rejections |
+| `quota_blocked_count` | `int` | Yes | Items blocked by mid-run quota |
+| `estimated_requests` | `int` | Yes | Conservative pre-submit estimate |
+| `lookups_used` | `int` | Yes | Actual VT API calls consumed |
+| `use_domain_reports` | `bool` | Yes | Options snapshot |
+| `stale_threshold_days` | `int` | Yes | Options snapshot |
+| `error_message` | `str\|null` | Yes | Top-level job error if status=error |
+| `item_order` | `List[str]` | Yes | Stable display order (normalized keys) — **contains raw domains/URLs** |
+| `results` | `Dict[str, MdiResultItem]` | Yes | Per-item VT results — **keys and some fields contain raw domains/URLs** |
+| `usage_history_written` | `bool` | Yes | Dedup guard; prevents double-append if somehow called again |
+
+**Data sensitivity note:** `item_order` and `results` keys contain normalized
+domains/URLs (e.g., `"example.com"`, `"http://malicious.test/"`).  This is
+intentional and justified — see `runtime-data.md` §MDI-08 for the full rationale.
+This data never appears in `vt_usage_history.jsonl`.
+
+### Recovery endpoint fields
+
+`GET /api/mdi/jobs/latest` returns `JobStatusResponse` — the same model as
+`GET /api/mdi/jobs/{job_id}`.  No new response model is needed.
+
+### Frontend recovery state
+
+| State variable | Type | Purpose |
+|---|---|---|
+| `restoredFromSession` | `bool` | Set to `true` when `/api/mdi/jobs/latest` returns a job on mount. Controls "↩ Restored from last session" notice. |
+
+The notice is dismissible (user can click ✕).  It is automatically cleared when
+the user submits a new job via "Run MDI Check".
+
+### Recovery behavior matrix
+
+| Scenario | `GET /api/mdi/jobs/latest` | Frontend |
+|---|---|---|
+| Completed job in memory | Returns live in-memory job | Shows results, restored notice |
+| Backend restarted, file present | Reads disk, registers, returns job | Shows results, restored notice |
+| Backend restarted, file missing | HTTP 404 | Silent — no notice |
+| Backend restarted, file corrupt | HTTP 404 | Silent — no notice |
+| Job in-progress during restart | 404 or prior completed job | Shows prior job or nothing |
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |
