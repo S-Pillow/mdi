@@ -741,6 +741,26 @@ function triageColor(bucket) {
   return m[bucket] || 'var(--text)'
 }
 
+function confidenceColor(conf) {
+  const m = {
+    high: 'var(--ok)',
+    clean: 'var(--ok)',
+    medium: 'var(--warn)',
+    low: 'var(--danger)',
+    unknown: 'var(--text-dim)',
+  }
+  return m[conf] || 'var(--text-dim)'
+}
+
+function TriageReasonList({ reasons }) {
+  if (!reasons || reasons.length === 0) return null
+  return (
+    <ul style={{ margin: '4px 0 0 0', padding: '0 0 0 16px', fontSize: 12, color: 'var(--text-dim)' }}>
+      {reasons.map((r, i) => <li key={i} style={{ marginBottom: 2 }}>{r}</li>)}
+    </ul>
+  )
+}
+
 // ── Job section (VT job processing — early implementation) ────────────────────
 
 function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestore }) {
@@ -865,7 +885,7 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr>
-                  {['#', 'Input', 'Status', 'Bucket', 'VT Hits', 'Ratio', 'Freshness', 'Action', 'Evidence'].map(h => (
+                  {['#', 'Input', 'Status', 'Bucket / Reason', 'VT Hits', 'Ratio', 'Freshness', 'Action', 'Confidence', 'Evidence'].map(h => (
                     <th key={h} style={{
                       textAlign: 'left', padding: '6px 10px',
                       borderBottom: '1px solid var(--border)',
@@ -888,6 +908,9 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
                       <span style={{ fontWeight: 600, color: triageColor(r.triage_bucket), fontSize: 11, textTransform: 'uppercase' }}>
                         {r.triage_bucket}
                       </span>
+                      {Array.isArray(r.triage_reason) && r.triage_reason.length > 0 && (
+                        <TriageReasonList reasons={r.triage_reason} />
+                      )}
                     </td>
                     <td style={{ padding: '5px 10px', textAlign: 'center', color: (r.vt_hits ?? 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
                       {r.vt_hits ?? '—'}
@@ -900,6 +923,9 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
                     </td>
                     <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
                       {r.recommended_action ?? '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontSize: 11, color: confidenceColor(r.triage_confidence) }}>
+                      {r.triage_confidence ?? '—'}
                     </td>
                     <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
                       {r.evidence_status ?? '—'}
