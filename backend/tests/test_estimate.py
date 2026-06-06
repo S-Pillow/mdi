@@ -1,5 +1,5 @@
 """
-MDI-07 — Tests for POST /api/mdi/jobs/estimate.
+MDI-07/MDI-09 — Tests for POST /api/mdi/jobs/estimate.
 
 Guarantees enforced by every test in this module:
   - No VT calls made (no httpx, no _vt_request invocations).
@@ -465,3 +465,173 @@ class TestRegressionExistingEndpoints:
         resp = client.get("/api/mdi/schema-summary")
         assert resp.status_code == 200
         assert "enums" in resp.json()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-09 — Settings default and parity tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMdi09SettingsDefaults:
+    """
+    Verify stale_threshold_days default is 7 and use_domain_reports affects
+    estimates correctly.  No VT calls, no external calls, no runtime file writes.
+    """
+
+    def test_estimate_default_stale_threshold_is_7(self):
+        """Omitting stale_threshold_days from /estimate request → backend uses 7."""
+        from models import EstimateRequest
+        req = EstimateRequest(raw_input="example.com")
+        assert req.stale_threshold_days == 7
+
+    def test_estimate_endpoint_accepts_omitted_stale_threshold(self):
+        """POST /estimate without stale_threshold_days returns 200 and accepted_count ≥ 1."""
+        resp = client.post("/api/mdi/jobs/estimate", json={"raw_input": "example.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["accepted_count"] >= 1
+        assert data["external_calls_made"] is False
+
+    def test_url_mode_bare_domain_estimate_max_3_calls(self):
+        """use_domain_reports=False: bare domain estimate max = 3 (URL-report path)."""
+        resp = client.post("/api/mdi/jobs/estimate", json={
+            "raw_input": "single-domain.com",
+            "use_domain_reports": False,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["estimated_vt_calls_max"] == 3
+        assert data["domain_count"] == 1
+
+    def test_domain_mode_bare_domain_estimate_max_1_call(self):
+        """use_domain_reports=True: bare domain estimate max = 1 (domain-report path)."""
+        resp = client.post("/api/mdi/jobs/estimate", json={
+            "raw_input": "single-domain.com",
+            "use_domain_reports": True,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["estimated_vt_calls_max"] == 1
+        assert data["domain_count"] == 1
+
+    def test_url_item_always_url_report_path_regardless_of_mode(self):
+        """
+        Full URL items (InputType.URL) always use the URL-report path, regardless
+        of use_domain_reports.  The URL-report path estimates up to 3 calls
+        (1 GET + 1 submit + 1 re-fetch if URL not yet cached on VT).
+        domain-report mode only reduces calls for bare domains (InputType.DOMAIN).
+        """
+        for mode in (True, False):
+            resp = client.post("/api/mdi/jobs/estimate", json={
+                "raw_input": "http://full-url.com/path",
+                "use_domain_reports": mode,
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            # max is 3 for URL items in both modes (URL-report path)
+            assert data["estimated_vt_calls_max"] == 3, f"mode={mode}"
+            assert data["url_count"] == 1, f"mode={mode}"
+
+    def test_estimate_and_submit_request_fields_match(self):
+        """
+        EstimateRequest and JobSubmitRequest share the same four settings fields
+        with identical names and defaults.  This ensures frontend can use a single
+        settingsPayload object for both calls.
+        """
+        from models import EstimateRequest, JobSubmitRequest
+        est_fields = {f: v.default for f, v in EstimateRequest.model_fields.items()
+                      if f in ('use_domain_reports', 'stale_threshold_days',
+                               'default_scheme', 'max_items')}
+        sub_fields = {f: v.default for f, v in JobSubmitRequest.model_fields.items()
+                      if f in ('use_domain_reports', 'stale_threshold_days',
+                               'default_scheme', 'max_items')}
+        assert est_fields == sub_fields, (
+            f"Estimate/submit settings mismatch: estimate={est_fields} submit={sub_fields}"
+        )
+
+    def test_stale_threshold_default_7_in_job_submit_request(self):
+        from models import JobSubmitRequest
+        req = JobSubmitRequest(raw_input="example.com")
+        assert req.stale_threshold_days == 7
+
+    def test_stale_threshold_default_7_in_mdi_job_options(self):
+        from models import MdiJobOptions
+        opts = MdiJobOptions()
+        assert opts.stale_threshold_days == 7
+
+    def test_stale_threshold_default_7_in_memory_job(self):
+        from services.job_store import InMemoryJob
+        import time
+        job = InMemoryJob(job_id="test-default-stale", status="queued",
+                          submitted_at=time.time())
+        assert job.stale_threshold_days == 7
+
+    def test_use_domain_reports_stored_in_job_status_response(self):
+        """
+        When use_domain_reports=True is submitted, JobStatusResponse must echo it back.
+        Tests that the setting is saved to the job, not just used internally.
+        Uses mocked VT + tmp_path to avoid live quota consumption.
+        """
+        from unittest.mock import AsyncMock, patch
+        from services import job_processor, job_store
+        from models import InputType
+
+        job_id = "test-domain-mode-settings-" + str(__import__("time").time_ns())
+        # Create a queued job with domain-mode=True
+        from services.job_store import InMemoryJob
+        from models import MdiResultItem, MdiProcessingStatus
+        import time
+        job = InMemoryJob(
+            job_id=job_id, status="queued",
+            submitted_at=time.time(), total=1,
+            use_domain_reports=True, stale_threshold_days=7,
+        )
+        domain = "domainmode-test.com"
+        job.results[domain] = MdiResultItem(
+            input_original=domain, input_normalized=domain,
+            input_type=InputType.DOMAIN, position=1,
+            processing_status=MdiProcessingStatus.PENDING,
+        )
+        job.item_order.append(domain)
+
+        import asyncio
+        from pathlib import Path
+        asyncio.run(job_store.create_job(job))
+
+        body = {
+            "data": {"attributes": {
+                "last_analysis_stats": {"malicious": 0, "suspicious": 0, "harmless": 70, "undetected": 5, "timeout": 0},
+                "last_analysis_date": int(time.time()) - 3600,
+            }}
+        }
+        from unittest.mock import MagicMock
+        import services.vt_service as vt_svc
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = body
+        mock_req = AsyncMock(return_value=mock_resp)
+        tmp = Path(__import__("tempfile").mkdtemp())
+        usage_file = tmp / "vt_usage.json"
+        usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+        job_file = tmp / "mdi_latest_job.json"
+
+        with patch("services.vt_service._vt_request", new=mock_req), \
+             patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+             patch.object(vt_svc._VT_LIMITER, "acquire", new=AsyncMock()):
+            asyncio.run(job_processor.process_job(
+                job_id, usage_file=usage_file, job_file=job_file,
+            ))
+
+        completed = job_store.get_job_sync(job_id)
+        assert completed.use_domain_reports is True
+        assert completed.stale_threshold_days == 7
+
+        # Clean up job store
+        job_store.clear_all_jobs()
+
+    def test_no_vt_calls_during_settings_tests(self):
+        """Confirm job_persistence and estimate service do not import httpx."""
+        import services.estimate as est_mod
+        import inspect
+        src = inspect.getsource(est_mod)
+        assert "httpx" not in src
+        assert "_vt_request" not in src

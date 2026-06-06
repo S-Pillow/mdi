@@ -373,7 +373,7 @@ class MdiJobOptions(BaseModel):
         description="[workflow] Run WHOIS/RDAP lookup for each item."
     )
     stale_threshold_days: int = Field(
-        5,
+        7,
         ge=1,
         le=90,
         description="[workflow] Reports older than this many days are classified as stale."
@@ -684,7 +684,7 @@ class JobSubmitRequest(BaseModel):
         description="[workflow] Use VT domain reports for bare domains.",
     )
     stale_threshold_days: int = Field(
-        5, ge=1, le=90,
+        7, ge=1, le=90,
         description="[workflow] Reports older than this many days are STALE.",
     )
 
@@ -749,7 +749,7 @@ class EstimateRequest(BaseModel):
         ),
     )
     stale_threshold_days: int = Field(
-        5,
+        7,
         ge=1,
         le=90,
         description="[workflow] Informational only for estimate; affects VT freshness at job time.",

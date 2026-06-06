@@ -41,7 +41,7 @@ class InMemoryJob:
     estimated_requests: int = 0       # pre-submit conservative estimate
     lookups_used: int = 0             # actual VT API calls consumed
     use_domain_reports: bool = False
-    stale_threshold_days: int = 5
+    stale_threshold_days: int = 7
     error_message: Optional[str] = None
     item_order: List[str] = field(default_factory=list)  # input_normalized, in submission order
     results: Dict[str, MdiResultItem] = field(default_factory=dict)

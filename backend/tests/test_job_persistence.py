@@ -69,7 +69,7 @@ def _make_done_job(job_id: str = "test-job-001", domain: str = "example.com") ->
         estimated_requests=3,
         lookups_used=1,
         use_domain_reports=False,
-        stale_threshold_days=5,
+        stale_threshold_days=7,
     )
     job.item_order = [domain]
     job.results = {domain: result}
