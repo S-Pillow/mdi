@@ -816,6 +816,11 @@ body {
   opacity: 0.4; cursor: not-allowed;
 }
 
+/* ── Spinner animation ───────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
   .main { padding: 14px 16px 48px; }

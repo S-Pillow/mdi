@@ -412,50 +412,128 @@ function CollapsibleSettingsPanel({
   )
 }
 
+// ── Inline validation summary (rendered inside InputSection) ──────────────────
+
+function ValidationSummary({ validating, preview, previewError, onRefresh }) {
+  const [showRejected, setShowRejected] = useState(false)
+  const [showDupes, setShowDupes]       = useState(false)
+
+  if (validating) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block', fontSize: 12 }}>↻</span>
+        Validating input…
+      </div>
+    )
+  }
+  if (previewError) {
+    return (
+      <div style={{ fontSize: 11, color: 'var(--risk-critical)', padding: '6px 0' }}>
+        Validation error: {previewError}
+        <button className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 8px', marginLeft: 8 }} onClick={onRefresh}>Retry</button>
+      </div>
+    )
+  }
+  if (!preview) return null
+
+  const accepted = preview.accepted_count ?? 0
+  const rejected = preview.rejected_count ?? 0
+  const dupes    = preview.duplicate_count ?? 0
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* Compact counts row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
+        <span style={{ color: accepted > 0 ? 'var(--risk-clean)' : 'var(--text-muted)', fontWeight: accepted > 0 ? 700 : 400 }}>
+          ✓ {accepted} accepted
+        </span>
+        {rejected > 0 && (
+          <span style={{ color: 'var(--risk-critical)', fontWeight: 600 }}>
+            ✗ {rejected} rejected
+          </span>
+        )}
+        {dupes > 0 && (
+          <span style={{ color: 'var(--risk-medium)' }}>
+            ⊘ {dupes} duplicate{dupes !== 1 ? 's' : ''} removed
+          </span>
+        )}
+        {/* Expandable toggles */}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {rejected > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => setShowRejected(v => !v)}>
+              {showRejected ? 'Hide' : 'Show'} rejected
+            </button>
+          )}
+          {dupes > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => setShowDupes(v => !v)}>
+              {showDupes ? 'Hide' : 'Show'} dupes
+            </button>
+          )}
+        </span>
+      </div>
+      {/* Rejected details */}
+      {showRejected && preview.rejected?.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', maxHeight: 100, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
+          {preview.rejected.map((r, i) => (
+            <div key={i}><code style={{ color: 'var(--risk-critical)', fontFamily: 'Menlo,Consolas,monospace' }}>{r.original}</code> — {r.reason}</div>
+          ))}
+        </div>
+      )}
+      {/* Duplicate details */}
+      {showDupes && preview.duplicates?.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 70, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
+          {preview.duplicates.map((d, i) => <div key={i}><code style={{ fontFamily: 'Menlo,Consolas,monospace' }}>{d}</code></div>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Input section ─────────────────────────────────────────────────────────────
 
 function InputSection({
-  rawInput, setRawInput, onPreview, previewing, onClear,
+  rawInput, setRawInput,
+  validating, preview, previewError, onRefreshValidation,
+  onClear,
   fileRef, selectedFile, onFileChange, onUploadPreview, uploadPreviewing,
   onRunJob, submitting, canRunJob,
   onEstimate, estimating,
 }) {
+  const hasInput = rawInput.trim().length > 0
+
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-label">Input</span>
-        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           Paste domains/URLs or upload CSV/XLSX · up to 500 items
         </span>
       </div>
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div>
+
+        {/* ── Paste area ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <textarea
             className="input-area"
             value={rawInput}
             onChange={e => setRawInput(e.target.value)}
-            placeholder="One per line, comma-separated, or space-separated."
+            placeholder="Paste domains or URLs — one per line, comma-separated, or space-separated."
             spellCheck={false}
             autoComplete="off"
           />
-          <div className="input-row">
-            <button className="btn btn-primary" onClick={onPreview} disabled={previewing || !rawInput.trim()}>
-              <IconEye /> {previewing ? 'Parsing…' : 'Parse Preview'}
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={onEstimate}
-              disabled={estimating || !rawInput.trim()}
-            >
-              <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate'}
-            </button>
-            <button className="btn btn-ghost" onClick={onClear} disabled={!rawInput.trim() && !previewing}>
-              Clear
-            </button>
-          </div>
+          {/* Inline auto-validation summary */}
+          {hasInput && (
+            <ValidationSummary
+              validating={validating}
+              preview={preview}
+              previewError={previewError}
+              onRefresh={onRefreshValidation}
+            />
+          )}
         </div>
 
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        {/* ── Upload area ── */}
+        <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 12 }}>
           <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
             Or upload a CSV or XLSX file (Domain / DNS Form column required)
           </p>
@@ -465,106 +543,75 @@ function InputSection({
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm" style={{ display: 'none' }} onChange={onFileChange} />
             </label>
             {selectedFile && (
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedFile.name}
               </span>
             )}
-            <button className="btn btn-primary" onClick={onUploadPreview} disabled={uploadPreviewing || !selectedFile}>
-              <IconUpload /> {uploadPreviewing ? 'Parsing…' : 'Upload Preview'}
+            <button className="btn btn-ghost" onClick={onUploadPreview} disabled={uploadPreviewing || !selectedFile} style={{ fontSize: 11 }}>
+              <IconUpload /> {uploadPreviewing ? 'Validating…' : 'Validate Upload'}
             </button>
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* ── Actions row ── */}
+        <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {/* Primary: Estimate */}
+          <button
+            className="btn btn-ghost"
+            onClick={onEstimate}
+            disabled={estimating || !canRunJob}
+            title={!canRunJob ? 'Paste input and wait for validation' : undefined}
+          >
+            <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate Quota & Runtime'}
+          </button>
+
+          {/* Primary: Run */}
           <button
             className="btn btn-primary"
             onClick={onRunJob}
             disabled={submitting || !canRunJob}
-            style={{ fontSize: 12 }}
           >
             <IconSearch /> {submitting ? 'Submitting…' : 'Run MDI Check'}
           </button>
-          {!canRunJob && !submitting && (
-            <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-              Run Parse Preview first to generate accepted items.
-            </p>
+
+          {/* Secondary: Clear */}
+          {hasInput && (
+            <button className="btn btn-ghost" onClick={onClear} style={{ fontSize: 11 }}>
+              Clear
+            </button>
           )}
-          <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto' }}>
-            No external calls — no quota consumed until Run MDI Check
-          </span>
+
+          {/* Tertiary: Refresh Validation — subtle, only shown when input exists */}
+          {hasInput && !validating && (
+            <button
+              className="btn btn-ghost"
+              onClick={onRefreshValidation}
+              style={{ fontSize: 10, padding: '3px 8px', color: 'var(--text-faint)', borderColor: 'var(--border-soft)', marginLeft: 'auto' }}
+              title="Re-run input validation"
+            >
+              ↺ Refresh validation
+            </button>
+          )}
+
+          {/* Helper text when not runnable */}
+          {!canRunJob && !submitting && !validating && hasInput && (
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: canRunJob ? 'auto' : 0 }}>
+              {previewError ? 'Fix validation errors above.' : 'No accepted items yet.'}
+            </span>
+          )}
+          {!hasInput && (
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 'auto' }}>
+              Validation runs automatically · no quota consumed
+            </span>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-// ── Preview results ───────────────────────────────────────────────────────────
-
-function PreviewResultsSection({ preview, error }) {
-  const [showRejected, setShowRejected] = useState(false)
-  const [showDupes, setShowDupes] = useState(false)
-
-  if (error) {
-    return (
-      <div className="card">
-        <div className="card-header"><span className="card-label">Parse Preview</span></div>
-        <div className="card-body">
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Parse error: {error}</p>
-        </div>
-      </div>
-    )
-  }
-  if (!preview) return null
-
-  return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-label">Parse Preview</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          No external calls — no quota consumed
-        </span>
-      </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          {[
-            { label: 'Accepted', value: preview.accepted_count, color: preview.accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Rejected', value: preview.rejected_count, color: preview.rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-            { label: 'Duplicates', value: preview.duplicate_count, color: preview.duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
-          ].map(t => (
-            <div key={t.label} className="summary-tile">
-              <span className="tile-label">{t.label}</span>
-              <span className="tile-value" style={{ color: t.color, fontSize: 18 }}>{t.value}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {preview.rejected_count > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowRejected(v => !v)}>
-              {showRejected ? 'Hide' : 'Show'} rejected ({preview.rejected_count})
-            </button>
-          )}
-          {preview.duplicate_count > 0 && (
-            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowDupes(v => !v)}>
-              {showDupes ? 'Hide' : 'Show'} dupes ({preview.duplicate_count})
-            </button>
-          )}
-        </div>
-        {showRejected && preview.rejected?.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 120, overflowY: 'auto' }}>
-            {preview.rejected.map((r, i) => (
-              <div key={i}><code style={{ color: 'var(--danger)' }}>{r.original}</code> — {r.reason}</div>
-            ))}
-          </div>
-        )}
-        {showDupes && preview.duplicates?.length > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 80, overflowY: 'auto' }}>
-            {preview.duplicates.map((d, i) => <div key={i}><code>{d}</code></div>)}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+// PreviewResultsSection removed — validation is now inline inside InputSection
+// via the ValidationSummary component with debounced auto-parse.
 
 // ── Upload preview results ────────────────────────────────────────────────────
 
@@ -576,9 +623,9 @@ function UploadPreviewResultsSection({ preview, error }) {
   if (error) {
     return (
       <div className="card">
-        <div className="card-header"><span className="card-label">Upload Preview</span></div>
+        <div className="card-header"><span className="card-label">Upload Validation</span></div>
         <div className="card-body">
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Upload error: {error}</p>
+          <p style={{ color: 'var(--risk-critical)', fontSize: 13 }}>Upload error: {error}</p>
         </div>
       </div>
     )
@@ -588,7 +635,7 @@ function UploadPreviewResultsSection({ preview, error }) {
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-label">Upload Preview</span>
+        <span className="card-label">Upload Validation</span>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           No external calls — no quota consumed
         </span>
@@ -1210,11 +1257,12 @@ export default function App() {
     return Date.now() - quotaState.checkedAt > QUOTA_STALE_MS
   }
 
-  // Paste preview state
-  const [rawInput, setRawInput]       = useState('')
-  const [previewing, setPreviewing]   = useState(false)
-  const [preview, setPreview]         = useState(null)
+  // Paste input + auto-validation state
+  const [rawInput, setRawInput]         = useState('')
+  const [validating, setValidating]     = useState(false)  // debounce in-flight
+  const [preview, setPreview]           = useState(null)
   const [previewError, setPreviewError] = useState(null)
+  const debounceRef                     = useRef(null)
 
   // Estimate state
   const [estimating, setEstimating]       = useState(false)
@@ -1270,27 +1318,49 @@ export default function App() {
     finally { setEstimating(false) }
   }
 
-  function handleRawInputChange(val) {
-    setRawInput(val)
-    if (estimateResult) setEstimateStale(true)
-  }
-
-  async function handlePreview() {
-    if (!rawInput.trim()) return
-    setPreviewing(true); setPreview(null); setPreviewError(null)
+  // Auto-parse: calls parse-preview with no side effects (no VT, no quota, no job)
+  async function autoParseInput(input) {
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/parse-preview`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
+        body: JSON.stringify({ raw_input: input, default_scheme: 'http', max_items: 500 }),
       })
       if (!resp.ok) { const t = await resp.text(); setPreviewError(`HTTP ${resp.status}: ${t}`); return }
       setPreview(await resp.json())
-    } catch (err) { setPreviewError(err.message || 'Network error') }
-    finally { setPreviewing(false) }
+      setPreviewError(null)
+    } catch (err) {
+      setPreviewError(err.message || 'Network error')
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  function handleRawInputChange(val) {
+    setRawInput(val)
+    if (estimateResult) setEstimateStale(true)
+    // Cancel any pending debounce
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!val.trim()) {
+      setPreview(null); setPreviewError(null); setValidating(false)
+      return
+    }
+    // Show "Validating…" immediately; fire parse after 500ms idle
+    setValidating(true)
+    debounceRef.current = setTimeout(() => autoParseInput(val), 500)
+  }
+
+  // Manual refresh — used by "↺ Refresh validation" button
+  function handleRefreshValidation() {
+    if (!rawInput.trim()) return
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setValidating(true)
+    setPreviewError(null)
+    autoParseInput(rawInput)
   }
 
   function handleClear() {
-    setRawInput(''); setPreview(null); setPreviewError(null)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setRawInput(''); setPreview(null); setPreviewError(null); setValidating(false)
     setEstimateResult(null); setEstimateError(null); setEstimateStale(false)
   }
 
@@ -1382,7 +1452,10 @@ export default function App() {
     return () => { cancelled = true }
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+  }, [])
 
   return (
     <div className="layout">
@@ -1435,8 +1508,10 @@ export default function App() {
         <InputSection
           rawInput={rawInput}
           setRawInput={handleRawInputChange}
-          onPreview={handlePreview}
-          previewing={previewing}
+          validating={validating}
+          preview={preview}
+          previewError={previewError}
+          onRefreshValidation={handleRefreshValidation}
           onClear={handleClear}
           fileRef={fileRef}
           selectedFile={selectedFile}
@@ -1451,7 +1526,6 @@ export default function App() {
         />
 
         <EstimateSection estimate={estimateResult} error={estimateError} stale={estimateStale} />
-        <PreviewResultsSection preview={preview} error={previewError} />
         <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
 
         <JobSection
