@@ -178,6 +178,92 @@ are identical to `MdiInputItem`.
 
 ---
 
+## MDI-06 VT service fields and behavior
+
+### VT normalization translation (`vt_service._build_vt_target`)
+
+MDI's input_parser stores normalized items in two forms:
+- `InputType.DOMAIN` → stored as `"example.com"` (bare domain, no scheme)
+- `InputType.URL` → stored as full URL e.g. `"https://example.net/path"`
+
+The VT API lookup target is derived in `vt_service._build_vt_target()`, NOT in the parser:
+
+| `input_type` | `use_domain_reports` | VT target | `vt_mode_used` |
+|---|---|---|---|
+| `domain` | `false` | `http://{domain}/` | `url_report` |
+| `domain` | `true` | `{domain}` (bare) | `domain_report` |
+| `url` | any | normalized URL unchanged | `url_report` |
+
+This translation happens in the service layer to avoid mutating the stored normalized form.
+
+### VT quota accounting
+
+| Scenario | VT calls consumed |
+|---|---|
+| URL or domain (URL mode) — cached in VT | 1 (GET succeeds) |
+| URL or domain (URL mode) — not in VT | 3 (GET 404 + POST submit + GET again) |
+| Domain (domain-report mode) | 1 (GET domains endpoint; no 404→submit flow) |
+| VT 429 | 1 (the failing call is counted; quota still incremented) |
+| VT timeout | 0 (exception before response; not counted) |
+
+Quota is incremented per `calls_made` reported by `vt_service.fetch_report()`.
+Atomic write: `vt_usage.json.tmp → os.replace() → vt_usage.json`.
+
+### Triage mapping (MDI-06)
+
+| Condition | `triage_bucket` | `recommended_action` | `evidence_status` |
+|---|---|---|---|
+| `vt_malicious > 0` | `malicious` | `investigate` | `complete` |
+| `vt_malicious == 0, vt_suspicious > 0` | `suspicious` | `manual_review` | `complete` |
+| Both 0, engines > 0 | `clean` | `clear` | `complete` |
+| Both 0, engines == 0 (never scanned) | `pending` | `none` | `partial` |
+| VT error (429, 5xx, timeout) | `error` | `manual_review` | `partial` |
+| Confirmed hold (held item) | `held` | `action_already_taken` | `skipped_hold` |
+| Quota exhausted mid-run | `error` | `manual_review` | `partial` |
+
+### Freshness classification (`vt_service.classify_freshness`)
+
+| `last_analysis_date` age | `freshness` | `triage_confidence` |
+|---|---|---|
+| < stale_threshold_days (default 5) | `fresh` | `high` |
+| 5–30 days | `stale` | `medium` |
+| > 30 days | `very_stale` | `medium` |
+| None / null | `never_scanned` | `low` |
+
+### In-memory job state fields (`InMemoryJob` in `job_store.py`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `job_id` | `str` | UUID assigned at submission |
+| `status` | `str` | `queued`, `running`, `done`, `error` |
+| `submitted_at` | `float` | Unix timestamp |
+| `completed_at` | `Optional[float]` | Set on completion or error |
+| `total` | `int` | Eligible VT-queue items (not counting held) |
+| `processed` | `int` | Items where VT attempt completed |
+| `held_skipped` | `int` | Items skipped because of hold |
+| `rejected_count` | `int` | Items rejected at parse time |
+| `quota_blocked_count` | `int` | Items blocked mid-run by quota exhaustion |
+| `estimated_requests` | `int` | Conservative VT API call estimate |
+| `lookups_used` | `int` | Actual VT API calls consumed |
+| `use_domain_reports` | `bool` | Options snapshot from submit request |
+| `stale_threshold_days` | `int` | Options snapshot |
+| `item_order` | `List[str]` | Stable display order (input_normalized keys) |
+| `results` | `Dict[str, MdiResultItem]` | Per-item results, key = input_normalized |
+| `usage_history_written` | `bool` | Dedup guard for JSONL append |
+
+**Known MDI-06 limitation:** Jobs are in-memory only. Service restart loses all job state.
+Job persistence and recovery are out of scope for MDI-06.
+
+### New API models (MDI-06)
+
+| Model | Fields | Purpose |
+|---|---|---|
+| `JobSubmitRequest` | `raw_input`, `default_scheme`, `max_items`, `use_domain_reports`, `stale_threshold_days` | POST /api/mdi/jobs/submit request body |
+| `JobSubmitResponse` | `job_id`, `status`, `total`, `queued_count`, `held_skipped_count`, `rejected_count`, `estimated_requests`, `quota_remaining_before` | Immediate response after job creation |
+| `JobStatusResponse` | `job_id`, `status`, `processed`, `total`, `results`, … | GET /api/mdi/jobs/{job_id} response |
+
+---
+
 ## Fields explicitly NOT included
 
 | Data | Reason omitted |

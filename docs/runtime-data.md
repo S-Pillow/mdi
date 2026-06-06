@@ -108,6 +108,56 @@ until a future column-addition ticket updates that exporter.
 
 ---
 
+## MDI-06 runtime file access summary
+
+### MDI-06 runtime behavior
+
+MDI-06 introduces actual runtime file **writes** for the first time.
+
+| File | MDI-06 Access | Notes |
+|---|---|---|
+| `vt_usage.json` | **READ + WRITE (atomic)** | Incremented after each VT API call via `quota_writer.increment_quota()`. Atomic: `tmp → os.replace()`. |
+| `vt_usage_history.jsonl` | **APPEND** | One metadata-only record appended per completed job via `quota_writer.append_usage_history()`. |
+| `vt_daily_history.json` | **READ + WRITE (atomic)** | Updated per-job on completion via `quota_writer.update_daily_history()`. Failure is logged and swallowed. |
+| `vt_latest_job.json` | **NEVER** | Exclusively owned by VT Bulk Check. MDI must not read or write this file. |
+| `mdi_latest_job.json` | **Not yet** | Deferred. Job recovery is out of scope for MDI-06. |
+
+### In-memory job state
+
+- MDI-06 stores all job state in process memory only (`services/job_store.py`).
+- Jobs are **not persisted to disk**. Service restart loses all in-flight and completed jobs.
+- This is a **documented MDI-06 limitation**. Job recovery is out of scope.
+- No dashboard history (beyond the metadata-only JSONL append).
+- No `mdi_latest_job.json` is written.
+
+### Quota write safety
+
+- `quota_writer.increment_quota()` uses `asyncio.Lock` for in-process serialization.
+- Write is atomic: content written to `{file}.tmp` then renamed with `os.replace()`.
+- **Accepted MVP risk:** both `mdi-backend` and `dns-tool-backend` may write `vt_usage.json`
+  simultaneously in separate processes. The race window is a single `os.replace()` call.
+  This is documented and carried forward to a future atomic-locking ticket.
+
+### Usage history contract
+
+Records appended to `vt_usage_history.jsonl` by MDI-06 are **metadata-only**:
+- `tool_name = "mdi"`
+- `operation = "report_lookup"`
+- Counts: `items_attempted`, `items_completed`, `quota_units_consumed`, `quota_blocked_count`,
+  `errors_count`, `held_skipped_count`
+- `processing_options_summary` (dict with `use_domain_reports`, `stale_threshold_days`)
+- `status` (`done` or `error`)
+- **No raw domains, URLs, or item-level result data.**
+
+### MDI-06 test isolation
+
+All MDI-06 tests use `tmp_path` for quota/history files:
+- `job_processor.process_job(job_id, usage_file=tmp_path/..., history_file=tmp_path/...)`
+- Live `/var/lib/dns-tool/vt_usage.json` is **never modified** by any MDI-06 test.
+- Test `test_live_vt_usage_file_not_modified` asserts mtime unchanged after each test run.
+
+---
+
 ## MDI-05 runtime file access summary
 
 | File | MDI-05 Access | Notes |
