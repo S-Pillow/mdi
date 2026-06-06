@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 // ── Icons (inline SVG — no external icon library) ────────────────────────────
 
@@ -51,6 +51,7 @@ const API_BASE = ''   // same-origin; nginx proxies /api/mdi/ to port 8011
 function InputSection({
   rawInput, setRawInput, onPreview, previewing, onClear,
   fileRef, selectedFile, onFileChange, onUploadPreview, uploadPreviewing,
+  onRunJob, submitting, canRunJob,
 }) {
   return (
     <div className="card">
@@ -123,12 +124,22 @@ function InputSection({
         </div>
 
         <p style={{ fontSize: 12, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-          Parse preview only — no VT, WHOIS, DNS, or live checks are run.
+          Parse preview only — no VT calls. Use "Run MDI Check" to submit a full VT job.
         </p>
 
-        <button className="btn btn-ghost" disabled style={{ alignSelf: 'flex-start', opacity: 0.4, fontSize: 12 }}>
-          <IconSearch /> Run MDI Check — not yet implemented
+        <button
+          className="btn btn-primary"
+          onClick={onRunJob}
+          disabled={submitting || !canRunJob}
+          style={{ alignSelf: 'flex-start', fontSize: 12 }}
+        >
+          <IconSearch /> {submitting ? 'Submitting…' : 'Run MDI Check'}
         </button>
+        {!canRunJob && !submitting && (
+          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            Run Parse Preview first to generate accepted items.
+          </p>
+        )}
       </div>
     </div>
   )
@@ -541,54 +552,169 @@ function UploadPreviewResultsSection({ preview, error }) {
 }
 
 
-// ── Placeholder sections (unchanged from shell) ───────────────────────────────
+// ── Triage bucket color ───────────────────────────────────────────────────────
 
-function TriageSummarySection() {
-  const tiles = [
-    { label: 'Total',      value: '—' },
-    { label: 'Malicious',  value: '—' },
-    { label: 'Suspicious', value: '—' },
-    { label: 'Held/Skip',  value: '—' },
-    { label: 'Clean',      value: '—' },
-    { label: 'Error',      value: '—' },
-  ]
-  return (
-    <div className="card">
-      <div className="card-header"><span className="card-label">Triage Summary</span></div>
-      <div className="card-body">
-        <div className="summary-grid">
-          {tiles.map(t => (
-            <div key={t.label} className="summary-tile">
-              <span className="tile-label">{t.label}</span>
-              <span className="tile-value">{t.value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
+function triageColor(bucket) {
+  const m = {
+    malicious: 'var(--danger)',
+    suspicious: 'var(--warn)',
+    held: 'var(--accent)',
+    clean: 'var(--ok)',
+    error: 'var(--text-dim)',
+    pending: 'var(--text-dim)',
+  }
+  return m[bucket] || 'var(--text)'
 }
 
-function ResultsSection() {
+// ── Job section (VT job processing — early implementation) ────────────────────
+
+function JobSection({ job, jobError, jobId }) {
+  if (jobError) {
+    return (
+      <div className="card">
+        <div className="card-header"><span className="card-label">VT Job</span></div>
+        <div className="card-body">
+          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Submit error: {jobError}</p>
+        </div>
+      </div>
+    )
+  }
+  if (!job && !jobId) return null
+
+  const pending = job ? (job.queued ?? 0) : 0
+  const done    = job ? (job.processed ?? 0) : 0
+  const total   = job ? (job.total ?? 0) : 0
+  const pct     = total > 0 ? Math.round((done / total) * 100) : 0
+  const results = job?.results ?? []
+
+  const malCount  = results.filter(r => r.triage_bucket === 'malicious').length
+  const suspCount = results.filter(r => r.triage_bucket === 'suspicious').length
+  const cleanCnt  = results.filter(r => r.triage_bucket === 'clean').length
+  const errCount  = results.filter(r => r.triage_bucket === 'error').length
+  const heldCount = results.filter(r => r.triage_bucket === 'held').length
+
+  const statusColor = {
+    queued: 'var(--text-muted)', running: 'var(--accent)',
+    done: 'var(--ok)', error: 'var(--danger)',
+  }[job?.status] || 'var(--text-muted)'
+
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-label">Results</span>
-        <button className="btn btn-ghost" disabled style={{ fontSize: 12, padding: '4px 10px' }}>Export CSV</button>
+        <span className="card-label">VT Job</span>
+        <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>
+          VT job processing — early implementation
+        </span>
       </div>
-      <div className="card-body">
-        <div className="results-placeholder"><span>No results — submit a job to begin.</span></div>
-      </div>
-    </div>
-  )
-}
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-function DetailDrawerSection() {
-  return (
-    <div className="card">
-      <div className="card-header"><span className="card-label">Detail Drawer</span></div>
-      <div className="card-body">
-        <div className="results-placeholder"><span>Select a result row to view details.</span></div>
+        {/* Status bar */}
+        {job && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+              <span style={{ color: 'var(--text-muted)' }}>
+                Job: <code style={{ fontSize: 11 }}>{jobId}</code>
+              </span>
+              <span style={{ color: statusColor, fontWeight: 600, textTransform: 'uppercase', fontSize: 11 }}>
+                {job.status}
+              </span>
+            </div>
+            {total > 0 && (
+              <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 4,
+                  width: `${pct}%`,
+                  background: job.status === 'done' ? 'var(--ok)'
+                    : job.status === 'error' ? 'var(--danger)' : 'var(--accent)',
+                  transition: 'width 0.3s ease',
+                }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Count tiles */}
+        {job && (
+          <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+            {[
+              { label: 'Total',      value: total,     color: 'var(--text)' },
+              { label: 'Malicious',  value: malCount,  color: malCount  > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+              { label: 'Suspicious', value: suspCount, color: suspCount > 0 ? 'var(--warn)'   : 'var(--text-muted)' },
+              { label: 'Clean',      value: cleanCnt,  color: cleanCnt  > 0 ? 'var(--ok)'     : 'var(--text-muted)' },
+              { label: 'Held/Skip',  value: heldCount + (job.held_skipped ?? 0), color: 'var(--accent)' },
+              { label: 'Error',      value: errCount,  color: errCount  > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            ].map(t => (
+              <div key={t.label} className="summary-tile">
+                <span className="tile-label">{t.label}</span>
+                <span className="tile-value" style={{ color: t.color }}>{t.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Results table */}
+        {results.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Results ({results.length})
+            </p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {['#', 'Input', 'Status', 'Bucket', 'VT Hits', 'Ratio', 'Freshness', 'Action', 'Evidence'].map(h => (
+                    <th key={h} style={{
+                      textAlign: 'left', padding: '6px 10px',
+                      borderBottom: '1px solid var(--border)',
+                      color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '5px 10px', color: 'var(--text-dim)' }}>{r.position}</td>
+                    <td style={{ padding: '5px 10px', fontFamily: 'monospace', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.input_normalized}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {r.processing_status}
+                    </td>
+                    <td style={{ padding: '5px 10px' }}>
+                      <span style={{ fontWeight: 600, color: triageColor(r.triage_bucket), fontSize: 11, textTransform: 'uppercase' }}>
+                        {r.triage_bucket}
+                      </span>
+                    </td>
+                    <td style={{ padding: '5px 10px', textAlign: 'center', color: (r.vt_hits ?? 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                      {r.vt_hits ?? '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                      {r.vt_ratio ?? '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {r.freshness ?? '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {r.recommended_action ?? '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {r.evidence_status ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {job && results.length === 0 && job.status === 'running' && (
+          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>
+            Processing… results will appear as they complete.
+          </p>
+        )}
+        {job && results.length === 0 && job.status === 'queued' && (
+          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>Queued…</p>
+        )}
       </div>
     </div>
   )
@@ -645,11 +771,20 @@ export default function App() {
   const [previewError, setPreviewError] = useState(null)
 
   // Upload preview state
-  const fileRef = React.useRef(null)
+  const fileRef = useRef(null)
   const [selectedFile, setSelectedFile] = useState(null)
   const [uploadPreviewing, setUploadPreviewing] = useState(false)
   const [uploadPreview, setUploadPreview] = useState(null)
   const [uploadError, setUploadError] = useState(null)
+
+  // VT job state
+  const [submitting, setSubmitting] = useState(false)
+  const [jobId, setJobId] = useState(null)
+  const [job, setJob] = useState(null)
+  const [jobError, setJobError] = useState(null)
+  const pollRef = useRef(null)
+
+  const canRunJob = !!(preview && preview.accepted_count > 0)
 
   async function handlePreview() {
     if (!rawInput.trim()) return
@@ -715,19 +850,70 @@ export default function App() {
     }
   }
 
+  // Poll job status until done/error
+  const pollJob = useCallback(async (id) => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/mdi/jobs/${id}`)
+      if (!resp.ok) return
+      const data = await resp.json()
+      setJob(data)
+      if (data.status === 'done' || data.status === 'error') {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      }
+    } catch (_) { /* ignore poll errors */ }
+  }, [])
+
+  async function handleRunJob() {
+    if (!rawInput.trim() || submitting) return
+    setSubmitting(true)
+    setJob(null)
+    setJobId(null)
+    setJobError(null)
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    try {
+      const resp = await fetch(`${API_BASE}/api/mdi/jobs/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
+      })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
+        setJobError(msg)
+        return
+      }
+      const data = await resp.json()
+      const id = data.job_id
+      setJobId(id)
+      // Start polling every 2s
+      pollRef.current = setInterval(() => pollJob(id), 2000)
+      // Immediate first poll
+      await pollJob(id)
+    } catch (err) {
+      setJobError(err.message || 'Network error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+  }, [])
+
   return (
     <div className="layout">
       <nav className="nav">
         <a href="/tools" className="nav-back"><IconArrowLeft /> All tools</a>
         <div className="nav-divider" />
         <span className="nav-title">MDI</span>
-        <span className="nav-badge">shell</span>
+        <span className="nav-badge">beta</span>
       </nav>
 
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI shell — parse &amp; upload preview active. VT, WHOIS, DNS, and live checks not yet implemented.
+          MDI — VT core checks active (MDI-06). WHOIS, DNS, and live checks not yet implemented.
         </div>
 
         <div className="page-header">
@@ -748,20 +934,22 @@ export default function App() {
           onFileChange={handleFileChange}
           onUploadPreview={handleUploadPreview}
           uploadPreviewing={uploadPreviewing}
+          onRunJob={handleRunJob}
+          submitting={submitting}
+          canRunJob={canRunJob}
         />
 
         <PreviewResultsSection preview={preview} error={previewError} />
         <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
 
-        <TriageSummarySection />
-        <ResultsSection />
-        <DetailDrawerSection />
+        <JobSection job={job} jobError={jobError} jobId={jobId} />
+
         <SettingsSection />
         <DashboardSection />
       </main>
 
       <footer className="footer">
-        © {new Date().getFullYear()} Forge Forward — MDI shell
+        © {new Date().getFullYear()} Forge Forward — MDI
       </footer>
     </div>
   )

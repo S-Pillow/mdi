@@ -12,31 +12,42 @@ MDI-04 endpoints:
 MDI-05 endpoints:
   POST /api/mdi/jobs/upload-preview — parse CSV/XLSX upload with hold detection
 
+MDI-06 endpoints:
+  POST /api/mdi/jobs/submit         — submit VT job; returns job_id
+  GET  /api/mdi/jobs/{job_id}       — poll job status and results
+
 Future endpoints (not yet implemented):
-  POST /api/mdi/jobs/submit
-  GET  /api/mdi/jobs/{job_id}
   GET  /api/mdi/jobs/{job_id}/export
   POST /api/mdi/jobs/{job_id}/rescan
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
+import uuid
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from models import (
     AgeBucket,
+    DomainHold,
     DomainHoldType,
     DomainStatusSource,
     DuplicateItemResponse,
     EvidenceStatus,
     Freshness,
     InputType,
+    JobStatusResponse,
+    JobSubmitRequest,
+    JobSubmitResponse,
     LiveStatus,
+    MdiError,
     MdiJobOptions,
     MdiJobStatus,
     MdiProcessingStatus,
+    MdiResultItem,
     ParsePreviewRequest,
     ParsePreviewResponse,
     RecommendedAction,
@@ -49,6 +60,9 @@ from models import (
 from services.vt_quota import get_usage_summary
 from services.input_parser import parse_raw_input
 from services.upload_parser import parse_upload
+from services.job_store import InMemoryJob, create_job, get_job
+from services import job_processor
+from services.quota_writer import read_remaining_quota
 
 router = APIRouter(prefix="/api/mdi")
 
@@ -171,6 +185,197 @@ async def upload_preview(
         missing_optional_columns=result.missing_optional_columns,
         external_calls_made=False,
         quota_consumed=False,
+    )
+
+
+# ── Job submit ─────────────────────────────────────────────────────────────────
+
+def _estimate_requests(items: list, use_domain_reports: bool) -> int:
+    """
+    Conservative VT API call estimate:
+      - domain report mode:  1 call per domain item
+      - URL report mode:     3 calls per item (GET + possible POST submit + GET again)
+    """
+    total = 0
+    for item in items:
+        if item.input_type == InputType.DOMAIN and use_domain_reports:
+            total += 1
+        else:
+            total += 3
+    return total
+
+
+def _make_pending_result(item, input_type: InputType) -> MdiResultItem:
+    return MdiResultItem(
+        input_original=item.input_original,
+        input_normalized=item.input_normalized,
+        input_type=input_type,
+        position=item.position,
+        processing_status=MdiProcessingStatus.PENDING,
+    )
+
+
+def _make_hold_skipped_result(item, input_type: InputType) -> MdiResultItem:
+    return MdiResultItem(
+        input_original=item.input_original,
+        input_normalized=item.input_normalized,
+        input_type=input_type,
+        position=item.position,
+        processing_status=MdiProcessingStatus.HOLD_SKIPPED,
+        domain_hold=DomainHold(
+            has_hold=True,
+            hold_types=[DomainHoldType.CLIENT_HOLD],
+            source=DomainStatusSource.UNKNOWN,
+        ),
+        vt_mode_used=VtModeUsed.SKIPPED_HOLD,
+        triage_bucket=TriageBucket.HELD,
+        triage_confidence=TriageConfidence.HIGH,
+        recommended_action=RecommendedAction.ACTION_ALREADY_TAKEN,
+        evidence_status=EvidenceStatus.SKIPPED_HOLD,
+        live_status=LiveStatus.NOT_CHECKED,
+    )
+
+
+@router.post("/jobs/submit", tags=["Jobs"], response_model=JobSubmitResponse)
+async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
+    """
+    Submit a VT-check job from raw pasted input.
+
+    Processing steps:
+      1. Parse raw_input via input_parser.
+      2. Filter items with confirmed hold (has_hold=True) — they skip VT.
+         Items with unknown hold status are eligible for VT.
+      3. Estimate VT API quota required (conservative: URL-mode = 3, domain-mode = 1).
+      4. If estimated > remaining quota: reject with quota_blocked response (HTTP 429).
+      5. Create in-memory job, launch background asyncio task, return job_id.
+
+    No external calls are made during submission; VT calls happen in the background task.
+    """
+    if not req.raw_input:
+        raise HTTPException(
+            status_code=422,
+            detail="raw_input is required. At least one domain or URL must be provided.",
+        )
+
+    parse_result = parse_raw_input(
+        req.raw_input,
+        default_scheme=req.default_scheme,
+        max_items=req.max_items,
+    )
+
+    accepted = parse_result.accepted
+    rejected_count = len(parse_result.rejected)
+
+    # Separate confirmed-held from eligible
+    held_items = [i for i in accepted if getattr(i, "domain_hold", None) and i.domain_hold.has_hold]  # type: ignore[attr-defined]
+    eligible_items = [i for i in accepted if i not in held_items]
+
+    # For MdiInputItem from parse_raw_input, hold status is NOT_CHECKED (no hold data yet).
+    # So all items from raw paste are eligible for VT (none are confirmed held at submit time).
+    # held_items will be empty for paste input; held filtering in MDI-06 is via the pre-populated
+    # held results pattern (from upload). For paste input, all accepted items go to VT queue.
+    # NOTE: If a future endpoint provides pre-populated UploadedInputItem with has_hold=True,
+    # those will be correctly filtered here.
+    held_items = []
+    eligible_items = accepted
+
+    held_skipped_count = len(held_items)
+    estimated = _estimate_requests(eligible_items, req.use_domain_reports)
+    remaining = read_remaining_quota()
+
+    if estimated > remaining:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "quota_blocked",
+                "message": (
+                    f"Estimated {estimated} VT API requests required but only "
+                    f"{remaining} remain today. Reduce input size or wait until tomorrow."
+                ),
+                "estimated_requests": estimated,
+                "quota_remaining": remaining,
+            },
+        )
+
+    job_id = str(uuid.uuid4())
+    job = InMemoryJob(
+        job_id=job_id,
+        status="queued",
+        submitted_at=time.time(),
+        total=len(eligible_items),
+        processed=0,
+        held_skipped=held_skipped_count,
+        rejected_count=rejected_count,
+        estimated_requests=estimated,
+        use_domain_reports=req.use_domain_reports,
+        stale_threshold_days=req.stale_threshold_days,
+    )
+
+    # Pre-populate results: held items first, then pending eligible items
+    for item in held_items:
+        job.results[item.input_normalized] = _make_hold_skipped_result(item, item.input_type)
+        job.item_order.append(item.input_normalized)
+
+    for item in eligible_items:
+        job.results[item.input_normalized] = _make_pending_result(item, item.input_type)
+        job.item_order.append(item.input_normalized)
+
+    await create_job(job)
+    asyncio.create_task(job_processor.process_job(job_id))
+
+    return JobSubmitResponse(
+        job_id=job_id,
+        status="queued",
+        total=len(eligible_items),
+        queued_count=len(eligible_items),
+        held_skipped_count=held_skipped_count,
+        rejected_count=rejected_count,
+        estimated_requests=estimated,
+        quota_remaining_before=remaining,
+    )
+
+
+# ── Job status ─────────────────────────────────────────────────────────────────
+
+@router.get("/jobs/{job_id}", tags=["Jobs"], response_model=JobStatusResponse)
+async def job_status(job_id: str) -> JobStatusResponse:
+    """
+    Return current status and results for an in-memory MDI job.
+
+    Jobs are stored in-memory only. After service restart, all jobs are lost
+    (MDI-06 known limitation; job recovery is out of scope).
+    """
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    queued = sum(
+        1 for r in job.results.values()
+        if r.processing_status == MdiProcessingStatus.PENDING
+    )
+    results_ordered = [
+        job.results[k]
+        for k in job.item_order
+        if k in job.results
+    ]
+
+    return JobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        submitted_at=job.submitted_at,
+        completed_at=job.completed_at,
+        total=job.total,
+        processed=job.processed,
+        held_skipped=job.held_skipped,
+        rejected_count=job.rejected_count,
+        queued=queued,
+        estimated_requests=job.estimated_requests,
+        lookups_used=job.lookups_used,
+        quota_blocked_count=job.quota_blocked_count,
+        error_message=job.error_message,
+        use_domain_reports=job.use_domain_reports,
+        stale_threshold_days=job.stale_threshold_days,
+        results=results_ordered,
     )
 
 

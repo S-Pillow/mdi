@@ -661,6 +661,66 @@ class UploadPreviewResponse(BaseModel):
     )
 
 
+# ─── Job-submit API models ────────────────────────────────────────────────────
+
+
+class JobSubmitRequest(BaseModel):
+    """Request body for POST /api/mdi/jobs/submit."""
+    raw_input: Optional[str] = Field(
+        None,
+        description="[audit] Raw pasted text. Mutually exclusive with 'items'."
+    )
+    default_scheme: str = Field(
+        "http",
+        description="[workflow] Scheme for tokens without a scheme.",
+        pattern=r"^https?$",
+    )
+    max_items: int = Field(
+        500, ge=1, le=500,
+        description="[workflow] Max items accepted from raw_input.",
+    )
+    use_domain_reports: bool = Field(
+        False,
+        description="[workflow] Use VT domain reports for bare domains.",
+    )
+    stale_threshold_days: int = Field(
+        5, ge=1, le=90,
+        description="[workflow] Reports older than this many days are STALE.",
+    )
+
+
+class JobSubmitResponse(BaseModel):
+    """Response body for POST /api/mdi/jobs/submit."""
+    job_id: str = Field(..., description="[display] UUID of the created job.")
+    status: str = Field(..., description="[display] Initial job status.")
+    total: int = Field(..., description="[display] Eligible items queued for VT check.")
+    queued_count: int = Field(..., description="[display] Items in VT queue.")
+    held_skipped_count: int = Field(..., description="[display] Items skipped due to hold.")
+    rejected_count: int = Field(..., description="[display] Items rejected at parse time.")
+    estimated_requests: int = Field(..., description="[display] Conservative VT API call estimate.")
+    quota_remaining_before: int = Field(..., description="[display] Quota available before job starts.")
+
+
+class JobStatusResponse(BaseModel):
+    """Response body for GET /api/mdi/jobs/{job_id}."""
+    job_id: str
+    status: str
+    submitted_at: float
+    completed_at: Optional[float] = None
+    total: int
+    processed: int
+    held_skipped: int
+    rejected_count: int
+    queued: int
+    estimated_requests: int
+    lookups_used: int
+    quota_blocked_count: int
+    error_message: Optional[str] = None
+    use_domain_reports: bool
+    stale_threshold_days: int
+    results: List[MdiResultItem] = Field(default_factory=list)
+
+
 # ─── Job state ─────────────────────────────────────────────────────────────────
 
 
