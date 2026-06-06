@@ -4,20 +4,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 function IconArrowLeft() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>
     </svg>
   )
 }
-
 function IconInfo() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
     </svg>
   )
 }
-
 function IconSearch() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -25,17 +23,14 @@ function IconSearch() {
     </svg>
   )
 }
-
 function IconCalculator() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
       <line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/>
-      <line x1="8" y1="18" x2="12" y2="18"/>
     </svg>
   )
 }
-
 function IconEye() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -43,11 +38,33 @@ function IconEye() {
     </svg>
   )
 }
-
-function IconX() {
+function IconGear() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  )
+}
+function IconUpload() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+  )
+}
+function IconRefresh() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+    </svg>
+  )
+}
+function IconMoreVertical() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>
     </svg>
   )
 }
@@ -55,6 +72,321 @@ function IconX() {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const API_BASE = ''   // same-origin; nginx proxies /api/mdi/ to port 8011
+const QUOTA_STALE_MS = 60_000  // refresh quota if older than 60 s before estimate
+
+// ── Pure helper functions ─────────────────────────────────────────────────────
+// These functions are pure: they take only result/job data, make no fetch calls,
+// make no external calls, and do not mutate their arguments.
+
+// Null-safe value helper
+function nv(value, fallback = '—') {
+  return value == null || value === '' ? fallback : value
+}
+
+// Live status classification (matches backend services/live_check.py _ACTIVE_LIVE and _NO_LIVE)
+const LIVE_ACTIVE_SET  = new Set(['active', 'redirect', 'forbidden'])
+const LIVE_NO_SET      = new Set(['not_found', 'gone', 'dns_failure', 'connection_refused', 'timeout'])
+const RECENT_AGE_SET   = new Set(['very_new', 'new'])
+const STALE_FRESH_SET  = new Set(['stale', 'very_stale'])
+const FLAGGED_BUCKET_SET = new Set(['malicious', 'suspicious'])
+
+function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
+function isLive(r)          { return LIVE_ACTIVE_SET.has(r?.live_status) }
+function isNoLive(r)        { return LIVE_NO_SET.has(r?.live_status) }
+function isRecentAge(r)     { return RECENT_AGE_SET.has(r?.age_bucket) }
+function isStaleFreshness(r){ return STALE_FRESH_SET.has(r?.freshness) }
+
+// Virtual bucket key — used for both card counts and filter predicates.
+// Buckets are mutually exclusive in priority order so card totals add up cleanly.
+// NOTE: "Flagged+Live+Recent" takes precedence over "Flagged+Live" and "Flagged+Recent".
+function getVirtualBucketKey(r) {
+  if (!r) return 'unknown'
+  const bucket = r.triage_bucket
+  if (bucket === 'held') return 'held'
+  if (bucket === 'error' || bucket === 'unresolvable' || bucket === 'pending') return 'unknown'
+  if (isFlagged(r)) {
+    if (isLive(r) && isRecentAge(r)) return 'flr'    // Flagged + Live + Recent
+    if (isLive(r))                   return 'fl'     // Flagged + Live
+    if (isRecentAge(r))              return 'fr'     // Flagged + Recent
+    if (isStaleFreshness(r))         return 'fs'     // Flagged + Stale
+    if (isNoLive(r))                 return 'fnl'    // Flagged + No-Live
+    return 'flagged'                                  // Flagged catch-all
+  }
+  if (bucket === 'clean') return 'clean'
+  return 'unknown'
+}
+
+// Priority rank map.
+// THIS MIRRORS backend/services/triage_rules.py priority order.
+// Update this map if the backend triage priority changes.
+const PRIORITY_RANK = {
+  held:    1,
+  unknown: 2,   // error / unresolvable / pending
+  flr:     3,   // Flagged + Live + Recent
+  fl:      4,   // Flagged + Live
+  fr:      5,   // Flagged + Recent
+  fs:      6,   // Flagged + Stale
+  fnl:     7,   // Flagged + No-Live
+  flagged: 8,   // Flagged catch-all
+  clean:   9,
+}
+const CONF_RANK = { high: 1, medium: 2, low: 3, clean: 4, unknown: 5 }
+
+function getItemPriority(r) {
+  return PRIORITY_RANK[getVirtualBucketKey(r)] ?? 10
+}
+function comparePriority(a, b) {
+  const pa = getItemPriority(a), pb = getItemPriority(b)
+  if (pa !== pb) return pa - pb
+  const ca = CONF_RANK[a?.triage_confidence] ?? 6
+  const cb = CONF_RANK[b?.triage_confidence] ?? 6
+  if (ca !== cb) return ca - cb
+  return (a?.position ?? 0) - (b?.position ?? 0)
+}
+
+// Filter predicates — inclusive (a row may appear under multiple filters)
+const FILTER_PREDICATES = {
+  all:     () => true,
+  held:    r => r?.triage_bucket === 'held',
+  flr:     r => isFlagged(r) && isLive(r) && isRecentAge(r),
+  fl:      r => isFlagged(r) && isLive(r),
+  fr:      r => isFlagged(r) && isRecentAge(r),
+  fs:      r => isFlagged(r) && isStaleFreshness(r),
+  fnl:     r => isFlagged(r) && isNoLive(r),
+  flagged: r => isFlagged(r),
+  unknown: r => ['error','unresolvable','pending'].includes(r?.triage_bucket),
+  clean:   r => r?.triage_bucket === 'clean',
+}
+
+function getFilteredResults(results, filterKey) {
+  const pred = FILTER_PREDICATES[filterKey] ?? FILTER_PREDICATES.all
+  return results.filter(pred)
+}
+function getFilterCount(results, filterKey) {
+  return getFilteredResults(results, filterKey).length
+}
+
+// Card counts use virtual bucket keys (mutually exclusive)
+function getTriageCardCounts(results) {
+  const counts = { flr: 0, fl: 0, fr: 0, fs: 0, fnl: 0, flagged: 0, unknown: 0, clean: 0, held: 0 }
+  for (const r of results) {
+    const k = getVirtualBucketKey(r)
+    if (k in counts) counts[k]++
+  }
+  return counts
+}
+
+function formatPercent(count, total) {
+  if (!total) return '0%'
+  return `${((count / total) * 100).toFixed(1)}%`
+}
+function formatDate(val) {
+  if (!val) return '—'
+  try {
+    const s = String(val).substring(0, 10)
+    return s.match(/^\d{4}-\d{2}-\d{2}$/) ? s : '—'
+  } catch { return '—' }
+}
+function formatAgeBucket(val) {
+  return { very_new: 'Very new', new: 'New', established: 'Established', mature: 'Mature', unknown: 'Unknown' }[val] ?? (val ?? '—')
+}
+function formatVtRatio(r) {
+  if (r?.vt_ratio) return r.vt_ratio
+  if (r?.vt_hits != null && r?.vt_total_engines != null) {
+    const pct = r.vt_total_engines > 0 ? ` (${((r.vt_hits / r.vt_total_engines) * 100).toFixed(1)}%)` : ''
+    return `${r.vt_hits} / ${r.vt_total_engines}${pct}`
+  }
+  return '—'
+}
+function formatLiveStatus(val) {
+  const MAP = {
+    active: 'LIVE', redirect: 'REDIRECT', forbidden: 'FORBIDDEN',
+    not_found: 'NOT FOUND', gone: 'GONE', dns_failure: 'DNS FAIL',
+    connection_refused: 'REFUSED', timeout: 'TIMEOUT',
+    server_error: 'SRV ERR', blocked: 'BLOCKED',
+    unknown: 'UNKNOWN', not_checked: 'NOT CHECKED',
+  }
+  return MAP[val] ?? (val ?? '—')
+}
+
+function fmtDuration(s) {
+  if (s == null) return '—'
+  if (s < 60) return `${Math.round(s)}s`
+  const m = Math.floor(s / 60), sec = Math.round(s % 60)
+  return sec > 0 ? `${m}m ${sec}s` : `${m}m`
+}
+
+// CSS class helpers
+function bucketBadgeClass(bucket) {
+  return { malicious: 'badge-malicious', suspicious: 'badge-suspicious', held: 'badge-held',
+    clean: 'badge-clean', error: 'badge-error', unresolvable: 'badge-unresolvable', pending: 'badge-pending' }[bucket] ?? 'badge-unresolvable'
+}
+function virtualBucketBadgeClass(key) {
+  return { flr: 'badge-flr', fl: 'badge-fl', fr: 'badge-fr', fs: 'badge-fs', fnl: 'badge-fnl',
+    flagged: 'badge-malicious', clean: 'badge-clean', held: 'badge-held', unknown: 'badge-error' }[key] ?? 'badge-unresolvable'
+}
+function liveBadgeClass(val) {
+  if (LIVE_ACTIVE_SET.has(val)) return 'badge-live'
+  if (LIVE_NO_SET.has(val)) return 'badge-no-live'
+  return 'badge-live-unknown'
+}
+function freshnessBadgeClass(val) {
+  return { fresh: 'badge-fresh', stale: 'badge-stale', very_stale: 'badge-very-stale',
+    never_scanned: 'badge-never-scanned' }[val] ?? 'badge-live-unknown'
+}
+function evidenceBadgeClass(val) {
+  return { complete: 'badge-complete', partial: 'badge-partial',
+    skipped_hold: 'badge-skipped-hold', none: 'badge-none-ev' }[val] ?? 'badge-none-ev'
+}
+function confClass(val) {
+  return { high: 'conf-high', medium: 'conf-medium', low: 'conf-low',
+    clean: 'conf-clean', unknown: 'conf-unknown' }[val] ?? 'conf-unknown'
+}
+function rowTierClass(r) {
+  const k = getVirtualBucketKey(r)
+  if (k === 'flr') return 'tier-critical'
+  if (k === 'fl' || k === 'fr') return 'tier-high'
+  if (k === 'fs' || k === 'flagged') return 'tier-medium'
+  if (k === 'fnl') return 'tier-low'
+  if (k === 'unknown' || k === 'held') return 'tier-info'
+  if (k === 'clean') return 'tier-clean'
+  return 'tier-none'
+}
+function triageColor(bucket) {
+  return { malicious: 'var(--danger)', suspicious: 'var(--warn)', held: '#818cf8',
+    clean: 'var(--ok)', error: 'var(--danger)', unresolvable: 'var(--text-muted)', pending: 'var(--text-dim)' }[bucket] ?? 'var(--text-muted)'
+}
+
+// Card definitions
+const TRIAGE_CARDS = [
+  { key: 'flr',     label: 'Flagged + Live + Recent', color: 'var(--c-flr)', filter: 'flr' },
+  { key: 'fl',      label: 'Flagged + Live',           color: 'var(--c-fl)',  filter: 'fl'  },
+  { key: 'fr',      label: 'Flagged + Recent',         color: 'var(--c-fr)', filter: 'fr'  },
+  { key: 'fs',      label: 'Flagged + Stale',          color: 'var(--c-fs)', filter: 'fs'  },
+  { key: 'fnl',     label: 'Flagged + No-Live',        color: 'var(--c-fnl)',filter: 'fnl' },
+  { key: 'unknown', label: 'Unknown / Errors',         color: 'var(--c-unk)',filter: 'unknown' },
+  { key: 'clean',   label: 'Clean',                    color: 'var(--c-cln)',filter: 'clean' },
+]
+
+// Named filters for the secondary filter bar
+const NAMED_FILTERS = [
+  { key: 'all',     label: 'All' },
+  { key: 'held',    label: 'Domain On Hold' },
+  { key: 'flr',     label: 'Flagged + Live + Recent' },
+  { key: 'fl',      label: 'Flagged + Live' },
+  { key: 'fr',      label: 'Flagged + Recent' },
+  { key: 'fs',      label: 'Flagged + Stale' },
+  { key: 'fnl',     label: 'Flagged + No-Live' },
+  { key: 'flagged', label: 'All Flagged' },
+  { key: 'unknown', label: 'Unknown / Errors' },
+  { key: 'clean',   label: 'Clean' },
+]
+
+// ── QuotaWidget (nav bar compact version) ─────────────────────────────────────
+
+function QuotaNavWidget({ quota, loading, error }) {
+  if (loading && !quota) {
+    return <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Checking quota…</span>
+  }
+  if (error && !quota) {
+    return <span style={{ fontSize: 11, color: 'var(--warn)' }} title={error}>⚠ Quota unavailable</span>
+  }
+  if (!quota) return null
+
+  const used = quota.daily_lookups_used ?? 0
+  const limit = quota.daily_limit ?? 500
+  const remaining = quota.remaining ?? (limit - used)
+  const pct = Math.min(Math.round((used / limit) * 100), 100)
+  const barColor = remaining <= 0 ? 'var(--danger)' : remaining < 50 ? 'var(--warn)' : 'var(--ok)'
+  const checkedStr = quota.checkedAt
+    ? new Date(quota.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null
+
+  return (
+    <div className="quota-nav-widget" title={`VT quota — shared by MDI and VT Bulk Check${checkedStr ? `. Last checked: ${checkedStr}` : ''}`}>
+      <span style={{ color: 'var(--text-dim)' }}>VT:</span>
+      <span style={{ color: remaining <= 0 ? 'var(--danger)' : 'var(--text)', fontFamily: 'monospace' }}>
+        {used}/{limit}
+      </span>
+      <div className="quota-bar-wrap">
+        <div className="quota-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+      </div>
+      {remaining <= 0 && <span style={{ color: 'var(--danger)', fontWeight: 700 }}>EXHAUSTED</span>}
+    </div>
+  )
+}
+
+// ── Settings panel (collapsible inline) ───────────────────────────────────────
+
+function CollapsibleSettingsPanel({
+  open, id,
+  useDomainReports, setUseDomainReports,
+  staleThresholdDays, setStaleThresholdDays,
+  locked,
+}) {
+  if (!open) return null
+  const lockedStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
+
+  return (
+    <div className="settings-panel" id={id} role="region" aria-label="MDI Settings">
+      <div className="settings-panel-inner">
+        {locked && (
+          <p className="settings-panel-locked-msg" style={{ width: '100%' }}>
+            Settings locked while a job is active or restored. Clear current results to change settings.
+          </p>
+        )}
+
+        {/* VT Report Mode */}
+        <div className="settings-panel-group" style={lockedStyle}>
+          <span className="settings-panel-label">VT Report Mode:</span>
+          <button
+            className="btn btn-ghost"
+            style={{ fontSize: 11, padding: '3px 10px' }}
+            onClick={() => setUseDomainReports(v => !v)}
+            disabled={locked}
+            title={locked ? 'Locked while job active' : 'Toggle between URL report and Domain report mode'}
+          >
+            {useDomainReports ? '⚙ Domain report' : '⚙ URL report'}
+          </button>
+          <span className="settings-panel-placeholder">
+            {useDomainReports ? '1 VT call/domain' : 'Up to 3 VT calls/domain — more detail'}
+          </span>
+        </div>
+
+        <div className="settings-panel-divider" />
+
+        {/* Stale threshold */}
+        <div className="settings-panel-group" style={lockedStyle}>
+          <span className="settings-panel-label">Stale after:</span>
+          <input
+            type="number" min={1} max={90}
+            value={staleThresholdDays}
+            onChange={e => {
+              const v = parseInt(e.target.value, 10)
+              if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
+            }}
+            disabled={locked}
+            style={{
+              width: 54, background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+              borderRadius: 4, color: 'var(--text)', padding: '3px 7px', fontSize: 12, textAlign: 'center',
+            }}
+          />
+          <span className="settings-panel-placeholder">days (1–90, default 7)</span>
+        </div>
+
+        <div className="settings-panel-divider" />
+
+        {/* Disabled placeholders */}
+        <div className="settings-panel-group">
+          <span className="settings-panel-label">Coming soon:</span>
+          <span className="btn-stub" title="Auto-rescan not yet available">↺ Auto-rescan stale</span>
+          <span className="btn-stub" title="URL activity check setting not yet available">🔗 URL activity check</span>
+          <span className="btn-stub" title="Export options available in MDI-16">↑ Export options</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ── Input section ─────────────────────────────────────────────────────────────
 
@@ -68,97 +400,75 @@ function InputSection({
     <div className="card">
       <div className="card-header">
         <span className="card-label">Input</span>
+        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+          Paste domains/URLs or upload CSV/XLSX · up to 500 items
+        </span>
       </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* ── Paste section ── */}
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-            Paste domains or URLs
-          </p>
           <textarea
             className="input-area"
-            style={{ cursor: 'text', color: 'var(--text)' }}
             value={rawInput}
-            onChange={e => handleRawInputChange(e.target.value)}
+            onChange={e => setRawInput(e.target.value)}
             placeholder="One per line, comma-separated, or space-separated."
             spellCheck={false}
             autoComplete="off"
           />
-          <div className="input-row" style={{ marginTop: 8 }}>
-            <button
-              className="btn btn-primary"
-              onClick={onPreview}
-              disabled={previewing || !rawInput.trim()}
-            >
+          <div className="input-row">
+            <button className="btn btn-primary" onClick={onPreview} disabled={previewing || !rawInput.trim()}>
               <IconEye /> {previewing ? 'Parsing…' : 'Parse Preview'}
             </button>
             <button
-              className="btn btn-primary"
+              className="btn btn-ghost"
               onClick={onEstimate}
               disabled={estimating || !rawInput.trim()}
-              style={{ background: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' }}
             >
-              <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate Quota & Runtime'}
+              <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate'}
             </button>
-            <button
-              className="btn btn-ghost"
-              onClick={onClear}
-              disabled={!rawInput.trim() && !previewing}
-            >
+            <button className="btn btn-ghost" onClick={onClear} disabled={!rawInput.trim() && !previewing}>
               Clear
             </button>
           </div>
         </div>
 
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
             Or upload a CSV or XLSX file (Domain / DNS Form column required)
           </p>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label className="btn btn-ghost" style={{ cursor: 'pointer', fontSize: 12, padding: '5px 12px' }}>
+            <label className="btn btn-ghost" style={{ cursor: 'pointer', fontSize: 11, padding: '4px 10px' }}>
               Choose file
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".csv,.xlsx,.xlsm"
-                style={{ display: 'none' }}
-                onChange={onFileChange}
-              />
+              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm" style={{ display: 'none' }} onChange={onFileChange} />
             </label>
             {selectedFile && (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selectedFile.name}
               </span>
             )}
-            <button
-              className="btn btn-primary"
-              onClick={onUploadPreview}
-              disabled={uploadPreviewing || !selectedFile}
-              style={{ marginLeft: selectedFile ? 0 : 'auto' }}
-            >
-              <IconEye /> {uploadPreviewing ? 'Parsing…' : 'Upload Preview'}
+            <button className="btn btn-primary" onClick={onUploadPreview} disabled={uploadPreviewing || !selectedFile}>
+              <IconUpload /> {uploadPreviewing ? 'Parsing…' : 'Upload Preview'}
             </button>
           </div>
         </div>
 
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-          Parse preview only — no VT calls. Use "Run MDI Check" to submit a full VT job.
-        </p>
-
-        <button
-          className="btn btn-primary"
-          onClick={onRunJob}
-          disabled={submitting || !canRunJob}
-          style={{ alignSelf: 'flex-start', fontSize: 12 }}
-        >
-          <IconSearch /> {submitting ? 'Submitting…' : 'Run MDI Check'}
-        </button>
-        {!canRunJob && !submitting && (
-          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            Run Parse Preview first to generate accepted items.
-          </p>
-        )}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-primary"
+            onClick={onRunJob}
+            disabled={submitting || !canRunJob}
+            style={{ fontSize: 12 }}
+          >
+            <IconSearch /> {submitting ? 'Submitting…' : 'Run MDI Check'}
+          </button>
+          {!canRunJob && !submitting && (
+            <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              Run Parse Preview first to generate accepted items.
+            </p>
+          )}
+          <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 'auto' }}>
+            No external calls — no quota consumed until Run MDI Check
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -175,161 +485,145 @@ function PreviewResultsSection({ preview, error }) {
       <div className="card">
         <div className="card-header"><span className="card-label">Parse Preview</span></div>
         <div className="card-body">
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>
-            Parse error: {error}
-          </p>
+          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Parse error: {error}</p>
         </div>
       </div>
     )
   }
-
   if (!preview) return null
-
-  const { accepted_count, rejected_count, duplicate_count, items, rejected, duplicates } = preview
 
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-label">Parse Preview</span>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           No external calls — no quota consumed
         </span>
       </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* Counts */}
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-          <div className="summary-tile">
-            <span className="tile-label">Accepted</span>
-            <span className="tile-value" style={{ color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' }}>
-              {accepted_count}
-            </span>
-          </div>
-          <div className="summary-tile">
-            <span className="tile-label">Rejected</span>
-            <span className="tile-value" style={{ color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-              {rejected_count}
-            </span>
-          </div>
-          <div className="summary-tile">
-            <span className="tile-label">Duplicates</span>
-            <span className="tile-value" style={{ color: duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' }}>
-              {duplicate_count}
-            </span>
-          </div>
-        </div>
-
-        {/* Accepted items table */}
-        {items.length > 0 && (
-          <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-              Accepted items ({items.length})
-            </p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {['#', 'Type', 'Original', 'Normalized'].map(h => (
-                      <th key={h} style={{
-                        textAlign: 'left', padding: '6px 10px',
-                        borderBottom: '1px solid var(--border)',
-                        color: 'var(--text-muted)', fontWeight: 600,
-                        whiteSpace: 'nowrap',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item.position} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '5px 10px', color: 'var(--text-dim)' }}>{item.position}</td>
-                      <td style={{ padding: '5px 10px' }}>
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
-                          color: item.input_type === 'domain' ? 'var(--ok)' : 'var(--accent)',
-                          textTransform: 'uppercase',
-                        }}>{item.input_type}</span>
-                      </td>
-                      <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                        {item.input_original}
-                      </td>
-                      <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text)' }}>
-                        {item.input_normalized}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {[
+            { label: 'Accepted', value: preview.accepted_count, color: preview.accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
+            { label: 'Rejected', value: preview.rejected_count, color: preview.rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Duplicates', value: preview.duplicate_count, color: preview.duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
+          ].map(t => (
+            <div key={t.label} className="summary-tile">
+              <span className="tile-label">{t.label}</span>
+              <span className="tile-value" style={{ color: t.color, fontSize: 18 }}>{t.value}</span>
             </div>
-          </div>
-        )}
-
-        {/* Rejected items */}
-        {rejected.length > 0 && (
-          <div>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => setShowRejected(v => !v)}
-            >
-              {showRejected ? '▲' : '▼'} {rejected.length} rejected item{rejected.length !== 1 ? 's' : ''}
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {preview.rejected_count > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowRejected(v => !v)}>
+              {showRejected ? 'Hide' : 'Show'} rejected ({preview.rejected_count})
             </button>
-            {showRejected && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {rejected.map((r, i) => (
-                  <div key={i} style={{
-                    display: 'flex', gap: 10, alignItems: 'flex-start',
-                    padding: '6px 10px', background: 'var(--bg-elevated)',
-                    borderRadius: 6, borderLeft: '3px solid var(--danger)',
-                    fontSize: 12,
-                  }}>
-                    <span style={{ color: 'var(--text-dim)', minWidth: 20 }}>#{r.position}</span>
-                    <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{r.input_original}</span>
-                    <span style={{ color: 'var(--danger)', marginLeft: 'auto' }}>{r.error.message}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Duplicates */}
-        {duplicates.length > 0 && (
-          <div>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => setShowDupes(v => !v)}
-            >
-              {showDupes ? '▲' : '▼'} {duplicates.length} duplicate{duplicates.length !== 1 ? 's' : ''} skipped
+          )}
+          {preview.duplicate_count > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowDupes(v => !v)}>
+              {showDupes ? 'Hide' : 'Show'} dupes ({preview.duplicate_count})
             </button>
-            {showDupes && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {duplicates.map((d, i) => (
-                  <div key={i} style={{
-                    display: 'flex', gap: 10, alignItems: 'center',
-                    padding: '6px 10px', background: 'var(--bg-elevated)',
-                    borderRadius: 6, borderLeft: '3px solid var(--warn)',
-                    fontSize: 12,
-                  }}>
-                    <span style={{ color: 'var(--text-dim)', minWidth: 20 }}>#{d.position}</span>
-                    <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{d.input_original}</span>
-                    <span style={{ color: 'var(--warn)', marginLeft: 'auto', fontSize: 11 }}>
-                      dup of {d.duplicate_of}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+          )}
+        </div>
+        {showRejected && preview.rejected?.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 120, overflowY: 'auto' }}>
+            {preview.rejected.map((r, i) => (
+              <div key={i}><code style={{ color: 'var(--danger)' }}>{r.original}</code> — {r.reason}</div>
+            ))}
           </div>
         )}
-
-        {accepted_count === 0 && rejected_count === 0 && duplicate_count === 0 && (
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>
-            No items found in input.
-          </p>
+        {showDupes && preview.duplicates?.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 80, overflowY: 'auto' }}>
+            {preview.duplicates.map((d, i) => <div key={i}><code>{d}</code></div>)}
+          </div>
         )}
+      </div>
+    </div>
+  )
+}
 
+// ── Upload preview results ────────────────────────────────────────────────────
+
+function UploadPreviewResultsSection({ preview, error }) {
+  const [showRejected, setShowRejected] = useState(false)
+  const [showDupes, setShowDupes] = useState(false)
+  const [showHeld, setShowHeld] = useState(true)
+
+  if (error) {
+    return (
+      <div className="card">
+        <div className="card-header"><span className="card-label">Upload Preview</span></div>
+        <div className="card-body">
+          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Upload error: {error}</p>
+        </div>
+      </div>
+    )
+  }
+  if (!preview) return null
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-label">Upload Preview</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          No external calls — no quota consumed
+        </span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          {[
+            { label: 'Accepted', value: preview.accepted_count, color: 'var(--ok)' },
+            { label: 'Rejected', value: preview.rejected_count, color: preview.rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Duplicates', value: preview.duplicate_count, color: 'var(--text-muted)' },
+            { label: 'Hold-skipped', value: preview.held_skipped_count ?? 0, color: '#818cf8' },
+          ].map(t => (
+            <div key={t.label} className="summary-tile">
+              <span className="tile-label">{t.label}</span>
+              <span className="tile-value" style={{ color: t.color, fontSize: 18 }}>{t.value}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {preview.rejected_count > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowRejected(v => !v)}>
+              {showRejected ? 'Hide' : 'Show'} rejected
+            </button>
+          )}
+          {preview.duplicate_count > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowDupes(v => !v)}>
+              {showDupes ? 'Hide' : 'Show'} dupes
+            </button>
+          )}
+          {(preview.held_skipped_count ?? 0) > 0 && (
+            <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowHeld(v => !v)}>
+              {showHeld ? 'Hide' : 'Show'} held ({preview.held_skipped_count})
+            </button>
+          )}
+        </div>
+        {showHeld && preview.held_items?.length > 0 && (
+          <div>
+            <p style={{ fontSize: 11, color: '#818cf8', marginBottom: 6 }}>Hold-skipped domains (not submitted to VT):</p>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr>{['#', 'Domain', 'Hold Type', 'Registrar', 'Created', 'Action'].map(h => (
+                  <th key={h} style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontWeight: 600 }}>{h}</th>
+                ))}</tr>
+              </thead>
+              <tbody>
+                {preview.held_items.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '4px 8px', color: 'var(--text-dim)' }}>{r.position}</td>
+                    <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.input_normalized}</td>
+                    <td style={{ padding: '4px 8px', color: '#818cf8' }}>{r.domain_hold?.hold_types?.join(', ') || '—'}</td>
+                    <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{r.registrar ?? '—'}</td>
+                    <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{formatDate(r.created_at)}</td>
+                    <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{r.recommended_action ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -337,11 +631,15 @@ function PreviewResultsSection({ preview, error }) {
 
 // ── Estimate section ──────────────────────────────────────────────────────────
 
-function fmtDuration(secs) {
-  if (secs < 60) return `${Math.round(secs)}s`
-  const m = Math.floor(secs / 60)
-  const s = Math.round(secs % 60)
-  return s > 0 ? `${m}m ${s}s` : `${m}m`
+function Row({ label, value, note, bold, color, warn }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{ fontFamily: 'monospace', fontWeight: bold ? 700 : 400, color: warn ? 'var(--warn)' : color ?? 'var(--text)' }}>
+        {value}{note && <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontFamily: 'inherit' }}> ({note})</span>}
+      </span>
+    </div>
+  )
 }
 
 function EstimateSection({ estimate, error, stale }) {
@@ -371,404 +669,313 @@ function EstimateSection({ estimate, error, stale }) {
     <div className="card" style={{ borderColor: will_exceed_quota ? 'var(--danger)' : stale ? 'var(--warn)' : undefined }}>
       <div className="card-header">
         <span className="card-label">Quota &amp; Runtime Estimate</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          Estimate only — no VT calls, no job created, no quota consumed
-        </span>
-        {stale && (
-          <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>
-            ⚠ Input changed — estimate may be outdated
-          </span>
-        )}
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Estimate only — no VT calls, no quota consumed</span>
+        {stale && <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>⚠ Input changed — estimate outdated</span>}
       </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {will_exceed_quota && (
-          <div style={{
-            padding: '10px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-            background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger)',
-            color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center',
-          }}>
+          <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger)', color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span>⛔</span>
-            <span>
-              Worst-case estimate ({estimated_vt_calls_max} VT calls) exceeds remaining quota
-              ({quota_remaining_now}). Submission will be blocked. Reduce input or wait until UTC midnight.
-            </span>
+            <span>Worst-case estimate ({estimated_vt_calls_max} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission will be blocked.</span>
           </div>
         )}
-
-        {/* Parse counts */}
         <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           {[
-            { label: 'Accepted',   value: accepted_count,   color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Eligible VT',value: eligible_vt_count, color: eligible_vt_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Rejected',   value: rejected_count,   color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-            { label: 'Duplicates', value: duplicate_count,  color: duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
+            { label: 'Accepted',    value: accepted_count,    color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
+            { label: 'Eligible VT', value: eligible_vt_count, color: eligible_vt_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
+            { label: 'Rejected',    value: rejected_count,    color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Duplicates',  value: duplicate_count,   color: duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
           ].map(t => (
             <div key={t.label} className="summary-tile">
               <span className="tile-label">{t.label}</span>
-              <span className="tile-value" style={{ color: t.color }}>{t.value}</span>
+              <span className="tile-value" style={{ color: t.color, fontSize: 18 }}>{t.value}</span>
             </div>
           ))}
         </div>
-
-        {/* Type breakdown */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
-            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Input type breakdown</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Row label="Bare domains" value={domain_count} />
-              <Row label="Full URLs" value={url_count} />
-              <Row label="Domain-report mode" value={domain_report_mode_count} note="1 call max" />
-              <Row label="URL-report mode" value={url_report_mode_count} note="up to 3 calls" />
-              {held_skipped_count > 0 && <Row label="Hold-skipped" value={held_skipped_count} note="0 calls" warn />}
-            </div>
-          </div>
-
           <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
             <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>VT call estimate</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Row label="Best case (all cached)" value={`${estimated_vt_calls_min} call${estimated_vt_calls_min !== 1 ? 's' : ''}`} />
-              <Row label="Worst case (none cached)" value={`${estimated_vt_calls_max} call${estimated_vt_calls_max !== 1 ? 's' : ''}`} bold />
+              <Row label="Best case" value={`${estimated_vt_calls_min} call${estimated_vt_calls_min !== 1 ? 's' : ''}`} />
+              <Row label="Worst case" value={`${estimated_vt_calls_max} call${estimated_vt_calls_max !== 1 ? 's' : ''}`} bold />
               <Row label="Quota remaining" value={quota_remaining_now} />
-              <Row
-                label="Headroom (worst case)"
-                value={quota_headroom >= 0 ? `+${quota_headroom}` : String(quota_headroom)}
-                color={quota_headroom >= 0 ? 'var(--ok)' : 'var(--danger)'}
+              <Row label="Headroom" value={quota_headroom >= 0 ? `+${quota_headroom}` : String(quota_headroom)} color={quota_headroom >= 0 ? 'var(--ok)' : 'var(--danger)'} />
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Estimated runtime</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Row label="Best case" value={fmtDuration(estimated_duration_seconds_min)} />
+              <Row label="Worst case" value={fmtDuration(estimated_duration_seconds_max)} />
+              {held_skipped_count > 0 && <Row label="Hold-skipped" value={held_skipped_count} note="0 calls" warn />}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}><strong style={{ color: 'var(--text-muted)' }}>Rate limit:</strong> {rate_limit_note}</p>
+          <p style={{ fontSize: 11, color: 'var(--warn)' }}><strong>Job state:</strong> {job_state_note}</p>
+          {live_check_note && <p style={{ fontSize: 11, color: 'var(--text-dim)' }}><strong style={{ color: 'var(--text-muted)' }}>Live checks:</strong> {live_check_note}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Triage summary cards ──────────────────────────────────────────────────────
+
+function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
+  const counts = getTriageCardCounts(results)
+  const total = results.length
+
+  return (
+    <div className="triage-cards-row" role="group" aria-label="Triage summary — click to filter">
+      {TRIAGE_CARDS.map(card => {
+        const count = counts[card.key] ?? 0
+        const isActive = activeFilter === card.filter
+        const isMuted = count === 0 && !isActive
+        return (
+          <button
+            key={card.key}
+            className={`triage-card${isActive ? ' active' : ''}${isMuted ? ' muted' : ''}`}
+            style={{ borderLeftColor: card.color }}
+            onClick={() => onFilterChange(isActive ? 'all' : card.filter)}
+            aria-pressed={isActive}
+            title={`Filter by: ${card.label} (${count} item${count !== 1 ? 's' : ''})`}
+          >
+            <span className="tc-label">{card.label}</span>
+            <span className="tc-count" style={{ color: count > 0 ? card.color : 'var(--text-dim)' }}>{count}</span>
+            <span className="tc-pct">{formatPercent(count, total)}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Filter bar ────────────────────────────────────────────────────────────────
+
+function FilterBar({ results, activeFilter, onFilterChange }) {
+  return (
+    <div className="filter-bar" role="group" aria-label="Result filters">
+      {NAMED_FILTERS.map(f => {
+        const count = getFilterCount(results, f.key)
+        const isActive = activeFilter === f.key
+        const isZero = count === 0 && f.key !== 'all'
+        return (
+          <button
+            key={f.key}
+            className={`filter-btn${isActive ? ' active' : ''}${isZero ? ' zero' : ''}`}
+            style={isActive ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}}
+            onClick={() => onFilterChange(isActive && f.key !== 'all' ? 'all' : f.key)}
+            aria-pressed={isActive}
+          >
+            {f.label}
+            <span className="filter-count">{f.key === 'all' ? results.length : count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Bulk controls ─────────────────────────────────────────────────────────────
+
+function BulkControls({ selectedCount }) {
+  return (
+    <div className="bulk-controls">
+      <span className="bulk-label">Bulk actions:</span>
+      <button className="btn-stub" disabled aria-disabled="true" title="Bulk actions — select rows first">
+        Actions {selectedCount > 0 ? `(${selectedCount})` : '▾'}
+      </button>
+      <button className="btn-stub" disabled aria-disabled="true" title="Export available in MDI-16">
+        <IconUpload /> Export Flagged
+      </button>
+      <button className="btn-stub" disabled aria-disabled="true" title="Export available in MDI-16">
+        <IconUpload /> Export All
+      </button>
+      <button className="btn-stub" disabled aria-disabled="true" title="Rescan not yet available">
+        <IconRefresh /> Rescan Selected
+      </button>
+      <button className="btn-stub" disabled aria-disabled="true" title="Rescan not yet available">
+        <IconRefresh /> Rescan Stale
+      </button>
+    </div>
+  )
+}
+
+// ── Operations results table ──────────────────────────────────────────────────
+
+function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll }) {
+  const allSelected = results.length > 0 && results.every(r => selectedIds.has(r.position))
+
+  return (
+    <div className="ops-table-wrap">
+      <table className="ops-table">
+        <thead>
+          <tr>
+            <th scope="col" style={{ width: 32, paddingLeft: 10 }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={e => onToggleAll(e.target.checked, results)}
+                aria-label="Select all visible rows"
+                title="Selection reserved for future bulk actions"
               />
-            </div>
-          </div>
-        </div>
-
-        {/* Runtime estimate */}
-        <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
-          <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>
-            Estimated runtime <span style={{ fontWeight: 400, fontSize: 11 }}>(approximate)</span>
-          </p>
-          <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>Best case: </span>
-              <span style={{ fontFamily: 'monospace', color: 'var(--ok)' }}>
-                {fmtDuration(estimated_duration_seconds_min)}
-              </span>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>Worst case: </span>
-              <span style={{ fontFamily: 'monospace', color: will_exceed_quota ? 'var(--danger)' : 'var(--text)' }}>
-                {fmtDuration(estimated_duration_seconds_max)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            <strong style={{ color: 'var(--text-muted)' }}>Rate limit:</strong> {rate_limit_note}
-          </p>
-          <p style={{ fontSize: 11, color: 'var(--warn)' }}>
-            <strong>Job state:</strong> {job_state_note}
-          </p>
-          {live_check_note && (
-            <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-              <strong style={{ color: 'var(--text-muted)' }}>Live checks:</strong> {live_check_note}
-            </p>
-          )}
-        </div>
-
-      </div>
-    </div>
-  )
-}
-
-function Row({ label, value, note, bold, color, warn }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span style={{
-        fontFamily: 'monospace',
-        fontWeight: bold ? 700 : 400,
-        color: color || (warn ? 'var(--warn)' : 'var(--text)'),
-      }}>
-        {value}{note && <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 4 }}>{note}</span>}
-      </span>
-    </div>
-  )
-}
-
-
-// ── Upload preview results ────────────────────────────────────────────────────
-
-function HoldBadge() {
-  return (
-    <span style={{
-      display: 'inline-block', fontSize: 10, fontWeight: 700,
-      letterSpacing: '0.06em', padding: '2px 6px', borderRadius: 4,
-      background: 'var(--warn)', color: '#000', textTransform: 'uppercase',
-    }}>On Hold</span>
-  )
-}
-
-function UploadPreviewResultsSection({ preview, error }) {
-  const [showRejected, setShowRejected] = useState(false)
-  const [showDupes, setShowDupes] = useState(false)
-  const [showHeld, setShowHeld] = useState(true)
-
-  if (error) {
-    return (
-      <div className="card">
-        <div className="card-header"><span className="card-label">Upload Preview</span></div>
-        <div className="card-body">
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Upload error: {error}</p>
-        </div>
-      </div>
-    )
-  }
-  if (!preview) return null
-
-  const { accepted_count, rejected_count, duplicate_count, held_count,
-          items, rejected, duplicates, held_items, columns_detected,
-          missing_optional_columns } = preview
-
-  return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-label">Upload Preview</span>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No external calls — no quota consumed</span>
-      </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-        {/* Counts */}
-        <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-          {[
-            { label: 'Accepted', value: accepted_count, color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Held',     value: held_count,     color: held_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
-            { label: 'Rejected', value: rejected_count, color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-            { label: 'Dupes',    value: duplicate_count, color: duplicate_count > 0 ? 'var(--accent)' : 'var(--text-muted)' },
-          ].map(t => (
-            <div key={t.label} className="summary-tile">
-              <span className="tile-label">{t.label}</span>
-              <span className="tile-value" style={{ color: t.color }}>{t.value}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Columns detected */}
-        {columns_detected && (
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            <span style={{ color: 'var(--text)', marginRight: 6 }}>Columns mapped:</span>
-            {Object.entries(columns_detected).filter(([,v]) => v).map(([k, v]) => (
-              <span key={k} style={{
-                marginRight: 8, padding: '1px 6px', borderRadius: 4,
-                background: 'var(--bg-elevated)', fontFamily: 'monospace',
-              }}>{k} → {v}</span>
-            ))}
-            {missing_optional_columns?.length > 0 && (
-              <span style={{ color: 'var(--text-dim)' }}>
-                (missing optional: {missing_optional_columns.join(', ')})
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Held items — shown first */}
-        {held_items?.length > 0 && (
-          <div>
-            <button
-              className="btn btn-ghost"
-              style={{ fontSize: 12, padding: '4px 10px', marginBottom: 8 }}
-              onClick={() => setShowHeld(v => !v)}
-            >
-              {showHeld ? '▲' : '▼'} {held_items.length} held domain{held_items.length !== 1 ? 's' : ''} (clientHold/serverHold)
-            </button>
-            {showHeld && (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      {['#', 'Domain', 'Hold Type', 'Registrar', 'Created', 'Action'].map(h => (
-                        <th key={h} style={{
-                          textAlign: 'left', padding: '6px 10px',
-                          borderBottom: '1px solid var(--border)',
-                          color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap',
-                        }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {held_items.map(item => {
-                      const holdTypes = item.domain_hold?.hold_types || []
-                      const holdLabel = holdTypes.filter(t => t !== 'none').join(' + ')
-                      return (
-                        <tr key={item.position} style={{ borderBottom: '1px solid var(--border)', background: 'rgba(250,173,20,0.04)' }}>
-                          <td style={{ padding: '5px 10px', color: 'var(--text-dim)' }}>{item.position}</td>
-                          <td style={{ padding: '5px 10px', fontFamily: 'monospace' }}>
-                            {item.input_normalized} <HoldBadge />
-                          </td>
-                          <td style={{ padding: '5px 10px', color: 'var(--warn)', fontSize: 11, fontWeight: 600 }}>
-                            {holdLabel || '—'}
-                          </td>
-                          <td style={{ padding: '5px 10px', color: 'var(--text-muted)' }}>{item.registrar || '—'}</td>
-                          <td style={{ padding: '5px 10px', color: 'var(--text-muted)' }}>{item.created_at || '—'}</td>
-                          <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--warn)' }}>Skip (hold)</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* All accepted items */}
-        {items.length > 0 && (
-          <div>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-              All accepted items ({items.length})
-            </p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {['#', 'Type', 'Normalized', 'Hold', 'Registrar', 'Created', 'Age', 'Action'].map(h => (
-                      <th key={h} style={{
-                        textAlign: 'left', padding: '6px 10px',
-                        borderBottom: '1px solid var(--border)',
-                        color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap',
-                      }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item.position} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '5px 10px', color: 'var(--text-dim)' }}>{item.position}</td>
-                      <td style={{ padding: '5px 10px' }}>
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em',
-                          color: item.input_type === 'domain' ? 'var(--ok)' : 'var(--accent)',
-                        }}>{item.input_type}</span>
-                      </td>
-                      <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text)' }}>
-                        {item.input_normalized}
-                        {item.domain_hold?.has_hold && <> <HoldBadge /></>}
-                      </td>
-                      <td style={{ padding: '5px 10px', color: item.domain_hold?.has_hold ? 'var(--warn)' : 'var(--text-dim)', fontSize: 11 }}>
-                        {item.domain_hold?.has_hold
-                          ? (item.domain_hold.hold_types || []).filter(t => t !== 'none').join('+')
-                          : item.domain_hold?.source === 'not_checked' ? 'unk' : 'none'}
-                      </td>
-                      <td style={{ padding: '5px 10px', color: 'var(--text-muted)' }}>{item.registrar || '—'}</td>
-                      <td style={{ padding: '5px 10px', color: 'var(--text-muted)' }}>{item.created_at || '—'}</td>
-                      <td style={{ padding: '5px 10px', color: 'var(--text-muted)', fontSize: 11 }}>{item.age_bucket}</td>
-                      <td style={{ padding: '5px 10px', fontSize: 11,
-                        color: item.recommended_action === 'skip' ? 'var(--warn)' : 'var(--text-dim)' }}>
-                        {item.recommended_action === 'skip' ? 'Skip (hold)' : 'Pending'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Rejected rows */}
-        {rejected?.length > 0 && (
-          <div>
-            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => setShowRejected(v => !v)}>
-              {showRejected ? '▲' : '▼'} {rejected.length} rejected row{rejected.length !== 1 ? 's' : ''}
-            </button>
-            {showRejected && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {rejected.map((r, i) => (
-                  <div key={i} style={{
-                    display: 'flex', gap: 10, padding: '6px 10px',
-                    background: 'var(--bg-elevated)', borderRadius: 6,
-                    borderLeft: '3px solid var(--danger)', fontSize: 12,
-                  }}>
-                    <span style={{ color: 'var(--text-dim)', minWidth: 20 }}>#{r.position}</span>
-                    <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{r.input_original}</span>
-                    <span style={{ color: 'var(--danger)', marginLeft: 'auto' }}>{r.error?.message}</span>
+            </th>
+            <th scope="col" style={{ width: 36 }}>#</th>
+            <th scope="col" style={{ minWidth: 180 }}>Domain / URL</th>
+            <th scope="col" style={{ minWidth: 140 }}>Triage Bucket</th>
+            <th scope="col">Confidence</th>
+            <th scope="col" style={{ minWidth: 130 }}>Recommended Action</th>
+            <th scope="col">VT Ratio</th>
+            <th scope="col">Freshness</th>
+            <th scope="col">Live</th>
+            <th scope="col">Created</th>
+            <th scope="col">Age</th>
+            <th scope="col">Evidence</th>
+            <th scope="col" style={{ width: 70 }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map(r => {
+            const isSelected = selectedIds.has(r.position)
+            const vbKey = getVirtualBucketKey(r)
+            const bucket = r.triage_bucket ?? 'pending'
+            const hasErrors = r.errors?.length > 0
+            return (
+              <tr
+                key={r.position}
+                className={`${rowTierClass(r)}${isSelected ? ' row-selected' : ''}`}
+                data-bucket={bucket}
+              >
+                <td className="accent-cell" style={{ paddingLeft: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelect(r.position)}
+                    aria-label={`Select ${r.input_normalized}`}
+                    title="Selection reserved for future bulk actions"
+                  />
+                </td>
+                <td style={{ color: 'var(--text-dim)', textAlign: 'center' }}>{r.position}</td>
+                <td>
+                  <code
+                    style={{ fontFamily: 'monospace', fontSize: 11, display: 'block', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}
+                    title={r.input_normalized}
+                  >
+                    {r.input_normalized}
+                  </code>
+                </td>
+                <td>
+                  <span className={`badge ${bucketBadgeClass(bucket)}`} style={{ textTransform: 'uppercase' }}>
+                    {bucket}
+                  </span>
+                  {Array.isArray(r.triage_reason) && r.triage_reason.length > 0 && (
+                    <details className="triage-reasons">
+                      <summary>Reasons ▾</summary>
+                      <ul>
+                        {r.triage_reason.map((t, i) => <li key={i}>{t}</li>)}
+                      </ul>
+                    </details>
+                  )}
+                </td>
+                <td>
+                  <span className={confClass(r.triage_confidence)}>
+                    {r.triage_confidence ? r.triage_confidence.charAt(0).toUpperCase() + r.triage_confidence.slice(1) : '—'}
+                  </span>
+                </td>
+                <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {r.recommended_action ? r.recommended_action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'}
+                </td>
+                <td style={{ fontFamily: 'monospace', color: (r.vt_hits ?? 0) > 0 ? 'var(--danger)' : 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                  {formatVtRatio(r)}
+                </td>
+                <td>
+                  {r.freshness ? (
+                    <span className={`badge ${freshnessBadgeClass(r.freshness)}`}>
+                      {r.freshness.replace(/_/g, ' ')}
+                    </span>
+                  ) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+                </td>
+                <td>
+                  {r.live_status && r.live_status !== 'not_checked' ? (
+                    <span className={`badge ${liveBadgeClass(r.live_status)}`}>
+                      {formatLiveStatus(r.live_status)}
+                    </span>
+                  ) : <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>—</span>}
+                </td>
+                <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  {formatDate(r.created_at)}
+                </td>
+                <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                  {formatAgeBucket(r.age_bucket)}
+                </td>
+                <td>
+                  {r.evidence_status ? (
+                    <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>
+                      {r.evidence_status.replace(/_/g, ' ')}
+                    </span>
+                  ) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+                  {hasErrors && <span style={{ color: 'var(--warn)', marginLeft: 4, fontSize: 10 }} title={r.errors.join('; ')}>⚠</span>}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      className="btn-stub"
+                      style={{ padding: '3px 6px' }}
+                      disabled
+                      aria-disabled="true"
+                      title="Detail view — coming soon (MDI-14)"
+                    >
+                      <IconEye />
+                    </button>
+                    <button
+                      className="btn-stub"
+                      style={{ padding: '3px 6px' }}
+                      disabled
+                      aria-disabled="true"
+                      title="More actions — coming soon"
+                    >
+                      <IconMoreVertical />
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Duplicates */}
-        {duplicates?.length > 0 && (
-          <div>
-            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
-              onClick={() => setShowDupes(v => !v)}>
-              {showDupes ? '▲' : '▼'} {duplicates.length} duplicate{duplicates.length !== 1 ? 's' : ''} skipped
-            </button>
-            {showDupes && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {duplicates.map((d, i) => (
-                  <div key={i} style={{
-                    display: 'flex', gap: 10, padding: '6px 10px',
-                    background: 'var(--bg-elevated)', borderRadius: 6,
-                    borderLeft: '3px solid var(--accent)', fontSize: 12,
-                  }}>
-                    <span style={{ color: 'var(--text-dim)', minWidth: 20 }}>#{d.position}</span>
-                    <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{d.input_original}</span>
-                    <span style={{ color: 'var(--accent)', marginLeft: 'auto', fontSize: 11 }}>dup of {d.duplicate_of}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {accepted_count === 0 && rejected_count === 0 && duplicate_count === 0 && (
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>No rows found in file.</p>
-        )}
-      </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
 
-
-// ── Triage bucket color ───────────────────────────────────────────────────────
-
-function triageColor(bucket) {
-  const m = {
-    malicious: 'var(--danger)',
-    suspicious: 'var(--warn)',
-    held: 'var(--accent)',
-    clean: 'var(--ok)',
-    error: 'var(--text-dim)',
-    pending: 'var(--text-dim)',
-  }
-  return m[bucket] || 'var(--text)'
-}
-
-function confidenceColor(conf) {
-  const m = {
-    high: 'var(--ok)',
-    clean: 'var(--ok)',
-    medium: 'var(--warn)',
-    low: 'var(--danger)',
-    unknown: 'var(--text-dim)',
-  }
-  return m[conf] || 'var(--text-dim)'
-}
-
-function TriageReasonList({ reasons }) {
-  if (!reasons || reasons.length === 0) return null
-  return (
-    <ul style={{ margin: '4px 0 0 0', padding: '0 0 0 16px', fontSize: 12, color: 'var(--text-dim)' }}>
-      {reasons.map((r, i) => <li key={i} style={{ marginBottom: 2 }}>{r}</li>)}
-    </ul>
-  )
-}
-
-// ── Job section (VT job processing — early implementation) ────────────────────
+// ── Job section ───────────────────────────────────────────────────────────────
 
 function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestore }) {
+  const [activeFilter, setActiveFilter] = useState('all')
+  const [selectedIds, setSelectedIds] = useState(new Set())
+
+  // Reset selection and filter when job changes
+  useEffect(() => {
+    setActiveFilter('all')
+    setSelectedIds(new Set())
+  }, [jobId])
+
+  function handleFilterChange(key) {
+    setActiveFilter(key)
+    setSelectedIds(new Set())
+  }
+  function handleToggleSelect(pos) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(pos) ? next.delete(pos) : next.add(pos)
+      return next
+    })
+  }
+  function handleToggleAll(checked, visibleResults) {
+    setSelectedIds(checked ? new Set(visibleResults.map(r => r.position)) : new Set())
+  }
+
   if (jobError) {
     return (
       <div className="card">
@@ -781,108 +988,73 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
   }
   if (!job && !jobId) return null
 
-  const pending = job ? (job.queued ?? 0) : 0
-  const done    = job ? (job.processed ?? 0) : 0
-  const total   = job ? (job.total ?? 0) : 0
-  const pct     = total > 0 ? Math.round((done / total) * 100) : 0
-  const results = job?.results ?? []
+  const done      = job ? (job.processed ?? 0) : 0
+  const total     = job ? (job.total ?? 0) : 0
+  const pct       = total > 0 ? Math.round((done / total) * 100) : 0
+  const allResults = job?.results ?? []
+  // Sort by priority before filtering
+  const prioritySorted = [...allResults].sort(comparePriority)
+  const filteredResults = getFilteredResults(prioritySorted, activeFilter)
+  const isComplete = job?.status === 'done' || job?.status === 'error'
+  const isRunning  = job?.status === 'running' || job?.status === 'queued'
 
-  const malCount  = results.filter(r => r.triage_bucket === 'malicious').length
-  const suspCount = results.filter(r => r.triage_bucket === 'suspicious').length
-  const cleanCnt  = results.filter(r => r.triage_bucket === 'clean').length
-  const errCount  = results.filter(r => r.triage_bucket === 'error').length
-  const heldCount = results.filter(r => r.triage_bucket === 'held').length
-
-  const statusColor = {
-    queued: 'var(--text-muted)', running: 'var(--accent)',
-    done: 'var(--ok)', error: 'var(--danger)',
-  }[job?.status] || 'var(--text-muted)'
+  const statusColor = { queued: 'var(--text-muted)', running: 'var(--accent)', done: 'var(--ok)', error: 'var(--danger)' }[job?.status] ?? 'var(--text-muted)'
 
   return (
     <div className="card">
-      <div className="card-header">
-        <span className="card-label">VT Job</span>
+      <div className="card-header" style={{ flexWrap: 'wrap' }}>
+        <span className="card-label">Triage Results</span>
         {restoredFromSession && (
-          <span style={{
-            fontSize: 11, color: 'var(--ok)', fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
+          <span style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
             ↩ Restored from last session
             <button
               onClick={onDismissRestore}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text-dim)', fontSize: 11, padding: '0 2px',
-              }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 11, padding: '0 2px' }}
               title="Dismiss"
             >✕</button>
           </span>
         )}
-        <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>
-          VT job processing — early implementation
-        </span>
+        {job && (
+          <span style={{ fontSize: 11, color: statusColor, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {job.status}
+          </span>
+        )}
+        {job && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            Job: <code style={{ fontSize: 10 }}>{jobId}</code>
+          </span>
+        )}
       </div>
+
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* Status bar */}
-        {job && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-              <span style={{ color: 'var(--text-muted)' }}>
-                Job: <code style={{ fontSize: 11 }}>{jobId}</code>
+        {/* Progress bar */}
+        {job && total > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+              <span>
+                {isRunning ? `Processing… ${done} / ${total} complete` : `${done} / ${total} processed`}
               </span>
-              <span style={{ color: statusColor, fontWeight: 600, textTransform: 'uppercase', fontSize: 11 }}>
-                {job.status}
-              </span>
+              <span>{pct}%</span>
             </div>
-            {total > 0 && (
-              <div style={{ height: 6, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', borderRadius: 4,
-                  width: `${pct}%`,
-                  background: job.status === 'done' ? 'var(--ok)'
-                    : job.status === 'error' ? 'var(--danger)' : 'var(--accent)',
-                  transition: 'width 0.3s ease',
-                }} />
-              </div>
-            )}
+            <div style={{ height: 5, background: 'var(--bg-elevated)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 4, width: `${pct}%`, background: isComplete && job.status === 'error' ? 'var(--danger)' : isComplete ? 'var(--ok)' : 'var(--accent)', transition: 'width 0.4s ease' }} />
+            </div>
           </div>
         )}
 
-        {/* Saved job settings summary */}
-        {job && (job.status === 'done' || job.status === 'error') && (
-          <div style={{
-            fontSize: 11, color: 'var(--text-dim)', padding: '6px 10px',
-            background: 'var(--bg-elevated)', borderRadius: 4, lineHeight: 1.7,
-          }}>
-            <strong>Job ran with:</strong>{' '}
-            {job.use_domain_reports ? 'Domain report mode' : 'URL report mode'}{' '}
-            · Stale after {job.stale_threshold_days ?? 7} days
-            {restoredFromSession && <span style={{ marginLeft: 8, color: 'var(--ok)', fontStyle: 'italic' }}>(recovered)</span>}
+        {/* Job settings summary */}
+        {job && isComplete && (
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span><strong style={{ color: 'var(--text-muted)' }}>Mode:</strong> {job.use_domain_reports ? 'Domain report' : 'URL report'}</span>
+            <span><strong style={{ color: 'var(--text-muted)' }}>Stale after:</strong> {job.stale_threshold_days ?? 7} days</span>
+            <span><strong style={{ color: 'var(--text-muted)' }}>VT calls used:</strong> {job.lookups_used ?? 0}</span>
+            {restoredFromSession && <span style={{ color: 'var(--ok)', fontStyle: 'italic' }}>↩ recovered</span>}
           </div>
         )}
 
-        {/* Count tiles */}
+        {/* Enrichment + live-check counters */}
         {job && (
-          <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
-            {[
-              { label: 'Total',      value: total,     color: 'var(--text)' },
-              { label: 'Malicious',  value: malCount,  color: malCount  > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-              { label: 'Suspicious', value: suspCount, color: suspCount > 0 ? 'var(--warn)'   : 'var(--text-muted)' },
-              { label: 'Clean',      value: cleanCnt,  color: cleanCnt  > 0 ? 'var(--ok)'     : 'var(--text-muted)' },
-              { label: 'Held/Skip',  value: heldCount + (job.held_skipped ?? 0), color: 'var(--accent)' },
-              { label: 'Error',      value: errCount,  color: errCount  > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-            ].map(t => (
-              <div key={t.label} className="summary-tile">
-                <span className="tile-label">{t.label}</span>
-                <span className="tile-value" style={{ color: t.color }}>{t.value}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Live-check and enrichment counter summary (MDI-12A) */}
-        {job && (job.status === 'done' || job.status === 'running') && (
           (() => {
             const lcc  = job.live_check_count ?? 0
             const lcsk = job.live_check_skipped_count ?? 0
@@ -892,350 +1064,107 @@ function JobSection({ job, jobError, jobId, restoredFromSession, onDismissRestor
             const anyRdap = rdap > 0
             if (!anyLive && !anyRdap) return null
             return (
-              <div style={{
-                fontSize: 11, color: 'var(--text-dim)', padding: '6px 10px',
-                background: 'var(--bg-elevated)', borderRadius: 4,
-                display: 'flex', flexWrap: 'wrap', gap: '6px 20px',
-              }}>
-                {anyRdap && (
-                  <span title="Domains enriched via RDAP/WHOIS before VT processing">
-                    RDAP enriched: <strong style={{ color: 'var(--text-muted)' }}>{rdap}</strong>
-                  </span>
-                )}
-                {anyLive && (
-                  <>
-                    <span title="Items that received a live HTTP activity check">
-                      Live checks run: <strong style={{ color: lcc > 0 ? 'var(--accent)' : 'var(--text-dim)' }}>{lcc}</strong>
-                    </span>
-                    <span title="Items skipped by live-check eligibility (clean, held, or error)">
-                      Live checks skipped: <strong style={{ color: 'var(--text-dim)' }}>{lcsk}</strong>
-                    </span>
-                    {lce > 0 && (
-                      <span title="Items where the live check returned an error">
-                        Live-check errors: <strong style={{ color: 'var(--warn)' }}>{lce}</strong>
-                      </span>
-                    )}
-                  </>
-                )}
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', padding: '5px 10px', background: 'var(--bg-elevated)', borderRadius: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 20px' }}>
+                {anyRdap && <span>RDAP enriched: <strong style={{ color: 'var(--text-muted)' }}>{rdap}</strong></span>}
+                {anyLive && <>
+                  <span>Live checks run: <strong style={{ color: lcc > 0 ? 'var(--accent)' : 'var(--text-dim)' }}>{lcc}</strong></span>
+                  <span>Live checks skipped: <strong style={{ color: 'var(--text-dim)' }}>{lcsk}</strong></span>
+                  {lce > 0 && <span>Live-check errors: <strong style={{ color: 'var(--warn)' }}>{lce}</strong></span>}
+                </>}
               </div>
             )
           })()
         )}
 
+        {/* Triage cards — only show once we have results */}
+        {allResults.length > 0 && (
+          <TriageSummaryCards
+            results={allResults}
+            activeFilter={activeFilter}
+            onFilterChange={handleFilterChange}
+          />
+        )}
+
+        {/* Filter bar */}
+        {allResults.length > 0 && (
+          <FilterBar
+            results={allResults}
+            activeFilter={activeFilter}
+            onFilterChange={handleFilterChange}
+          />
+        )}
+
+        {/* Bulk controls */}
+        {allResults.length > 0 && (
+          <BulkControls selectedCount={selectedIds.size} />
+        )}
+
+        {/* Table meta */}
+        {filteredResults.length > 0 && (
+          <div className="table-meta">
+            <span>
+              Showing <strong>{filteredResults.length}</strong>
+              {activeFilter !== 'all' ? ` of ${allResults.length}` : ''} result{filteredResults.length !== 1 ? 's' : ''}
+              {activeFilter !== 'all' && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>— filtered by: {NAMED_FILTERS.find(f => f.key === activeFilter)?.label ?? activeFilter}</span>}
+            </span>
+            <span style={{ color: 'var(--text-dim)' }}>Priority sorted · {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'no selection'}</span>
+          </div>
+        )}
+
         {/* Results table */}
-        {results.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-              Results ({results.length})
+        {filteredResults.length > 0 && (
+          <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+            <ResultsTable
+              results={filteredResults}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              onToggleAll={handleToggleAll}
+            />
+          </div>
+        )}
+
+        {/* Empty filter state */}
+        {allResults.length > 0 && filteredResults.length === 0 && (
+          <div className="empty-state">
+            No results match this filter.
+            <br />
+            <button className="btn btn-ghost" style={{ marginTop: 10, fontSize: 12 }} onClick={() => handleFilterChange('all')}>
+              Clear filter — show all
+            </button>
+          </div>
+        )}
+
+        {/* Loading states */}
+        {allResults.length === 0 && isRunning && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>
+              {job?.status === 'queued' ? 'Queued — waiting to start…' : 'Processing… results will appear as they complete.'}
             </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr>
-                  {['#', 'Input', 'Status', 'Bucket / Reason', 'VT Hits', 'Ratio', 'Freshness', 'Action', 'Confidence', 'Evidence'].map(h => (
-                    <th key={h} style={{
-                      textAlign: 'left', padding: '6px 10px',
-                      borderBottom: '1px solid var(--border)',
-                      color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap',
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '5px 10px', color: 'var(--text-dim)' }}>{r.position}</td>
-                    <td style={{ padding: '5px 10px', fontFamily: 'monospace', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {r.input_normalized}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {r.processing_status}
-                    </td>
-                    <td style={{ padding: '5px 10px' }}>
-                      <span style={{ fontWeight: 600, color: triageColor(r.triage_bucket), fontSize: 11, textTransform: 'uppercase' }}>
-                        {r.triage_bucket}
-                      </span>
-                      {Array.isArray(r.triage_reason) && r.triage_reason.length > 0 && (
-                        <TriageReasonList reasons={r.triage_reason} />
-                      )}
-                    </td>
-                    <td style={{ padding: '5px 10px', textAlign: 'center', color: (r.vt_hits ?? 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                      {r.vt_hits ?? '—'}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                      {r.vt_ratio ?? '—'}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {r.freshness ?? '—'}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {r.recommended_action ?? '—'}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontSize: 11, color: confidenceColor(r.triage_confidence) }}>
-                      {r.triage_confidence ?? '—'}
-                    </td>
-                    <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {r.evidence_status ?? '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         )}
-
-        {job && results.length === 0 && job.status === 'running' && (
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>
-            Processing… results will appear as they complete.
-          </p>
-        )}
-        {job && results.length === 0 && job.status === 'queued' && (
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', textAlign: 'center' }}>Queued…</p>
-        )}
       </div>
-    </div>
-  )
-}
-
-function SettingsSection({ useDomainReports, setUseDomainReports, staleThresholdDays, setStaleThresholdDays, locked }) {
-  const lockedStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
-  return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-label">Settings</span>
-        {locked && (
-          <span style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
-            Locked — start a new job to change settings
-          </span>
-        )}
-      </div>
-      <div className="card-body">
-
-        {/* ── Group 1: Functional settings ──────────────────────────────── */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-            VT Processing Options
-          </div>
-          <div className="settings-list" style={lockedStyle}>
-
-            {/* VT Report Mode */}
-            <div className="setting-row">
-              <div className="setting-info">
-                <span className="setting-name">VT Report Mode</span>
-                <span className="setting-desc">
-                  {useDomainReports
-                    ? 'Domain report mode — 1 VT call per bare domain. Less detail than URL mode.'
-                    : 'URL report mode (recommended) — up to 3 VT calls per bare domain. Better coverage.'}
-                </span>
-              </div>
-              <button
-                className={`btn ${useDomainReports ? 'btn-secondary' : 'btn-primary'}`}
-                style={{ fontSize: 11, padding: '4px 12px', minWidth: 130, whiteSpace: 'nowrap' }}
-                onClick={() => setUseDomainReports(v => !v)}
-                disabled={locked}
-                title={locked ? 'Settings locked while a job is active' : undefined}
-              >
-                {useDomainReports ? '⚙ Domain report' : '⚙ URL report'}
-              </button>
-            </div>
-
-            {/* Stale threshold */}
-            <div className="setting-row">
-              <div className="setting-info">
-                <span className="setting-name">Stale Threshold</span>
-                <span className="setting-desc">
-                  VT reports older than this many days are classified as <strong>STALE</strong> (lower confidence). Default: 7 days.
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input
-                  type="number"
-                  min={1}
-                  max={90}
-                  value={staleThresholdDays}
-                  onChange={e => {
-                    const v = parseInt(e.target.value, 10)
-                    if (!isNaN(v) && v >= 1 && v <= 90) setStaleThresholdDays(v)
-                  }}
-                  disabled={locked}
-                  style={{
-                    width: 60, padding: '4px 6px', borderRadius: 4, border: '1px solid var(--border)',
-                    background: 'var(--surface)', color: 'var(--text)', fontSize: 13,
-                    opacity: locked ? 0.55 : 1,
-                  }}
-                  title={locked ? 'Settings locked while a job is active' : 'Stale threshold in days (1–90)'}
-                />
-                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>days</span>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* ── Group 2: Disabled placeholders (not yet implemented) ───────── */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-            Advanced Options <span style={{ fontSize: 10, fontWeight: 400, textTransform: 'none' }}>(not yet implemented)</span>
-          </div>
-          <div className="settings-list">
-
-            <div className="setting-row" style={{ opacity: 0.5 }}>
-              <div className="setting-info">
-                <span className="setting-name">Auto-Rescan Stale Results</span>
-                <span className="setting-desc">
-                  Automatically request fresh VT scans for stale items. <strong>Not yet implemented.</strong>{' '}
-                  When enabled, will consume additional VT quota per stale item.
-                </span>
-              </div>
-              <div className="toggle-placeholder" title="Not yet implemented — auto-rescan coming in a future release" />
-            </div>
-
-            <div className="setting-row" style={{ opacity: 0.5 }}>
-              <div className="setting-info">
-                <span className="setting-name">URL Activity Check</span>
-                <span className="setting-desc">
-                  Live HEAD-request probe for each item (SSRF-safe). <strong>Coming in a future release.</strong>
-                </span>
-              </div>
-              <div className="toggle-placeholder" title="Not yet implemented — URL activity check coming in a future release" />
-            </div>
-
-            <div className="setting-row" style={{ opacity: 0.5 }}>
-              <div className="setting-info">
-                <span className="setting-name">Export Results</span>
-                <span className="setting-desc">
-                  Download results as CSV or JSON. <strong>Coming soon.</strong>
-                </span>
-              </div>
-              <div className="toggle-placeholder" title="Not yet implemented — export coming in a future release" />
-            </div>
-
-          </div>
-        </div>
-
-        {/* ── Group 3: Info rows (read-only) ────────────────────────────── */}
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-            Current Behavior (read-only)
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.8 }}>
-            <div><strong>VT hit definition:</strong> MALICIOUS ≥ 1 engine → Malicious · SUSPICIOUS ≥ 1 engine → Suspicious. Configurable threshold coming soon.</div>
-            <div><strong>Max items per job:</strong> 500</div>
-            <div><strong>Default scheme:</strong> HTTP (bare tokens treated as domains)</div>
-            <div><strong>Hold detection:</strong> clientHold / serverHold domains skip VT — enabled by default</div>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  )
-}
-
-function DashboardSection() {
-  return (
-    <div className="card">
-      <div className="card-header">
-        <span className="card-label">Dashboard</span>
-        <button className="btn btn-ghost" disabled style={{ fontSize: 12, padding: '4px 10px' }}>Download Usage Report</button>
-      </div>
-      <div className="card-body">
-        <div className="dashboard-placeholder">Job history and quota usage will appear here.</div>
-      </div>
-    </div>
-  )
-}
-
-// ── Quota widget ──────────────────────────────────────────────────────────────
-
-function QuotaWidget({ quota, loading, error }) {
-  if (loading) {
-    return (
-      <div style={{
-        fontSize: 11, color: 'var(--text-dim)', padding: '4px 0',
-        display: 'flex', alignItems: 'center', gap: 8,
-      }}>
-        <span style={{ opacity: 0.6 }}>⏳ Checking VT quota…</span>
-      </div>
-    )
-  }
-  if (error) {
-    return (
-      <div style={{
-        fontSize: 11, color: 'var(--warn)', padding: '4px 0',
-        display: 'flex', alignItems: 'center', gap: 6,
-      }}>
-        ⚠ Quota check failed: {error}
-      </div>
-    )
-  }
-  if (!quota) return null
-
-  const pct = quota.remaining != null && quota.daily_limit != null
-    ? Math.round(((quota.daily_limit - quota.remaining) / quota.daily_limit) * 100)
-    : null
-  const barColor = quota.remaining <= 0 ? 'var(--danger)'
-    : quota.remaining < 50 ? 'var(--warn)' : 'var(--ok)'
-  const checkedStr = quota.checkedAt
-    ? new Date(quota.checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : null
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 14,
-      fontSize: 11, color: 'var(--text-muted)',
-      padding: '5px 0', flexWrap: 'wrap',
-    }}>
-      <span title="Shared VT quota — used by MDI and VT Bulk Check">
-        <span style={{ color: 'var(--text-dim)' }}>VT quota: </span>
-        <span style={{ fontFamily: 'monospace', color: quota.remaining <= 0 ? 'var(--danger)' : 'var(--text)' }}>
-          {quota.daily_lookups_used ?? '?'} / {quota.daily_limit ?? '500'}
-        </span>
-        {' '}
-        <span style={{ color: barColor, fontWeight: 600 }}>
-          ({quota.remaining ?? '?'} remaining)
-        </span>
-      </span>
-      {pct != null && (
-        <span style={{
-          display: 'inline-block', width: 60, height: 6,
-          background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden',
-          verticalAlign: 'middle',
-        }}>
-          <span style={{
-            display: 'block', height: '100%',
-            width: `${Math.min(pct, 100)}%`,
-            background: barColor, borderRadius: 3,
-          }} />
-        </span>
-      )}
-      {checkedStr && (
-        <span style={{ color: 'var(--text-dim)' }}>
-          Last checked: {checkedStr}
-        </span>
-      )}
     </div>
   )
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
-// How old a quota reading can be before estimate/submit forces a refresh (ms).
-const QUOTA_STALE_MS = 60_000
-
 export default function App() {
-  // Shared VT quota state (MDI-12A — refreshed on load, before submit, after completion)
-  const [quotaState, setQuotaState] = useState(null)    // { daily_lookups_used, remaining, daily_limit, checkedAt }
+  // Shared VT quota state (MDI-12A)
+  const [quotaState, setQuotaState]   = useState(null)
   const [quotaLoading, setQuotaLoading] = useState(false)
-  const [quotaError, setQuotaError] = useState(null)
+  const [quotaError, setQuotaError]   = useState(null)
+
+  // Settings visibility
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsPanelId = 'mdi-settings-panel'
 
   async function refreshQuota() {
     setQuotaLoading(true)
     setQuotaError(null)
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/usage`)
-      if (!resp.ok) {
-        setQuotaError(`HTTP ${resp.status}`)
-        return null
-      }
+      if (!resp.ok) { setQuotaError(`HTTP ${resp.status}`); return null }
       const data = await resp.json()
       const next = { ...data, checkedAt: Date.now() }
       setQuotaState(next)
@@ -1254,55 +1183,49 @@ export default function App() {
   }
 
   // Paste preview state
-  const [rawInput, setRawInput] = useState('')
-  const [previewing, setPreviewing] = useState(false)
-  const [preview, setPreview] = useState(null)
+  const [rawInput, setRawInput]       = useState('')
+  const [previewing, setPreviewing]   = useState(false)
+  const [preview, setPreview]         = useState(null)
   const [previewError, setPreviewError] = useState(null)
 
   // Estimate state
-  const [estimating, setEstimating] = useState(false)
+  const [estimating, setEstimating]       = useState(false)
   const [estimateResult, setEstimateResult] = useState(null)
   const [estimateError, setEstimateError] = useState(null)
   const [estimateStale, setEstimateStale] = useState(false)
 
   // Upload preview state
   const fileRef = useRef(null)
-  const [selectedFile, setSelectedFile] = useState(null)
+  const [selectedFile, setSelectedFile]     = useState(null)
   const [uploadPreviewing, setUploadPreviewing] = useState(false)
-  const [uploadPreview, setUploadPreview] = useState(null)
-  const [uploadError, setUploadError] = useState(null)
+  const [uploadPreview, setUploadPreview]   = useState(null)
+  const [uploadError, setUploadError]       = useState(null)
 
   // Settings state
-  const [useDomainReports, setUseDomainReports] = useState(false)
+  const [useDomainReports, setUseDomainReports]     = useState(false)
   const [staleThresholdDays, setStaleThresholdDays] = useState(7)
 
   // VT job state
-  const [submitting, setSubmitting] = useState(false)
-  const [jobId, setJobId] = useState(null)
-  const [job, setJob] = useState(null)
-  const [jobError, setJobError] = useState(null)
+  const [submitting, setSubmitting]               = useState(false)
+  const [jobId, setJobId]                         = useState(null)
+  const [job, setJob]                             = useState(null)
+  const [jobError, setJobError]                   = useState(null)
   const [restoredFromSession, setRestoredFromSession] = useState(false)
   const pollRef = useRef(null)
 
   const canRunJob = !!(preview && preview.accepted_count > 0)
-
-  // Settings are locked while a job is running/queued or a recovered job is shown
   const settingsLocked = !!(
     restoredFromSession ||
     (job && (job.status === 'queued' || job.status === 'running'))
   )
-
-  // Shared settings payload — single source of truth for both estimate and submit
   const settingsPayload = {
-    default_scheme: 'http',
-    max_items: 500,
+    default_scheme: 'http', max_items: 500,
     use_domain_reports: useDomainReports,
     stale_threshold_days: staleThresholdDays,
   }
 
   async function handleEstimate() {
     if (!rawInput.trim()) return
-    // Refresh shared quota first if stale — for operator visibility before the estimate renders
     if (isQuotaStale()) await refreshQuota()
     setEstimating(true)
     setEstimateResult(null)
@@ -1310,97 +1233,57 @@ export default function App() {
     setEstimateStale(false)
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/estimate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
       })
-      if (!resp.ok) {
-        const text = await resp.text()
-        setEstimateError(`HTTP ${resp.status}: ${text}`)
-        return
-      }
+      if (!resp.ok) { const t = await resp.text(); setEstimateError(`HTTP ${resp.status}: ${t}`); return }
       setEstimateResult(await resp.json())
-    } catch (err) {
-      setEstimateError(err.message || 'Network error')
-    } finally {
-      setEstimating(false)
-    }
+    } catch (err) { setEstimateError(err.message || 'Network error') }
+    finally { setEstimating(false) }
   }
 
   function handleRawInputChange(val) {
     setRawInput(val)
-    // Mark existing estimate as stale when input changes
     if (estimateResult) setEstimateStale(true)
   }
 
   async function handlePreview() {
     if (!rawInput.trim()) return
-    setPreviewing(true)
-    setPreview(null)
-    setPreviewError(null)
+    setPreviewing(true); setPreview(null); setPreviewError(null)
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/parse-preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ raw_input: rawInput, default_scheme: 'http', max_items: 500 }),
       })
-      if (!resp.ok) {
-        const text = await resp.text()
-        setPreviewError(`HTTP ${resp.status}: ${text}`)
-        return
-      }
+      if (!resp.ok) { const t = await resp.text(); setPreviewError(`HTTP ${resp.status}: ${t}`); return }
       setPreview(await resp.json())
-    } catch (err) {
-      setPreviewError(err.message || 'Network error')
-    } finally {
-      setPreviewing(false)
-    }
+    } catch (err) { setPreviewError(err.message || 'Network error') }
+    finally { setPreviewing(false) }
   }
 
   function handleClear() {
-    setRawInput('')
-    setPreview(null)
-    setPreviewError(null)
-    setEstimateResult(null)
-    setEstimateError(null)
-    setEstimateStale(false)
+    setRawInput(''); setPreview(null); setPreviewError(null)
+    setEstimateResult(null); setEstimateError(null); setEstimateStale(false)
   }
 
   function handleFileChange(e) {
     const f = e.target.files?.[0] || null
-    setSelectedFile(f)
-    setUploadPreview(null)
-    setUploadError(null)
+    setSelectedFile(f); setUploadPreview(null); setUploadError(null)
   }
 
   async function handleUploadPreview() {
     if (!selectedFile) return
-    setUploadPreviewing(true)
-    setUploadPreview(null)
-    setUploadError(null)
+    setUploadPreviewing(true); setUploadPreview(null); setUploadError(null)
     try {
       const form = new FormData()
-      form.append('file', selectedFile)
-      form.append('default_scheme', 'http')
-      form.append('max_items', '500')
-      const resp = await fetch(`${API_BASE}/api/mdi/jobs/upload-preview`, {
-        method: 'POST',
-        body: form,
-      })
-      if (!resp.ok) {
-        const text = await resp.text()
-        setUploadError(`HTTP ${resp.status}: ${text}`)
-        return
-      }
+      form.append('file', selectedFile); form.append('default_scheme', 'http'); form.append('max_items', '500')
+      const resp = await fetch(`${API_BASE}/api/mdi/jobs/upload-preview`, { method: 'POST', body: form })
+      if (!resp.ok) { const t = await resp.text(); setUploadError(`HTTP ${resp.status}: ${t}`); return }
       setUploadPreview(await resp.json())
-    } catch (err) {
-      setUploadError(err.message || 'Network error')
-    } finally {
-      setUploadPreviewing(false)
-    }
+    } catch (err) { setUploadError(err.message || 'Network error') }
+    finally { setUploadPreviewing(false) }
   }
 
-  // Poll job status until done/error; refresh shared quota on completion
   const pollJob = useCallback(async (id) => {
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/${id}`)
@@ -1409,7 +1292,6 @@ export default function App() {
       setJob(data)
       if (data.status === 'done' || data.status === 'error') {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-        // Refresh quota to reflect consumption by the completed job
         refreshQuota()
       }
     } catch (_) { /* ignore poll errors */ }
@@ -1417,113 +1299,114 @@ export default function App() {
 
   async function handleRunJob() {
     if (!rawInput.trim() || submitting) return
-
-    // Always refresh shared quota immediately before submit so the UI shows current usage
-    // and we can block if quota is exhausted.
     const freshQuota = await refreshQuota()
     if (freshQuota && freshQuota.remaining <= 0) {
       setJobError(
-        `VT quota exhausted — ${freshQuota.daily_lookups_used ?? '?'} / ` +
-        `${freshQuota.daily_limit ?? 500} used today. Wait until UTC midnight to reset.`
+        `VT quota exhausted — ${freshQuota.daily_lookups_used ?? '?'} / ${freshQuota.daily_limit ?? 500} used today. Wait until UTC midnight.`
       )
       return
     }
-
-    setSubmitting(true)
-    setJob(null)
-    setJobId(null)
-    setJobError(null)
-    setRestoredFromSession(false)
+    setSubmitting(true); setJob(null); setJobId(null); setJobError(null); setRestoredFromSession(false)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     try {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
       })
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}))
-        const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
-        setJobError(msg)
+        setJobError(data?.detail?.message || data?.detail || `HTTP ${resp.status}`)
         return
       }
       const data = await resp.json()
       const id = data.job_id
       setJobId(id)
-      // Start polling every 2s
       pollRef.current = setInterval(() => pollJob(id), 2000)
-      // Immediate first poll
       await pollJob(id)
-    } catch (err) {
-      setJobError(err.message || 'Network error')
-    } finally {
-      setSubmitting(false)
-    }
+    } catch (err) { setJobError(err.message || 'Network error') }
+    finally { setSubmitting(false) }
   }
 
-  // Mark estimate stale when settings change (same as when input changes)
   useEffect(() => {
     if (estimateResult) setEstimateStale(true)
   }, [useDomainReports, staleThresholdDays])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch shared VT quota on app load (MDI-12A)
-  useEffect(() => {
-    refreshQuota()
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Fetch quota on app load
+  useEffect(() => { refreshQuota() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Recovery: on mount, attempt to restore the latest completed job
+  // Recovery: restore latest completed job on mount
   useEffect(() => {
     let cancelled = false
     async function tryRecover() {
       try {
         const resp = await fetch(`${API_BASE}/api/mdi/jobs/latest`)
         if (cancelled) return
-        if (resp.status === 404) return  // no prior job — silent
-        if (!resp.ok) return             // unexpected error — non-blocking
+        if (resp.status === 404 || !resp.ok) return
         const data = await resp.json()
         if (cancelled) return
-        setJob(data)
-        setJobId(data.job_id)
-        setRestoredFromSession(true)
-        // If the recovered job is still running, resume polling
+        setJob(data); setJobId(data.job_id); setRestoredFromSession(true)
         if (data.status === 'queued' || data.status === 'running') {
           pollRef.current = setInterval(() => pollJob(data.job_id), 2000)
         }
-      } catch (_) {
-        // Network error on mount — do not block the UI
-      }
+      } catch (_) { /* non-blocking */ }
     }
     tryRecover()
     return () => { cancelled = true }
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cleanup on unmount
-  useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current)
-  }, [])
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   return (
     <div className="layout">
+      {/* ── Nav ── */}
       <nav className="nav">
         <a href="/tools" className="nav-back"><IconArrowLeft /> All tools</a>
         <div className="nav-divider" />
-        <span className="nav-title">MDI</span>
-        <span className="nav-badge">beta</span>
+        <div className="nav-brand">
+          <span className="nav-title">MDI</span>
+          <span className="nav-subtitle">Malicious Domain Identifier</span>
+        </div>
+
+        <div className="nav-center">
+          <QuotaNavWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
+        </div>
+
+        <div className="nav-right">
+          <button
+            className="settings-gear-btn"
+            onClick={() => setSettingsOpen(v => !v)}
+            aria-expanded={settingsOpen}
+            aria-controls={settingsPanelId}
+            title="Toggle MDI settings"
+          >
+            <IconGear /> Settings
+          </button>
+        </div>
       </nav>
+
+      {/* ── Collapsible settings panel ── */}
+      <CollapsibleSettingsPanel
+        open={settingsOpen}
+        id={settingsPanelId}
+        useDomainReports={useDomainReports}
+        setUseDomainReports={setUseDomainReports}
+        staleThresholdDays={staleThresholdDays}
+        setStaleThresholdDays={setStaleThresholdDays}
+        locked={settingsLocked}
+      />
 
       <main className="main">
         <div className="shell-notice">
           <IconInfo />
-          MDI — VT core + RDAP/WHOIS enrichment + live checks (MDI-12) active.
+          MDI — VT core + RDAP/WHOIS enrichment + live checks + triage UI active.
         </div>
 
-        {/* Shared VT quota display (MDI-12A) */}
-        <QuotaWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
-
-        <div className="page-header">
-          <h1 className="page-title">Malicious Domain Identifier</h1>
-          <p className="page-subtitle">
-            Internal malicious-domain triage tool. Combines domain reputation, WHOIS, and live activity into a single check.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)' }}>
+            Malicious Domain Identifier
+          </h1>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            Triage domains using VirusTotal, age context, and live-site checks to quickly identify risky infrastructure.
           </p>
         </div>
 
@@ -1556,15 +1439,6 @@ export default function App() {
           restoredFromSession={restoredFromSession}
           onDismissRestore={() => { setRestoredFromSession(false); setJob(null); setJobId(null) }}
         />
-
-        <SettingsSection
-          useDomainReports={useDomainReports}
-          setUseDomainReports={setUseDomainReports}
-          staleThresholdDays={staleThresholdDays}
-          setStaleThresholdDays={setStaleThresholdDays}
-          locked={settingsLocked}
-        />
-        <DashboardSection />
       </main>
 
       <footer className="footer">
