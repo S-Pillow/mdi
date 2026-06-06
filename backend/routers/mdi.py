@@ -604,6 +604,6 @@ async def schema_summary() -> Dict[str, Any]:
             "RATE_LIMIT_PER_MIN": 4,
             "MAX_AUTO_RESCANS_PER_RUN": 25,
             "AUTO_RESCAN_THRESHOLD_DAYS": 7,
-            "STALE_THRESHOLD_DAYS": 5,
+            "STALE_THRESHOLD_DAYS": 7,
         },
     }

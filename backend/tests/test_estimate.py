@@ -466,6 +466,12 @@ class TestRegressionExistingEndpoints:
         assert resp.status_code == 200
         assert "enums" in resp.json()
 
+    def test_schema_summary_stale_threshold_constant_is_7(self):
+        """MDI-09A: schema-summary must report STALE_THRESHOLD_DAYS=7 to match PRD and Pydantic defaults."""
+        resp = client.get("/api/mdi/schema-summary")
+        assert resp.status_code == 200
+        assert resp.json()["constants"]["STALE_THRESHOLD_DAYS"] == 7
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MDI-09 — Settings default and parity tests
