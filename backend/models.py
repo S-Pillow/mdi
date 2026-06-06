@@ -319,9 +319,13 @@ class MdiResultItem(BaseModel):
         Freshness.UNKNOWN,
         description="[display, filtering, workflow] Age classification of the VT report."
     )
-    vt_engine_results: Optional[Dict[str, Any]] = Field(
+    vt_engine_results: Optional[List[Dict[str, Any]]] = Field(
         None,
-        description="[future] Raw per-engine VT results. Not included in exports by default."
+        description=(
+            "[display] Non-clean VT engine detections, malicious/suspicious only. "
+            "Empty list means no malicious/suspicious engine detections. "
+            "None means unavailable, pre-MDI-14 job, or VT not checked."
+        ),
     )
 
     # ── URL live activity ─────────────────────────────────────────────────────
@@ -332,6 +336,14 @@ class MdiResultItem(BaseModel):
     live_checked_at: Optional[datetime] = Field(
         None,
         description="[display, audit] UTC timestamp when live check ran."
+    )
+    http_status_code: Optional[int] = Field(
+        None,
+        description="[display] Final HTTP status code from live check. None if not checked.",
+    )
+    redirect_count: int = Field(
+        0,
+        description="[display] Number of redirects followed during live check.",
     )
 
     # ── Triage ───────────────────────────────────────────────────────────────

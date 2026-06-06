@@ -1378,9 +1378,42 @@ function DetailDrawer({ selectedItem: r, onClose }) {
           </div>
         )}
 
-        {/* 3. DOMAIN AGE CONTEXT */}
+        {/* 3. VT HIT DETAILS (MDI-14) */}
         <div className="detail-section">
-          <div className="detail-section-label">3. Domain Age Context</div>
+          <div className="detail-section-label">3. VT Hit Details</div>
+          {r.vt_engine_results === null || r.vt_engine_results === undefined ? (
+            <p className="detail-empty-note">Engine-level details not available for this job.</p>
+          ) : r.vt_engine_results.length === 0 ? (
+            <p className="detail-empty-note">No malicious or suspicious engines flagged this item.</p>
+          ) : (
+            <div className="vt-engine-table-wrap">
+              <table className="vt-engine-table">
+                <thead>
+                  <tr>
+                    <th>Engine</th>
+                    <th>Category</th>
+                    <th>Result</th>
+                    <th>Method</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.vt_engine_results.map((det, i) => (
+                    <tr key={i}>
+                      <td className="vt-eng-name">{det.engine_name}</td>
+                      <td><span className={`vt-cat-badge vt-cat-${det.category}`}>{det.category}</span></td>
+                      <td className="vt-eng-result">{det.result || '—'}</td>
+                      <td className="vt-eng-method">{det.method || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 4. DOMAIN AGE CONTEXT */}
+        <div className="detail-section">
+          <div className="detail-section-label">4. Domain Age Context</div>
           <div className="detail-kv-grid">
             <span>Created</span><span>{formatDate(r.created_at)}</span>
             <span>Age</span>
@@ -1411,9 +1444,9 @@ function DetailDrawer({ selectedItem: r, onClose }) {
           </div>
         </div>
 
-        {/* 4. LIVE ACTIVITY CONTEXT */}
+        {/* 5. LIVE ACTIVITY CONTEXT */}
         <div className="detail-section">
-          <div className="detail-section-label">4. Live Activity Context</div>
+          <div className="detail-section-label">5. Live Activity Context</div>
           <div className="detail-kv-grid">
             <span>Live status</span>
             <span>
@@ -1421,19 +1454,22 @@ function DetailDrawer({ selectedItem: r, onClose }) {
                 <span className={`badge ${liveBadgeClass(r.live_status)}`}>{formatLiveStatus(r.live_status)}</span>
               ) : '—'}
             </span>
-            {r.live_http_code && <><span>HTTP code</span><span>{r.live_http_code}</span></>}
-            {r.live_ip && <><span>IP address</span><span style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.live_ip}</span></>}
-            {r.live_asn && <><span>ASN / Org</span><span style={{ fontSize: 10 }}>{r.live_asn}</span></>}
+            {r.http_status_code != null && (
+              <><span>HTTP status</span><span style={{ fontFamily: 'Menlo,Consolas,monospace', fontSize: 11 }}>{r.http_status_code}</span></>
+            )}
+            {r.redirect_count > 0 && (
+              <><span>Redirects</span><span>{r.redirect_count}</span></>
+            )}
           </div>
           {!r.live_status || r.live_status === 'not_checked' ? (
-            <p style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 6 }}>Live check not performed for this item.</p>
+            <p className="detail-empty-note">Live check not performed for this item.</p>
           ) : null}
         </div>
 
-        {/* 5. TRIAGE REASONS */}
+        {/* 6. TRIAGE REASONS */}
         {r.triage_reason?.length > 0 && (
           <div className="detail-section">
-            <div className="detail-section-label">5. Triage Reasons</div>
+            <div className="detail-section-label">6. Triage Reasons</div>
             <ul className="detail-reasons-list">
               {r.triage_reason.map((t, i) => <li key={i}>{t}</li>)}
             </ul>
@@ -1443,7 +1479,7 @@ function DetailDrawer({ selectedItem: r, onClose }) {
         {/* 6. EVIDENCE */}
         {r.evidence_status && (
           <div className="detail-section">
-            <div className="detail-section-label">6. Evidence</div>
+            <div className="detail-section-label">7. Evidence</div>
             <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>
             {r.freshness && (
               <span className={`badge ${freshnessBadgeClass(r.freshness)}`} style={{ marginLeft: 6 }}>{r.freshness.replace(/_/g, ' ')}</span>
@@ -1456,9 +1492,9 @@ function DetailDrawer({ selectedItem: r, onClose }) {
           </div>
         )}
 
-        {/* 7. ACTIONS — roadmap-approved stubs only */}
+        {/* 8. ACTIONS — roadmap-approved stubs only, all disabled */}
         <div className="detail-section">
-          <div className="detail-section-label">7. Actions</div>
+          <div className="detail-section-label">8. Actions</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <button className="btn-stub" disabled title="Export evidence — available in MDI-16">↑ Export evidence (JSON) — MDI-16</button>
             <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VirusTotal</button>

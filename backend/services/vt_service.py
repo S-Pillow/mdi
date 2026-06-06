@@ -30,7 +30,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -102,6 +102,8 @@ class VtLookupResult:
     vt_mode_used: VtModeUsed = VtModeUsed.NOT_CHECKED
     error: Optional[MdiError] = None
     calls_made: int = 0     # how many VT API calls were consumed (for quota accounting)
+    # MDI-14: malicious/suspicious engine detections only; [] for clean results
+    engine_detections: "List[Dict[str, Any]]" = field(default_factory=list)
 
 
 # ── Internal HTTP call ─────────────────────────────────────────────────────────
@@ -201,6 +203,24 @@ def parse_vt_response(
 
     freshness = classify_freshness(scan_ts, stale_threshold_days=stale_threshold_days)
 
+    # MDI-14: extract malicious/suspicious engine detections only (never harmless rows)
+    engine_detections: List[Dict[str, Any]] = []
+    raw_engines: Dict[str, Any] = attrs.get("last_analysis_results") or {}
+    if isinstance(raw_engines, dict):
+        for engine_name, details in raw_engines.items():
+            if not isinstance(details, dict):
+                continue
+            category = details.get("category") or ""
+            if category not in ("malicious", "suspicious"):
+                continue
+            engine_detections.append({
+                "engine_name": str(engine_name),
+                "category": category,
+                "result": details.get("result") or None,
+                "method": details.get("method") or None,
+                "engine_update": details.get("engine_update") or None,
+            })
+
     return VtLookupResult(
         vt_malicious=malicious,
         vt_suspicious=suspicious,
@@ -213,6 +233,7 @@ def parse_vt_response(
         vt_mode_used=vt_mode_used,
         error=None,
         calls_made=0,                   # filled in by fetch_report
+        engine_detections=engine_detections,
     )
 
 
