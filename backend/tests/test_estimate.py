@@ -123,6 +123,8 @@ class TestEstimateJob:
         assert result["estimated_duration_seconds_max"] == 0.0
         assert result["domain_count"] == 0
         assert result["url_count"] == 0
+        # MDI-11: empty list → 0 enrichment lookups
+        assert result["estimated_enrichment_lookups"] == 0
 
     def test_single_domain_url_mode(self):
         item = self._make_item(InputType.DOMAIN)
@@ -167,15 +169,19 @@ class TestEstimateJob:
 
     def test_duration_formula_single_item(self):
         from models import MdiInputItem
+        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
         item = MdiInputItem(input_original="a.com", input_normalized="a.com",
                             input_type=InputType.DOMAIN, position=1)
         result = estimate_job([item], use_domain_reports=False)
-        # (1 - 1) * 15 = 0 for min; (3 - 1) * 15 = 30 for max
-        assert result["estimated_duration_seconds_min"] == 0.0
-        assert result["estimated_duration_seconds_max"] == pytest.approx(30.0)
+        # VT: (1-1)*15=0 min, (3-1)*15=30 max; enrichment: 1×0.5=0.5
+        enrichment_overhead = 1 * RDAP_ESTIMATE_SECONDS_PER_ITEM
+        assert result["estimated_duration_seconds_min"] == pytest.approx(0.0 + enrichment_overhead)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(30.0 + enrichment_overhead)
+        assert result["estimated_enrichment_lookups"] == 1
 
     def test_duration_formula_two_items(self):
         from models import MdiInputItem
+        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
         items = [
             MdiInputItem(input_original="a.com", input_normalized="a.com",
                          input_type=InputType.DOMAIN, position=1),
@@ -183,14 +189,19 @@ class TestEstimateJob:
                          input_type=InputType.DOMAIN, position=2),
         ]
         result = estimate_job(items, use_domain_reports=False)
-        # calls_min=2, calls_max=6 → durations: (2-1)*15=15, (6-1)*15=75
-        assert result["estimated_duration_seconds_min"] == pytest.approx(15.0)
-        assert result["estimated_duration_seconds_max"] == pytest.approx(75.0)
+        # VT: calls_min=2, calls_max=6 → (2-1)*15=15, (6-1)*15=75
+        # Enrichment: 2 × 0.5 = 1.0
+        enrichment_overhead = 2 * RDAP_ESTIMATE_SECONDS_PER_ITEM
+        assert result["estimated_duration_seconds_min"] == pytest.approx(15.0 + enrichment_overhead)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(75.0 + enrichment_overhead)
+        assert result["estimated_enrichment_lookups"] == 2
 
     def test_notes_present(self):
+        from services.estimate import ENRICHMENT_NOTE
         result = estimate_job([], use_domain_reports=False)
         assert result["rate_limit_note"] == VT_RATE_LIMIT_NOTE
         assert result["job_state_note"] == JOB_STATE_NOTE
+        assert result["enrichment_note"] == ENRICHMENT_NOTE
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -325,15 +336,26 @@ class TestEstimateEndpoint:
                 os.environ["VT_USAGE_FILE"] = old_env
 
     def test_duration_seconds_max_formula(self):
+        # MDI-11: duration = VT time + enrichment overhead (0.5s per eligible item)
+        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
         resp = _post_estimate("example.com")
         calls_max = resp["estimated_vt_calls_max"]
-        expected_max = max(0.0, (calls_max - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+        enrichment_lookups = resp["estimated_enrichment_lookups"]
+        expected_max = (
+            max(0.0, (calls_max - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+            + enrichment_lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM
+        )
         assert resp["estimated_duration_seconds_max"] == pytest.approx(expected_max)
 
     def test_duration_seconds_min_formula(self):
+        from services.estimate import RDAP_ESTIMATE_SECONDS_PER_ITEM
         resp = _post_estimate("example.com")
         calls_min = resp["estimated_vt_calls_min"]
-        expected_min = max(0.0, (calls_min - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+        enrichment_lookups = resp["estimated_enrichment_lookups"]
+        expected_min = (
+            max(0.0, (calls_min - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS)
+            + enrichment_lookups * RDAP_ESTIMATE_SECONDS_PER_ITEM
+        )
         assert resp["estimated_duration_seconds_min"] == pytest.approx(expected_min)
 
     def test_rate_limit_note_present(self):

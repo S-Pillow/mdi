@@ -8,6 +8,7 @@ Strategy:
   - Live /var/lib/dns-tool/vt_usage.json is never modified.
   - Live /var/lib/dns-tool/mdi_latest_job.json is never created or modified.
   - No real VT API calls are made.
+  - No real RDAP or WHOIS calls are made (MDI-11 enrichment is mocked).
 
 MDI-08A isolation fix (two paths):
   1. Direct process_job() calls: all now pass job_file=tmp_path / "mdi_latest_job.json".
@@ -16,6 +17,12 @@ MDI-08A isolation fix (two paths):
      MDI_LATEST_JOB_FILE to tmp_path for every test in this module.
   Prior to this fix, both paths defaulted to /var/lib/dns-tool/mdi_latest_job.json
   and wrote test artifacts to the live recovery file during every test run.
+
+MDI-11 enrichment guard (autouse):
+  The redirect_job_persistence fixture also patches enrich_domain to return a
+  safe no-op EnrichmentResult so that all existing tests are unaffected by the
+  new pre-enrichment pass.  Tests that need specific enrichment behavior override
+  the mock explicitly within the test body.
 """
 
 from __future__ import annotations
@@ -39,6 +46,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import services.vt_service as vt_svc
 from main import app
 from models import (
+    AgeBucket,
+    DomainHold,
+    DomainHoldType,
+    DomainStatusSource,
     EvidenceStatus,
     Freshness,
     InputType,
@@ -47,7 +58,8 @@ from models import (
     TriageBucket,
     VtModeUsed,
 )
-from services import job_processor, job_store
+from services import domain_enrichment, job_processor, job_store
+from services.domain_enrichment import EnrichmentResult
 from services.job_store import InMemoryJob
 from services.quota_writer import increment_quota, read_remaining_quota
 
@@ -55,6 +67,19 @@ client = TestClient(app)
 
 
 # ── Module-level test isolation ────────────────────────────────────────────────
+
+def _make_noop_enrichment(registered_domain: str = "example.com") -> EnrichmentResult:
+    """Return a safe, empty enrichment result (no hold, no data, no error)."""
+    return EnrichmentResult(
+        registered_domain=registered_domain,
+        source=DomainStatusSource.NOT_CHECKED,
+        domain_hold=DomainHold(
+            has_hold=False,
+            hold_types=[DomainHoldType.NONE],
+            source=DomainStatusSource.NOT_CHECKED,
+        ),
+    )
+
 
 @pytest.fixture(autouse=True)
 def redirect_job_persistence(tmp_path, monkeypatch):
@@ -70,8 +95,18 @@ def redirect_job_persistence(tmp_path, monkeypatch):
     Without this fixture, background tasks default to _default_job_file() =
     /var/lib/dns-tool/mdi_latest_job.json, writing test artifacts to the live
     recovery file.  monkeypatch automatically restores the env var after each test.
+
+    MDI-11 enrichment guard: also patches enrich_domain to return a no-op result
+    so existing tests never make live RDAP or WHOIS calls.  Tests that need real
+    enrichment behavior override this mock explicitly within the test.
     """
     monkeypatch.setenv("MDI_LATEST_JOB_FILE", str(tmp_path / "mdi_latest_job.json"))
+    # Patch enrich_domain at the module level used by job_processor
+    with patch.object(
+        domain_enrichment, "enrich_domain",
+        new=AsyncMock(side_effect=lambda reg_domain: _make_noop_enrichment(reg_domain)),
+    ):
+        yield
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -967,3 +1002,248 @@ def test_mdi10_quota_blocked_uses_retry_lookup(tmp_path):
     assert result.recommended_action == RecommendedAction.RETRY_LOOKUP
     assert isinstance(result.triage_reason, list)
     assert len(result.triage_reason) >= 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-11 — RDAP/WHOIS enrichment integration tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_rdap_enrichment_result(
+    registered_domain: str = "example.com",
+    age_bucket: AgeBucket = AgeBucket.MATURE,
+    has_hold: bool = False,
+    hold_source: DomainStatusSource = DomainStatusSource.RDAP,
+    registrar: str = "Test Registrar",
+    error=None,
+) -> EnrichmentResult:
+    """Build a realistic EnrichmentResult for MDI-11 integration tests."""
+    from datetime import datetime, timezone
+    from models import MdiError
+    return EnrichmentResult(
+        registered_domain=registered_domain,
+        source=DomainStatusSource.RDAP if error is None else DomainStatusSource.UNKNOWN,
+        created_at=datetime(1995, 8, 14, tzinfo=timezone.utc) if age_bucket == AgeBucket.MATURE else None,
+        age_bucket=age_bucket,
+        registrar=registrar if not has_hold else None,
+        epp_status=["clientHold"] if has_hold else ["clientTransferProhibited"],
+        nameservers=["ns1.example.com"],
+        domain_hold=DomainHold(
+            has_hold=has_hold,
+            hold_types=[DomainHoldType.CLIENT_HOLD] if has_hold else [DomainHoldType.NONE],
+            source=hold_source,
+        ),
+        error=error,
+        whois_fallback_used=False,
+    )
+
+
+def test_mdi11_enrichment_populates_created_at_and_age_bucket(tmp_path):
+    """
+    MDI-11: mocked RDAP enrichment → created_at and age_bucket populated in result.
+    """
+    job_id = "test-mdi11-enrich-" + str(time.time_ns())
+    _make_job(job_id, [("example.com", "example.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_vt = AsyncMock(return_value=_mock_resp(200, body))
+    enrichment = _make_rdap_enrichment_result(age_bucket=AgeBucket.MATURE, registrar="IANA")
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+         patch.object(
+             domain_enrichment, "enrich_domain",
+             new=AsyncMock(return_value=enrichment),
+         ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["example.com"]
+    assert result.age_bucket == AgeBucket.MATURE
+    assert result.created_at is not None
+    assert result.created_at.year == 1995
+    assert result.registrar == "IANA"
+    assert result.nameservers == ["ns1.example.com"]
+
+
+def test_mdi11_client_hold_via_rdap_skips_vt(tmp_path):
+    """
+    MDI-11: RDAP confirms clientHold → VT is skipped; triage_bucket=HELD.
+    VT mock must NOT be called.
+    """
+    job_id = "test-mdi11-hold-" + str(time.time_ns())
+    _make_job(job_id, [("held-rdap.com", "held-rdap.com", InputType.DOMAIN)])
+
+    mock_vt = AsyncMock()
+    enrichment = _make_rdap_enrichment_result(
+        registered_domain="held-rdap.com",
+        has_hold=True,
+        hold_source=DomainStatusSource.RDAP,
+    )
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+         patch.object(
+             domain_enrichment, "enrich_domain",
+             new=AsyncMock(return_value=enrichment),
+         ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    mock_vt.assert_not_called()
+    job = job_store.get_job_sync(job_id)
+    result = job.results["held-rdap.com"]
+    assert result.processing_status == MdiProcessingStatus.HOLD_SKIPPED
+    assert result.triage_bucket == TriageBucket.HELD
+    assert result.recommended_action == RecommendedAction.ACTION_ALREADY_TAKEN
+    assert result.evidence_status == EvidenceStatus.SKIPPED_HOLD
+    assert job.hold_detected_by_enrichment_count == 1
+    assert job.held_skipped >= 1
+
+
+def test_mdi11_enrichment_failure_does_not_stop_vt(tmp_path):
+    """
+    MDI-11: RDAP + WHOIS both fail → enrichment error is non-fatal; VT still runs.
+    """
+    from models import MdiError
+    job_id = "test-mdi11-fail-" + str(time.time_ns())
+    _make_job(job_id, [("broken-enrich.com", "broken-enrich.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_vt = AsyncMock(return_value=_mock_resp(200, body))
+    failed_enrichment = _make_rdap_enrichment_result(
+        error=MdiError(
+            code="whois_failed",
+            message="Both RDAP and WHOIS failed.",
+            source="domain_enrichment",
+            retriable=True,
+        )
+    )
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+         patch.object(
+             domain_enrichment, "enrich_domain",
+             new=AsyncMock(return_value=failed_enrichment),
+         ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    mock_vt.assert_called_once()
+    job = job_store.get_job_sync(job_id)
+    result = job.results["broken-enrich.com"]
+    assert result.processing_status == MdiProcessingStatus.DONE
+    assert result.age_bucket == AgeBucket.UNKNOWN
+    assert any(e.code == "whois_failed" for e in (result.errors or []))
+
+
+def test_mdi11_duplicate_registered_domain_enriched_once(tmp_path):
+    """
+    MDI-11: two URL items sharing the same registered domain → enrich_domain called once.
+    """
+    job_id = "test-mdi11-cache-" + str(time.time_ns())
+    _make_job(job_id, [
+        ("https://a.shared-domain.com/p1", "https://a.shared-domain.com/p1", InputType.URL),
+        ("https://b.shared-domain.com/p2", "https://b.shared-domain.com/p2", InputType.URL),
+    ])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_vt = AsyncMock(return_value=_mock_resp(200, body))
+    enrichment = _make_rdap_enrichment_result(registered_domain="shared-domain.com")
+    mock_enrich = AsyncMock(return_value=enrichment)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+         patch.object(domain_enrichment, "enrich_domain", new=mock_enrich):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    # enrich_domain should be called only once due to the per-job domain cache
+    assert mock_enrich.call_count == 1
+
+
+def test_mdi11_history_metadata_has_enrichment_counts_not_domains(tmp_path):
+    """
+    MDI-11: usage history record must contain enrichment counts,
+    and must NOT contain raw domain names, registrar names, or nameservers.
+    """
+    from models import MdiError
+    job_id = "test-mdi11-meta-" + str(time.time_ns())
+    _make_job(job_id, [("meta-check.com", "meta-check.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_vt = AsyncMock(return_value=_mock_resp(200, body))
+    enrichment = _make_rdap_enrichment_result(registrar="Sensitive Registrar Name")
+    history_file = tmp_path / "history.jsonl"
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
+         patch.object(
+             domain_enrichment, "enrich_domain",
+             new=AsyncMock(return_value=enrichment),
+         ):
+        _run(job_processor.process_job(
+            job_id,
+            usage_file=usage_file,
+            history_file=history_file,
+            job_file=tmp_path / "mdi_latest_job.json",
+        ))
+
+    assert history_file.exists()
+    records = [json.loads(line) for line in history_file.read_text().splitlines() if line.strip()]
+    assert len(records) == 1
+    record = records[0]
+
+    assert "rdap_enriched_count" in record
+    assert "rdap_failed_count" in record
+    assert "whois_fallback_count" in record
+    assert "hold_detected_by_enrichment_count" in record
+
+    record_str = json.dumps(record)
+    assert "meta-check.com" not in record_str, "Raw domain leaked into history record"
+    assert "Sensitive Registrar Name" not in record_str, "Registrar name leaked into history record"
+    assert "ns1.example.com" not in record_str, "Nameserver leaked into history record"
+
+
+def test_mdi11_enrichment_guard_noop_does_not_crash(tmp_path):
+    """
+    MDI-11: autouse fixture noop mock → job completes with UNKNOWN age_bucket.
+    """
+    job_id = "test-mdi11-guard-" + str(time.time_ns())
+    _make_job(job_id, [("example.com", "example.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, harmless=70, age_days=1)
+    mock_vt = AsyncMock(return_value=_mock_resp(200, body))
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_vt), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["example.com"]
+    assert result.processing_status == MdiProcessingStatus.DONE
+    assert result.age_bucket == AgeBucket.UNKNOWN

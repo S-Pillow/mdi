@@ -46,6 +46,12 @@ class InMemoryJob:
     item_order: List[str] = field(default_factory=list)  # input_normalized, in submission order
     results: Dict[str, MdiResultItem] = field(default_factory=dict)
     usage_history_written: bool = False
+    # ── MDI-11 enrichment counters (metadata-only — counts, no raw domain values) ──
+    rdap_enriched_count: int = 0
+    rdap_failed_count: int = 0
+    whois_fallback_count: int = 0
+    hold_detected_by_enrichment_count: int = 0
+    enrichment_skipped_uploaded_hold_count: int = 0
 
 
 # ── Store ──────────────────────────────────────────────────────────────────────

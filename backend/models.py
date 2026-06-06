@@ -864,6 +864,16 @@ class EstimateResponse(BaseModel):
         ),
     )
 
+    # ── MDI-11 enrichment estimate ────────────────────────────────────────────
+    estimated_enrichment_lookups: int = Field(
+        0,
+        description=(
+            "[display] MDI-11: conservative RDAP/WHOIS lookups expected before VT. "
+            "1 per accepted item (paste input has no confirmed holds at estimate time). "
+            "Actual jobs deduplicate shared registered domains."
+        ),
+    )
+
     # ── Quota ─────────────────────────────────────────────────────────────────
     quota_remaining_now: int = Field(
         ...,
@@ -908,6 +918,10 @@ class EstimateResponse(BaseModel):
     job_state_note: str = Field(
         ...,
         description="[display] Warning that jobs are in-memory only (MDI-06/08 limitation).",
+    )
+    enrichment_note: str = Field(
+        "",
+        description="[display] MDI-11: informational note about RDAP/WHOIS enrichment overhead.",
     )
 
     # ── Audit / safety flags ──────────────────────────────────────────────────

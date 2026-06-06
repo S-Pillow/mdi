@@ -304,3 +304,77 @@ All MDI-06 tests use `tmp_path` for quota/history files:
 | `vt_latest_job.json` | **NEVER** | MDI must never access this file |
 | `mdi_latest_job.json` | None | Does not exist yet |
 | `mdi_daily_history.json` | None | Does not exist yet |
+
+---
+
+## MDI-11 — WHOIS/RDAP Enrichment Runtime Notes
+
+### New runtime files
+
+MDI-11 adds **no new runtime files**. RDAP and WHOIS results are held in memory
+only (per-job domain cache) and are never written to disk directly.
+
+### `mdi_latest_job.json` — enriched fields added
+
+After MDI-11, completed jobs stored in `mdi_latest_job.json` include all
+enrichment fields that were populated during RDAP/WHOIS lookup:
+
+```json
+{
+  "created_at": "1995-08-14T04:00:00+00:00",
+  "age_bucket": "mature",
+  "registrar": "IANA",
+  "epp_status": ["clientTransferProhibited", "clientUpdateProhibited"],
+  "nameservers": ["a.iana-servers.net", "b.iana-servers.net"],
+  "domain_hold": {
+    "has_hold": false,
+    "hold_types": ["none"],
+    "source": "rdap",
+    "raw_statuses": ["clientTransferProhibited", "clientUpdateProhibited"]
+  }
+}
+```
+
+These are publicly available RDAP fields — no PII. The file remains `0600`
+permissions and is excluded from git via `.gitignore`.
+
+### `vt_usage_history.jsonl` — enrichment counts added
+
+MDI-11 adds five new count fields to each history record. **No raw domain names,
+registrar names, nameservers, or EPP status strings are ever written** to this file.
+
+New count-only fields per record:
+- `rdap_enriched_count` — number of items enriched via RDAP or WHOIS
+- `rdap_failed_count` — number of items where both RDAP and WHOIS failed
+- `whois_fallback_count` — number of items where RDAP failed but WHOIS succeeded
+- `hold_detected_by_enrichment_count` — items where live hold caused VT skip
+- `enrichment_skipped_uploaded_hold_count` — items whose hold was already confirmed by upload
+
+### External services used during live job processing
+
+MDI-11 introduces two new external service dependencies for live job runs:
+
+| Service | URL | Purpose | Failure behavior |
+|---|---|---|---|
+| rdap.org | `https://rdap.org/domain/{domain}` | RDAP lookups | Non-fatal; WHOIS fallback |
+| WHOIS (system) | N/A (subprocess) | Fallback if RDAP fails | Non-fatal; item proceeds to VT |
+
+These services are used **only during `process_job()` execution** — not during:
+- `POST /api/mdi/jobs/estimate` (pure estimate, no enrichment)
+- `POST /api/mdi/jobs/submit` (job creation only; enrichment happens in background task)
+- `GET /api/mdi/jobs/{id}` (status polling)
+- `GET /api/mdi/jobs/latest` (recovery)
+- Any upload/preview endpoints
+
+### Rate limiting and timeout behavior
+
+- RDAP timeout: 10 seconds per request
+- RDAP 429: retry once after 5 seconds, then WHOIS fallback
+- WHOIS: blocking I/O in thread executor; no explicit timeout (relies on OS)
+- No in-process rate limiter for RDAP (rdap.org handles throttling)
+- Per-job domain cache: duplicate registered domains enriched once
+
+### Estimate runtime impact
+
+`POST /api/mdi/jobs/estimate` now includes enrichment overhead in the runtime
+estimate: `0.5 seconds × N items` added to `estimated_duration_seconds_min/max`.
