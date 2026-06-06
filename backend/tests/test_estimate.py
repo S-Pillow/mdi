@@ -816,3 +816,84 @@ class TestMdi11aEnrichmentEstimate:
                 os.environ.pop("MDI_JOB_FILE", None)
             else:
                 os.environ["MDI_JOB_FILE"] = old_job
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-12 — live-check estimate fields
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMdi12LiveCheckEstimate:
+    """
+    MDI-12: verify that the estimate endpoint and estimate_job() return
+    estimated_live_check_count=0 and a non-empty live_check_note, and that
+    estimate.py makes no live DNS, HTTP, or VT calls.
+    """
+
+    def test_estimated_live_check_count_is_zero(self):
+        """estimated_live_check_count is always 0 at estimate time (flagged count unknown)."""
+        resp = _post_estimate("evil.com\nmalware.net")
+        assert resp["estimated_live_check_count"] == 0
+
+    def test_live_check_note_present_and_non_empty(self):
+        """live_check_note must be a non-empty string explaining conditional timing."""
+        resp = _post_estimate("example.com")
+        assert "live_check_note" in resp
+        assert isinstance(resp["live_check_note"], str)
+        assert len(resp["live_check_note"]) > 20
+
+    def test_live_check_note_mentions_flagged(self):
+        """live_check_note must mention that checks run only for flagged/suspicious items."""
+        resp = _post_estimate("example.com")
+        note = resp["live_check_note"].lower()
+        assert "flagged" in note or "suspicious" in note
+
+    def test_live_check_note_mentions_timing(self):
+        """live_check_note must mention timing so users understand the overhead."""
+        resp = _post_estimate("example.com")
+        note = resp["live_check_note"]
+        assert "second" in note or "time" in note.lower()
+
+    def test_estimate_job_returns_live_check_count_zero(self):
+        """estimate_job() dict must include estimated_live_check_count=0."""
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from services.estimate import estimate_job
+        from models import InputType, MdiInputItem
+
+        items = [MdiInputItem(input_original="a.com", input_normalized="a.com", position=1, input_type=InputType.DOMAIN)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert result["estimated_live_check_count"] == 0
+
+    def test_estimate_job_returns_live_check_note(self):
+        """estimate_job() dict must include a non-empty live_check_note."""
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+        from services.estimate import estimate_job
+        from models import InputType, MdiInputItem
+
+        items = [MdiInputItem(input_original="a.com", input_normalized="a.com", position=1, input_type=InputType.DOMAIN)]
+        result = estimate_job(items, use_domain_reports=False)
+        assert isinstance(result["live_check_note"], str)
+        assert len(result["live_check_note"]) > 0
+
+    def test_estimate_does_not_call_live_check(self):
+        """estimate.py must never import the live_check module or call httpx."""
+        import services.estimate as est_mod
+        src = open(est_mod.__file__).read()
+        # Must not import live_check or httpx (which would enable live HTTP calls)
+        assert "import live_check" not in src, (
+            "estimate.py must not import live_check"
+        )
+        assert "import httpx" not in src, (
+            "estimate.py must not import httpx — no live HTTP calls in estimates"
+        )
+        assert "_resolve_dns" not in src, (
+            "estimate.py must not call DNS resolution"
+        )
+
+    def test_estimate_live_check_count_unchanged_for_large_batch(self):
+        """Even with 100 items, estimated_live_check_count stays 0."""
+        raw = "\n".join(f"domain{i}.com" for i in range(100))
+        resp = _post_estimate(raw)
+        assert resp["estimated_live_check_count"] == 0

@@ -53,14 +53,16 @@ from models import (
     EvidenceStatus,
     Freshness,
     InputType,
+    LiveStatus,
     MdiProcessingStatus,
     RecommendedAction,
     TriageBucket,
     VtModeUsed,
 )
-from services import domain_enrichment, job_processor, job_store
+from services import domain_enrichment, job_processor, job_store, live_check
 from services.domain_enrichment import EnrichmentResult
 from services.job_store import InMemoryJob
+from services.live_check import LiveCheckResult
 from services.quota_writer import increment_quota, read_remaining_quota
 
 client = TestClient(app)
@@ -98,13 +100,23 @@ def redirect_job_persistence(tmp_path, monkeypatch):
 
     MDI-11 enrichment guard: also patches enrich_domain to return a no-op result
     so existing tests never make live RDAP or WHOIS calls.  Tests that need real
-    enrichment behavior override this mock explicitly within the test.
+    enrichment behavior override the mock explicitly within the test.
+
+    MDI-12 live-check guard: also patches live_check.live_check_item to return
+    NOT_CHECKED so all existing tests are unaffected by the new live-check pass.
+    Tests that need specific live-check behavior override this mock explicitly.
     """
     monkeypatch.setenv("MDI_LATEST_JOB_FILE", str(tmp_path / "mdi_latest_job.json"))
     # Patch enrich_domain at the module level used by job_processor
-    with patch.object(
-        domain_enrichment, "enrich_domain",
-        new=AsyncMock(side_effect=lambda reg_domain: _make_noop_enrichment(reg_domain)),
+    with (
+        patch.object(
+            domain_enrichment, "enrich_domain",
+            new=AsyncMock(side_effect=lambda reg_domain: _make_noop_enrichment(reg_domain)),
+        ),
+        patch.object(
+            live_check, "live_check_item",
+            new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.NOT_CHECKED)),
+        ),
     ):
         yield
 
@@ -1247,3 +1259,365 @@ def test_mdi11_enrichment_guard_noop_does_not_crash(tmp_path):
     result = job.results["example.com"]
     assert result.processing_status == MdiProcessingStatus.DONE
     assert result.age_bucket == AgeBucket.UNKNOWN
+
+
+# ── MDI-12 live-check integration tests ───────────────────────────────────────
+# All tests use _no_limiter(), mocked VT, and mocked live_check.live_check_item.
+# The autouse fixture patches live_check_item to NOT_CHECKED by default;
+# individual tests override as needed.
+
+
+def _make_flagged_vt_body(malicious: int = 3, suspicious: int = 0) -> dict:
+    """Build a VT report body with positive VT signals."""
+    return _vt_report_body(malicious=malicious, suspicious=suspicious, harmless=10, age_days=10)
+
+
+def _make_clean_vt_body() -> dict:
+    """Build a VT report body with zero flags."""
+    return _vt_report_body(malicious=0, suspicious=0, harmless=80, age_days=10)
+
+
+def test_mdi12_flagged_vt_item_triggers_live_check(tmp_path):
+    """
+    MDI-12: item with vt_hits > 0 → live_check_item is called once.
+    The autouse fixture defaults live_check_item to NOT_CHECKED; we count calls.
+    """
+    job_id = "test-mdi12-flagged-" + str(time.time_ns())
+    _make_job(job_id, [("evil.com", "evil.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=3)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    lc_mock.assert_called_once()
+    job = job_store.get_job_sync(job_id)
+    assert job.live_check_count == 1
+    assert job.live_check_skipped_count == 0
+
+
+def test_mdi12_suspicious_vt_item_triggers_live_check(tmp_path):
+    """MDI-12: item with vt_suspicious > 0 → live_check_item is called."""
+    job_id = "test-mdi12-suspicious-" + str(time.time_ns())
+    _make_job(job_id, [("suspect.com", "suspect.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, suspicious=2, harmless=70, age_days=5)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    lc_mock.assert_called_once()
+    job = job_store.get_job_sync(job_id)
+    assert job.live_check_count == 1
+
+
+def test_mdi12_clean_vt_item_skips_live_check(tmp_path):
+    """MDI-12: clean item (0 malicious, 0 suspicious) → live_check_item never called."""
+    job_id = "test-mdi12-clean-" + str(time.time_ns())
+    _make_job(job_id, [("clean.com", "clean.com", InputType.DOMAIN)])
+
+    body = _make_clean_vt_body()
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    lc_mock.assert_not_called()
+    job = job_store.get_job_sync(job_id)
+    assert job.live_check_skipped_count == 1
+    assert job.live_check_count == 0
+
+
+def test_mdi12_held_item_skips_live_check(tmp_path):
+    """MDI-12: HOLD_SKIPPED item → live_check_item is never called."""
+    job_id = "test-mdi12-held-" + str(time.time_ns())
+    _make_job(job_id, [("held.com", "held.com", InputType.DOMAIN)])
+
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    # Force enrichment to detect a hold so the item becomes HOLD_SKIPPED
+    held_enrichment = _make_rdap_enrichment_result(
+        registered_domain="held.com",
+        has_hold=True,
+    )
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, {}))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(domain_enrichment, "enrich_domain", new=AsyncMock(return_value=held_enrichment)),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    lc_mock.assert_not_called()
+    job = job_store.get_job_sync(job_id)
+    result = job.results["held.com"]
+    assert result.processing_status == MdiProcessingStatus.HOLD_SKIPPED
+
+
+def test_mdi12_live_active_updates_triage(tmp_path):
+    """
+    MDI-12: flagged item + live ACTIVE → triage re-runs with live_status=ACTIVE.
+    With a VT-flagged domain confirmed live → investigate/act urgency expected.
+    """
+    job_id = "test-mdi12-live-active-triage-" + str(time.time_ns())
+    _make_job(job_id, [("active-evil.com", "active-evil.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=5)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(
+            live_check, "live_check_item",
+            new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE)),
+        ),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["active-evil.com"]
+    assert result.live_status == LiveStatus.ACTIVE
+    # Triage should reflect the live-and-flagged combination
+    assert result.triage_bucket in (TriageBucket.MALICIOUS, TriageBucket.SUSPICIOUS)
+    assert result.processing_status == MdiProcessingStatus.DONE
+
+
+def test_mdi12_live_not_found_updates_triage(tmp_path):
+    """
+    MDI-12: flagged item + live NOT_FOUND → triage includes no-live branch context.
+    live_status is set to NOT_FOUND; triage re-runs.
+    """
+    job_id = "test-mdi12-live-not-found-" + str(time.time_ns())
+    _make_job(job_id, [("down-evil.com", "down-evil.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=3)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(
+            live_check, "live_check_item",
+            new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.NOT_FOUND)),
+        ),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["down-evil.com"]
+    assert result.live_status == LiveStatus.NOT_FOUND
+    # VT flagged + domain down → still malicious bucket
+    assert result.triage_bucket in (TriageBucket.MALICIOUS, TriageBucket.SUSPICIOUS)
+    assert result.processing_status == MdiProcessingStatus.DONE
+
+
+def test_mdi12_live_check_error_is_non_fatal(tmp_path):
+    """
+    MDI-12: live_check_item returns an error → job still completes, error appended.
+    """
+    from models import MdiError
+    from services.live_check import LiveCheckResult
+
+    job_id = "test-mdi12-lc-error-" + str(time.time_ns())
+    _make_job(job_id, [("error-test.com", "error-test.com", InputType.DOMAIN)])
+
+    body = _make_flagged_vt_body(malicious=2)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_error = MdiError(
+        code="live_check_dns_failure",
+        message="DNS returned nothing",
+        source="live_check",
+        retriable=True,
+    )
+    lc_result_with_error = LiveCheckResult(
+        live_status=LiveStatus.DNS_FAILURE,
+        error=lc_error,
+    )
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=AsyncMock(return_value=lc_result_with_error)),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["error-test.com"]
+    # Job completed despite live check error
+    assert result.processing_status == MdiProcessingStatus.DONE
+    assert result.live_status == LiveStatus.DNS_FAILURE
+    # Error is appended to result.errors
+    error_codes = [e.code for e in (result.errors or [])]
+    assert "live_check_dns_failure" in error_codes
+    # live_check_error_count incremented
+    assert job.live_check_error_count == 1
+    assert job.live_check_count == 1
+
+
+def test_mdi12_live_check_not_checked_for_clean_preserves_triage(tmp_path):
+    """
+    MDI-12: clean item skips live check; live_status stays NOT_CHECKED; triage unchanged.
+    """
+    job_id = "test-mdi12-clean-preserve-" + str(time.time_ns())
+    _make_job(job_id, [("safe.com", "safe.com", InputType.DOMAIN)])
+
+    body = _make_clean_vt_body()
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    job = job_store.get_job_sync(job_id)
+    result = job.results["safe.com"]
+    assert result.live_status == LiveStatus.NOT_CHECKED
+    assert result.triage_bucket == TriageBucket.CLEAN
+    assert result.processing_status == MdiProcessingStatus.DONE
+
+
+def test_mdi12_history_metadata_has_live_check_counts_not_urls(tmp_path):
+    """
+    MDI-12: usage history record includes live_check_count, live_check_skipped_count,
+    and live_check_error_count — but must not include raw URLs, IPs, or per-item data.
+    """
+    job_id = "test-mdi12-history-" + str(time.time_ns())
+    _make_job(job_id, [
+        ("flagged.com", "flagged.com", InputType.DOMAIN),
+        ("clean.com", "clean.com", InputType.DOMAIN),
+    ])
+
+    flagged_body = _make_flagged_vt_body(malicious=2)
+    clean_body = _make_clean_vt_body()
+    call_count = 0
+
+    async def _vt_side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _mock_resp(200, flagged_body)
+        return _mock_resp(200, clean_body)
+
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+    history_file = tmp_path / "vt_usage_history.jsonl"
+
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(side_effect=_vt_side_effect)),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(
+            live_check, "live_check_item",
+            new=AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE)),
+        ),
+    ):
+        _run(job_processor.process_job(
+            job_id,
+            usage_file=usage_file,
+            history_file=history_file,
+            job_file=tmp_path / "mdi_latest_job.json",
+        ))
+
+    import json as _json
+    lines = [l for l in history_file.read_text().splitlines() if l.strip()]
+    assert len(lines) == 1
+    record = _json.loads(lines[0])
+
+    # Live-check aggregate counts must be present
+    assert "live_check_count" in record
+    assert "live_check_skipped_count" in record
+    assert "live_check_error_count" in record
+
+    # Counts must be non-negative ints
+    assert isinstance(record["live_check_count"], int)
+    assert isinstance(record["live_check_skipped_count"], int)
+    assert isinstance(record["live_check_error_count"], int)
+
+    # Verify no raw URL/IP/domain data appears in the record text
+    record_text = _json.dumps(record)
+    assert "flagged.com" not in record_text
+    assert "clean.com" not in record_text
+    assert "93.184.216.34" not in record_text  # no resolved IPs
+    assert "live_status" not in record_text    # no per-item live_status
+    assert "http_status_code" not in record_text  # no raw HTTP codes
+
+
+def test_mdi12_url_input_type_triggers_live_check(tmp_path):
+    """MDI-12: URL input type is also eligible when flagged."""
+    job_id = "test-mdi12-url-input-" + str(time.time_ns())
+    _make_job(job_id, [("https://evil.com/malware", "https://evil.com/malware", InputType.URL)])
+
+    body = _make_flagged_vt_body(malicious=4)
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    lc_mock = AsyncMock(return_value=LiveCheckResult(live_status=LiveStatus.ACTIVE))
+    with (
+        _no_limiter(),
+        patch("services.vt_service._vt_request", new=AsyncMock(return_value=_mock_resp(200, body))),
+        patch.dict(os.environ, {"VT_API_KEY": "testkey"}),
+        patch.object(live_check, "live_check_item", new=lc_mock),
+    ):
+        _run(job_processor.process_job(
+            job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"
+        ))
+
+    lc_mock.assert_called_once()
+    call_args = lc_mock.call_args
+    # Must pass the normalized input and the correct InputType
+    assert call_args[0][0] == "https://evil.com/malware"
+    assert call_args[0][1] == InputType.URL

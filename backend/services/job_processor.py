@@ -22,10 +22,16 @@ Processing flow for each eligible item:
   4. Build TriageInput from VT result + item fields.
   5. Call triage_rules.decide() — single authoritative triage decision.
   6. Update in-memory job state.
+  7. Post-VT live-check pass (MDI-12): SSRF-safe HEAD probe for flagged/suspicious items.
+     a. Skip held, error, quota-blocked, clean, and no-VT-data items.
+     b. Call live_check.live_check_item() — all HTTP mocked in tests.
+     c. Set result.live_status from LiveCheckResult.
+     d. Re-run triage_rules.decide() with updated live_status.
+     e. Live-check failures are non-fatal: original VT triage is preserved on error.
 
 On completion, append a metadata-only record to the usage JSONL.
 Usage JSONL records NEVER contain raw domains, URLs, or item-level result data.
-Enrichment counts (rdap_enriched_count, etc.) are metadata-only — no raw values.
+Enrichment and live-check counts are metadata-only — no raw values.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ from models import (
     DomainHold,
     DomainHoldType,
     DomainStatusSource,
+    Freshness,
     InputType,
     LiveStatus,
     MdiError,
@@ -51,11 +58,13 @@ from services import (
     domain_enrichment,
     job_persistence,
     job_store,
+    live_check,
     quota_writer,
     triage_rules,
     vt_service,
 )
 from services.domain_enrichment import EnrichmentResult
+from services.live_check import LiveCheckResult
 
 logger = logging.getLogger("mdi.job_processor")
 
@@ -122,6 +131,8 @@ async def process_job(
         # MDI-11: enrich all items with RDAP/WHOIS before VT processing
         await _enrich_items(job)
         await _run_items(job, usage_file=usage_file)
+        # MDI-12: live HTTP check for flagged/suspicious items after VT
+        await _live_check_items(job)
     except Exception as exc:  # noqa: BLE001
         logger.exception("process_job: unexpected error in job %s: %s", job_id, exc)
         job.status = "error"
@@ -386,6 +397,107 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
         job.processed += 1
 
 
+# ── MDI-12 live-check pass ─────────────────────────────────────────────────────
+
+
+def _should_live_check(result: MdiResultItem) -> bool:
+    """
+    Return True when an item should receive a live HTTP check.
+
+    Eligibility requirements (all must be true):
+      - Not held/HOLD_SKIPPED.
+      - Not ERROR (includes quota-blocked items whose processing_status=ERROR).
+      - VT ran (vt_total_engines > 0).
+      - At least one VT hit (malicious) or suspicious vote.
+
+    This ensures live checks run only for flagged/suspicious items.
+    Clean items (zero hits, zero suspicious) are skipped.
+    """
+    if result.processing_status == MdiProcessingStatus.HOLD_SKIPPED:
+        return False
+    if result.processing_status == MdiProcessingStatus.ERROR:
+        return False
+    if not (result.vt_total_engines or 0):
+        return False
+    return (result.vt_hits or 0) > 0 or (result.vt_suspicious or 0) > 0
+
+
+async def _live_check_items(job: job_store.InMemoryJob) -> None:
+    """
+    Run SSRF-safe live HTTP checks for flagged/suspicious items after VT.
+
+    For each eligible item:
+      1. Check eligibility via _should_live_check().
+      2. Call live_check.live_check_item() — all HTTP mocked in tests.
+      3. Set result.live_status from the LiveCheckResult.
+      4. Append any structured error to result.errors (non-fatal).
+      5. Re-run triage_rules.decide() with updated live_status.
+
+    Live-check errors are non-fatal: VT triage fields are preserved, only
+    live_status is updated and any error is appended to result.errors.
+
+    Counters updated on job:
+      - live_check_count: items that received a live check attempt.
+      - live_check_skipped_count: items skipped by eligibility rules.
+      - live_check_error_count: items where live_check returned an error.
+    """
+    for normalized in job.item_order:
+        result = job.results.get(normalized)
+        if result is None:
+            continue
+
+        if not _should_live_check(result):
+            job.live_check_skipped_count += 1
+            continue
+
+        # Attempt live check — never raises (live_check_item catches all exceptions)
+        try:
+            lc_result: LiveCheckResult = await live_check.live_check_item(
+                result.input_normalized,
+                result.input_type,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "live_check: unexpected exception for item at position %s: %s",
+                result.position, exc,
+            )
+            job.live_check_error_count += 1
+            continue
+
+        job.live_check_count += 1
+
+        # Collect existing errors; append live-check error if any
+        updated_errors = list(result.errors or [])
+        if lc_result.error is not None:
+            updated_errors.append(lc_result.error)
+            job.live_check_error_count += 1
+
+        # Re-run triage with updated live_status (preserves all VT + enrichment fields)
+        inp = triage_rules.TriageInput(
+            domain_hold_has_hold=False,
+            processing_status=result.processing_status,
+            vt_hits=result.vt_hits or 0,
+            vt_suspicious=result.vt_suspicious or 0,
+            vt_total_engines=result.vt_total_engines or 0,
+            freshness=result.freshness or Freshness.UNKNOWN,
+            live_status=lc_result.live_status,
+            age_bucket=result.age_bucket or AgeBucket.UNKNOWN,
+            errors=updated_errors,
+            stale_threshold_days=job.stale_threshold_days,
+        )
+        dec = triage_rules.decide(inp)
+
+        job.results[normalized] = result.model_copy(update={
+            "live_status": lc_result.live_status,
+            "triage_bucket": dec.triage_bucket,
+            "triage_confidence": dec.triage_confidence,
+            "recommended_action": dec.recommended_action,
+            "evidence_status": dec.evidence_status,
+            "triage_reason": dec.triage_reason,
+            "errors": updated_errors,
+        })
+
+
 # ── Persistence helpers ────────────────────────────────────────────────────────
 
 async def _write_persistence(
@@ -438,6 +550,9 @@ def _write_history(
         whois_fallback_count=job.whois_fallback_count,
         hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
         enrichment_skipped_uploaded_hold_count=job.enrichment_skipped_uploaded_hold_count,
+        live_check_count=job.live_check_count,
+        live_check_skipped_count=job.live_check_skipped_count,
+        live_check_error_count=job.live_check_error_count,
     )
     quota_writer.append_usage_history(record, history_file)
 

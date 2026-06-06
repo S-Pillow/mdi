@@ -52,6 +52,10 @@ class InMemoryJob:
     whois_fallback_count: int = 0
     hold_detected_by_enrichment_count: int = 0
     enrichment_skipped_uploaded_hold_count: int = 0
+    # ── MDI-12 live-check counters (metadata-only — counts only, no URLs or IPs) ──
+    live_check_count: int = 0           # items that received a live check
+    live_check_skipped_count: int = 0   # items skipped (clean, held, error, no VT data)
+    live_check_error_count: int = 0     # items where live check returned an error
 
 
 # ── Store ──────────────────────────────────────────────────────────────────────

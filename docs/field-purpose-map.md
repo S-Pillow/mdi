@@ -750,3 +750,124 @@ These are publicly available RDAP fields — no PII.
 
 - `tldextract==5.3.1` — registered domain extraction from URLs
 - `whois==1.20240129.2` — WHOIS fallback lookups
+
+---
+
+## MDI-12 — SSRF-safe Live Status Checks
+
+### Overview
+
+MDI-12 adds `backend/services/live_check.py`, a self-contained SSRF-safe
+HTTP probe service.  It ports the URL Activity Scanner's safety chain to Python,
+running live HTTP checks **after VT processing** for flagged or suspicious items.
+
+### `live_check.py` — core service
+
+Implements a four-gate pipeline before any network call reaches the internet:
+
+1. **URL validation (pure)** — scheme, hostname blocklist, IP-literal CIDR check.
+2. **DNS resolution + re-check** — resolves A/AAAA via `socket.getaddrinfo`
+   through `asyncio.run_in_executor`; all resolved IPs are checked against the
+   SSRF blocklist before continuing.
+3. **HEAD request chain** — manual redirect following (max 3 hops); every
+   redirect `Location` header is re-validated through all four gates before
+   following.
+4. **GET fallback** — only on 405/501; body immediately closed without reading.
+
+All external-facing functions (`_resolve_dns`, `_head_request`,
+`_get_fallback_request`) are module-level async functions — mockable in tests
+via `patch.object` without any live network calls.
+
+### SSRF protection summary
+
+| Protection | Method |
+|---|---|
+| Scheme restriction | Only `http` and `https` allowed |
+| Hostname exact blocklist | `localhost`, `localhost.localdomain`, `metadata.google.internal` |
+| Hostname suffix blocklist | `.localhost`, `.localdomain`, `.local`, `.internal` |
+| IPv4 CIDR blocklist | Loopback, RFC 1918 private, link-local, CGNAT, multicast, reserved test nets, broadcast |
+| IPv6 CIDR blocklist | Loopback, ULA, link-local, multicast, documentation, IPv4-mapped equivalents |
+| DNS rebinding mitigation | All resolved IPs checked against SSRF blocklist before HTTP call |
+| Redirect revalidation | Every Location header treated as untrusted; re-runs all four gates |
+| TLS verification | Always enabled (`verify=True`); TLS errors → `UNKNOWN` |
+| Body policy | HEAD: no body by spec; GET fallback: `aclose()` immediately |
+
+### `live_status` activation
+
+`live_status` was defined in `models.py` (MDI-10) and consumed by
+`triage_rules.py` (MDI-10), but always remained `NOT_CHECKED`.  MDI-12
+populates it for eligible items.
+
+**Eligibility rules (all must be true):**
+- `processing_status` is not `HOLD_SKIPPED`
+- `processing_status` is not `ERROR` (includes quota-blocked items)
+- `vt_total_engines > 0` (VT actually ran)
+- `vt_hits > 0` OR `vt_suspicious > 0`
+
+Clean items (zero hits, zero suspicious) are always skipped.
+Held domains are always skipped.
+
+### `live_status` → `LiveStatus` mapping
+
+| HTTP outcome | `LiveStatus` |
+|---|---|
+| 2xx (direct) | `ACTIVE` |
+| 3xx (any redirect followed) | `REDIRECT` |
+| 403 | `FORBIDDEN` |
+| 404 | `NOT_FOUND` |
+| 410 | `GONE` |
+| 5xx | `SERVER_ERROR` |
+| Other 4xx | `UNKNOWN` |
+| Timeout | `TIMEOUT` |
+| Connection refused | `CONNECTION_REFUSED` |
+| DNS failure | `DNS_FAILURE` |
+| SSRF block | `BLOCKED` |
+| Too many redirects (> 3) | `UNKNOWN` |
+| TLS error | `UNKNOWN` |
+| Not eligible | `NOT_CHECKED` |
+
+### Triage interaction
+
+After `live_status` is populated, `triage_rules.decide()` is re-run for the
+item.  The `_is_live()` and `_is_no_live()` branches (defined in MDI-10 but
+previously unreachable) now activate:
+
+| Triage set | `LiveStatus` values |
+|---|---|
+| Live (active) | `ACTIVE`, `REDIRECT`, `FORBIDDEN` |
+| No-live (down) | `NOT_FOUND`, `GONE`, `DNS_FAILURE`, `CONNECTION_REFUSED`, `TIMEOUT` |
+| Neutral/unknown | `UNKNOWN`, `BLOCKED`, `SERVER_ERROR`, `NOT_CHECKED` |
+
+### Job-state counters (MDI-12)
+
+Added to `InMemoryJob` and usage-history records:
+
+| Counter | Meaning |
+|---|---|
+| `live_check_count` | Items that received a live check attempt |
+| `live_check_skipped_count` | Items skipped by eligibility rules |
+| `live_check_error_count` | Items where live_check returned a structured error |
+
+### Usage-history privacy
+
+Metadata-only records (no raw per-item data):
+- `live_check_count` — aggregate count
+- `live_check_skipped_count` — aggregate count
+- `live_check_error_count` — aggregate count
+
+**Must not appear in history records:**
+- Submitted URLs or domains
+- Resolved IP addresses
+- Redirect chains
+- Final resolved URLs
+- `live_status` per item
+- HTTP status codes per item
+
+### Estimate behavior
+
+`estimated_live_check_count = 0` always — the number of flagged items is not
+known until VT processing completes.  A `live_check_note` string is included in
+the estimate response explaining the conditional timing overhead.
+
+`live_check` duration is **not** added to `estimated_duration_seconds_min` or
+`estimated_duration_seconds_max` because the count is unknown at estimate time.

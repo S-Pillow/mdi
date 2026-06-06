@@ -45,6 +45,13 @@ ENRICHMENT_NOTE: str = (
     "Items sharing the same registered domain are enriched once (per-job cache)."
 )
 
+# MDI-12: live-check note (shown at estimate time — count is always 0 before VT)
+LIVE_CHECK_NOTE: str = (
+    "Live checks run only after VT and only for flagged/suspicious items. "
+    "They may add up to 10 seconds per flagged item, plus redirect time. "
+    "The exact count is not known until VT processing completes."
+)
+
 
 def _enrichment_warning(lookups: int) -> str:
     """
@@ -152,4 +159,7 @@ def estimate_job(
         "job_state_note": JOB_STATE_NOTE,
         "enrichment_note": ENRICHMENT_NOTE,
         "enrichment_warning": warning,
+        # MDI-12: live-check estimate (always 0 — flagged count unknown before VT)
+        "estimated_live_check_count": 0,
+        "live_check_note": LIVE_CHECK_NOTE,
     }
