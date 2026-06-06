@@ -6,7 +6,16 @@ Strategy:
   - Processing tests call job_processor.process_job() directly via asyncio.run()
     with mocked VT (_vt_request) and temp file paths (tmp_path).
   - Live /var/lib/dns-tool/vt_usage.json is never modified.
+  - Live /var/lib/dns-tool/mdi_latest_job.json is never created or modified.
   - No real VT API calls are made.
+
+MDI-08A isolation fix (two paths):
+  1. Direct process_job() calls: all now pass job_file=tmp_path / "mdi_latest_job.json".
+  2. Background tasks from POST /api/mdi/jobs/submit TestClient tests: cannot
+     inject job_file= through the endpoint, so an autouse fixture redirects
+     MDI_LATEST_JOB_FILE to tmp_path for every test in this module.
+  Prior to this fix, both paths defaulted to /var/lib/dns-tool/mdi_latest_job.json
+  and wrote test artifacts to the live recovery file during every test run.
 """
 
 from __future__ import annotations
@@ -43,6 +52,26 @@ from services.job_store import InMemoryJob
 from services.quota_writer import increment_quota, read_remaining_quota
 
 client = TestClient(app)
+
+
+# ── Module-level test isolation ────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def redirect_job_persistence(tmp_path, monkeypatch):
+    """
+    Redirect ALL job persistence writes to tmp_path for every test in this module.
+
+    This covers two write paths:
+      1. Direct process_job() calls — each also passes explicit job_file=tmp_path/...
+      2. Background tasks spawned by POST /api/mdi/jobs/submit via TestClient —
+         those tasks cannot receive job_file= injection through the endpoint, so
+         they pick up MDI_LATEST_JOB_FILE from the environment instead.
+
+    Without this fixture, background tasks default to _default_job_file() =
+    /var/lib/dns-tool/mdi_latest_job.json, writing test artifacts to the live
+    recovery file.  monkeypatch automatically restores the env var after each test.
+    """
+    monkeypatch.setenv("MDI_LATEST_JOB_FILE", str(tmp_path / "mdi_latest_job.json"))
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -255,7 +284,7 @@ def test_process_job_clean_domain(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     job = job_store.get_job_sync(job_id)
     assert job.status == "done"
@@ -278,7 +307,7 @@ def test_process_job_malicious_domain(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     job = job_store.get_job_sync(job_id)
     result = job.results["evil.com"]
@@ -299,7 +328,7 @@ def test_process_job_held_item_not_vt_checked(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     mock_req.assert_not_called()
     job = job_store.get_job_sync(job_id)
@@ -324,7 +353,7 @@ def test_process_job_unknown_hold_is_processed(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     mock_req.assert_called()
     job = job_store.get_job_sync(job_id)
@@ -346,7 +375,7 @@ def test_quota_increment_after_successful_call(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     data = json.loads(usage_file.read_text())
     # One successful GET call → 1 increment
@@ -380,7 +409,7 @@ def test_quota_increment_url_404_flow(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=multi), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     data = json.loads(usage_file.read_text())
     assert data["daily_lookups_used"] == 3
@@ -411,7 +440,7 @@ def test_quota_hard_stop_mid_run(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     mock_req.assert_not_called()
     job = job_store.get_job_sync(job_id)
@@ -432,7 +461,7 @@ def test_process_job_vt_429_structured_error(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     job = job_store.get_job_sync(job_id)
     result = job.results["ratelimited.com"]
@@ -455,7 +484,7 @@ def test_process_job_vt_500_structured_error(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["server-error.com"]
     assert result.processing_status == MdiProcessingStatus.ERROR
@@ -477,7 +506,7 @@ def test_process_job_vt_timeout_structured_error(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=raise_timeout), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["slow.com"]
     assert result.processing_status == MdiProcessingStatus.ERROR
@@ -498,7 +527,7 @@ def test_freshness_1_day_is_fresh(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["fresh.com"]
     assert result.freshness == Freshness.FRESH
@@ -516,7 +545,7 @@ def test_freshness_10_days_is_stale(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["stale.com"]
     assert result.freshness == Freshness.STALE
@@ -534,7 +563,7 @@ def test_freshness_45_days_is_very_stale(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["very-stale.com"]
     assert result.freshness == Freshness.VERY_STALE
@@ -560,7 +589,7 @@ def test_freshness_missing_date_is_never_scanned(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     result = job_store.get_job_sync(job_id).results["no-scan.com"]
     assert result.freshness == Freshness.NEVER_SCANNED
@@ -586,6 +615,7 @@ def test_usage_history_metadata_only(tmp_path):
             job_id,
             usage_file=usage_file,
             history_file=history_file,
+            job_file=tmp_path / "mdi_latest_job.json",
         ))
 
     assert history_file.exists()
@@ -619,6 +649,7 @@ def test_usage_history_no_raw_domains_or_urls(tmp_path):
             job_id,
             usage_file=usage_file,
             history_file=history_file,
+            job_file=tmp_path / "mdi_latest_job.json",
         ))
 
     raw = history_file.read_text()
@@ -626,6 +657,47 @@ def test_usage_history_no_raw_domains_or_urls(tmp_path):
 
 
 # ── Live runtime file protection ───────────────────────────────────────────────
+
+def test_live_mdi_latest_job_not_created_or_modified(tmp_path):
+    """
+    Processing tests must never create or modify /var/lib/dns-tool/mdi_latest_job.json.
+
+    This is the MDI-08A regression guard.  Before the fix, process_job() calls
+    without job_file= defaulted to the live path and wrote test artifacts there.
+    """
+    live_path = Path("/var/lib/dns-tool/mdi_latest_job.json")
+    existed_before = live_path.exists()
+    mtime_before = live_path.stat().st_mtime if existed_before else None
+
+    job_id = "test-isolation-" + str(time.time_ns())
+    _make_job(job_id, [("isolation-check.com", "isolation-check.com", InputType.DOMAIN)])
+
+    body = _vt_report_body(malicious=0, age_days=1)
+    mock_req = AsyncMock(return_value=_mock_resp(200, body))
+    usage_file = tmp_path / "vt_usage.json"
+    usage_file.write_text('{"date_utc": "2099-01-01", "daily_lookups_used": 0}')
+
+    with _no_limiter(), \
+         patch("services.vt_service._vt_request", new=mock_req), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        _run(job_processor.process_job(
+            job_id,
+            usage_file=usage_file,
+            job_file=tmp_path / "mdi_latest_job.json",
+        ))
+
+    # Verify the test's own persistence went to tmp_path, not the live path
+    assert (tmp_path / "mdi_latest_job.json").exists(), \
+        "Persistence should have written to tmp_path"
+
+    if not existed_before:
+        assert not live_path.exists(), \
+            "test must not create /var/lib/dns-tool/mdi_latest_job.json"
+    else:
+        mtime_after = live_path.stat().st_mtime
+        assert mtime_before == mtime_after, \
+            "test must not modify /var/lib/dns-tool/mdi_latest_job.json"
+
 
 def test_live_vt_usage_file_not_modified(tmp_path):
     """Tests must not modify /var/lib/dns-tool/vt_usage.json."""
@@ -645,7 +717,7 @@ def test_live_vt_usage_file_not_modified(tmp_path):
     with _no_limiter(), \
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
-        _run(job_processor.process_job(job_id, usage_file=tmp_usage))
+        _run(job_processor.process_job(job_id, usage_file=tmp_usage, job_file=tmp_path / "mdi_latest_job.json"))
 
     if live_path.exists() and mtime_before is not None:
         mtime_after = live_path.stat().st_mtime
@@ -673,7 +745,7 @@ def test_no_socket_calls_in_processing(tmp_path):
          patch("services.vt_service._vt_request", new=mock_req), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}), \
          patch("socket.getaddrinfo", side_effect=spy_getaddrinfo):
-        _run(job_processor.process_job(job_id, usage_file=usage_file))
+        _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     assert dns_calls == [], f"Unexpected DNS calls: {dns_calls}"
 
