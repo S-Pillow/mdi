@@ -30,6 +30,7 @@ from models import (
     MdiProcessingStatus,
     MdiResultItem,
     RefreshScanScope,
+    VtModeUsed,
 )
 from services import job_persistence, job_store, live_check, quota_writer, triage_rules, vt_service
 from services.job_store import InMemoryJob, get_job, get_job_sync, register_recovered_job
@@ -40,12 +41,6 @@ from services.vt_service import VtLookupResult
 logger = logging.getLogger("mdi.job_actions")
 
 _STALE_FRESHNESS = frozenset({Freshness.STALE, Freshness.VERY_STALE})
-
-_DOMAIN_SCAN_SKIP_MSG = (
-    "New scan is not supported in domain-report mode; "
-    "use Refresh Report or rerun with URL report mode."
-)
-
 
 @dataclass
 class EligibilityResult:
@@ -74,8 +69,13 @@ def _result_by_position(job: InMemoryJob, position: int) -> Optional[MdiResultIt
     return None
 
 
-def _scan_supported(job: InMemoryJob, result: MdiResultItem) -> bool:
-    return vt_service.scan_supported_for_item(result.input_type, job.use_domain_reports)
+def _vt_mode_for_result(job: InMemoryJob, result: MdiResultItem) -> VtModeUsed:
+    _, vt_mode = vt_service._build_vt_target(
+        result.input_normalized,
+        result.input_type,
+        job.use_domain_reports,
+    )
+    return vt_mode
 
 
 def _is_stale(result: MdiResultItem) -> bool:
@@ -138,8 +138,10 @@ def _evaluate_item(
     if _is_held(result):
         out.record_skip("held")
         return
-    if action == "scan" and not _scan_supported(job, result):
-        out.record_skip("domain_report_mode")
+    if action == "scan" and not vt_service.scan_supported_for_item(
+        result.input_type, job.use_domain_reports
+    ):
+        out.record_skip("unsupported_item_type")
         return
     out.eligible.append(result)
 
@@ -147,9 +149,8 @@ def _evaluate_item(
 def _quota_per_item(action: str, job: InMemoryJob, result: MdiResultItem) -> Tuple[int, int]:
     if action == "refresh":
         return 1, 1
-    if not _scan_supported(job, result):
-        return 0, 0
-    return 2, 4
+    vt_mode = _vt_mode_for_result(job, result)
+    return vt_service.scan_quota_estimate_for_mode(vt_mode)
 
 
 def estimate_action(
@@ -160,10 +161,17 @@ def estimate_action(
     """Compute quota estimate for a refresh or scan batch."""
     selection = select_eligible_items(job, request.scope, request.positions, action)
     q_min = q_max = 0
+    url_scan_eligible_count = 0
+    domain_rescan_eligible_count = 0
     for item in selection.eligible:
         cmin, cmax = _quota_per_item(action, job, item)
         q_min += cmin
         q_max += cmax
+        if action == "scan":
+            if _vt_mode_for_result(job, item) == VtModeUsed.DOMAIN_REPORT:
+                domain_rescan_eligible_count += 1
+            else:
+                url_scan_eligible_count += 1
 
     try:
         remaining = read_remaining_quota()
@@ -180,6 +188,8 @@ def estimate_action(
             quota_remaining=0,
             will_exceed_quota=True,
             message="Shared quota lock unavailable; try again shortly.",
+            url_scan_eligible_count=url_scan_eligible_count,
+            domain_rescan_eligible_count=domain_rescan_eligible_count,
         )
 
     will_exceed = q_max > remaining
@@ -190,6 +200,13 @@ def estimate_action(
             f"{action.capitalize()} will process {len(selection.eligible)} item(s); "
             f"estimated {q_min}–{q_max} VT quota unit(s)."
         )
+        if action == "scan" and (url_scan_eligible_count or domain_rescan_eligible_count):
+            parts = []
+            if url_scan_eligible_count:
+                parts.append(f"{url_scan_eligible_count} URL scan(s)")
+            if domain_rescan_eligible_count:
+                parts.append(f"{domain_rescan_eligible_count} domain rescan(s)")
+            msg += f" Includes {' and '.join(parts)}."
     else:
         msg = f"No eligible items for {action}."
 
@@ -208,6 +225,8 @@ def estimate_action(
         quota_remaining=remaining,
         will_exceed_quota=will_exceed,
         message=msg,
+        url_scan_eligible_count=url_scan_eligible_count,
+        domain_rescan_eligible_count=domain_rescan_eligible_count,
     )
 
 

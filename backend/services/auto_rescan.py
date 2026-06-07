@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 
 from models import (
     Freshness,
+    InputType,
     MdiProcessingStatus,
     MdiResultItem,
 )
@@ -58,7 +59,8 @@ def evaluate_auto_rescan_eligibility(
         return False, "auto_rescan_not_flagged"
     if result.freshness not in _STALE_FRESHNESS:
         return False, "auto_rescan_not_stale"
-    if not vt_service.scan_supported_for_item(result.input_type, job.use_domain_reports):
+    # MDI-28: manual domain rescan supported; auto-rescan domain support deferred.
+    if result.input_type == InputType.DOMAIN and job.use_domain_reports:
         return False, "auto_rescan_domain_report_mode"
     if job.auto_rescan_attempted_count >= job.max_auto_rescans:
         return False, "auto_rescan_job_limit"

@@ -824,6 +824,14 @@ class JobActionEstimateResponse(BaseModel):
     quota_remaining: int
     will_exceed_quota: bool
     message: str
+    url_scan_eligible_count: int = Field(
+        0,
+        description="[display] Scan-eligible URL-report rows (URL scan path).",
+    )
+    domain_rescan_eligible_count: int = Field(
+        0,
+        description="[display] Scan-eligible domain-report rows (domain rescan path).",
+    )
 
 
 class JobActionAcceptedResponse(BaseModel):
