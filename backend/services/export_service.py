@@ -56,6 +56,36 @@ CSV_HEADERS: List[str] = [
 _INJECTION_FIRST_CHARS = frozenset("=+-@")
 _SCHEMA_VERSION = "mdi-evidence-v1"
 
+_EXPORT_CODE_MAP: Dict[str, str] = {
+    "action_in_progress": "action_in_progress",
+    "no_results": "no_rows",
+    "no_flagged_rows": "no_flagged_rows",
+}
+
+
+def export_error_detail(reason: str) -> Dict[str, str]:
+    """
+    Structured export error for HTTP responses.
+
+    Preserves human-readable message; adds stable code/category/severity fields.
+    """
+    from services.error_taxonomy import ErrorCategory, ErrorSeverity
+
+    code = _EXPORT_CODE_MAP.get(reason, "export_error")
+    if reason.startswith("Job status"):
+        code = "job_not_exportable"
+    elif reason.startswith("Invalid positions") or reason.startswith("No rows match"):
+        code = "invalid_selection"
+    elif "positions is required" in reason:
+        code = "invalid_selection"
+    severity = ErrorSeverity.SKIP.value if code in ("no_rows", "no_flagged_rows") else ErrorSeverity.ERROR.value
+    return {
+        "code": code,
+        "message": reason,
+        "category": ErrorCategory.EXPORT.value,
+        "severity": severity,
+    }
+
 
 def validate_job_for_export(job: InMemoryJob) -> Optional[str]:
     """Return error detail if job cannot be exported, else None."""
@@ -232,6 +262,9 @@ def _sanitize_errors(errors: List[MdiError]) -> List[Dict[str, Any]]:
             "message": err.message,
             "source": err.source,
             "retriable": err.retriable,
+            "category": err.category,
+            "severity": err.severity,
+            "blocks_triage": err.blocks_triage,
         }
         for err in errors
     ]

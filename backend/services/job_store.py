@@ -37,7 +37,8 @@ class InMemoryJob:
     processed: int = 0                # items where VT attempt finished
     held_skipped: int = 0             # items skipped because of hold
     rejected_count: int = 0           # parse-rejected items
-    quota_blocked_count: int = 0      # items blocked mid-run by quota
+    quota_blocked_count: int = 0      # items blocked mid-run by quota exhaustion
+    quota_lock_timeout_count: int = 0  # items skipped due to shared quota lock timeout
     estimated_requests: int = 0       # pre-submit conservative estimate
     lookups_used: int = 0             # actual VT API calls consumed
     use_domain_reports: bool = False

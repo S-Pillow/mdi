@@ -45,8 +45,18 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from models import InputType, LiveStatus, MdiError
+from services.error_taxonomy import make_mdi_error
 
 # ── Constants ──────────────────────────────────────────────────────────────────
+
+
+def _live_error(code: str, message: str, *, retriable: bool = True) -> MdiError:
+    return make_mdi_error(
+        code=code,
+        message=message,
+        source="live_check",
+        retriable=retriable,
+    )
 
 MAX_REDIRECTS: int = 3
 TIMEOUT_S: float = 10.0
@@ -363,10 +373,9 @@ async def _run_head_chain(
                 return LiveCheckResult(
                     live_status=LiveStatus.UNKNOWN,
                     redirect_count=redirect_count,
-                    error=MdiError(
-                        code="live_check_tls_error",
-                        message="TLS/SSL verification failed",
-                        source="live_check",
+                    error=_live_error(
+                        "live_check_tls_error",
+                        "TLS/SSL verification failed",
                         retriable=False,
                     ),
                 )
@@ -416,10 +425,9 @@ async def _run_head_chain(
                     live_status=LiveStatus.BLOCKED,
                     http_status_code=status,
                     redirect_count=redirect_count,
-                    error=MdiError(
-                        code="live_check_redirect_blocked",
-                        message=f"Redirect target blocked: {next_validation.reason}",
-                        source="live_check",
+                    error=_live_error(
+                        "live_check_redirect_blocked",
+                        f"Redirect target blocked: {next_validation.reason}",
                         retriable=False,
                     ),
                 )
@@ -441,12 +449,9 @@ async def _run_head_chain(
                             live_status=LiveStatus.BLOCKED,
                             http_status_code=status,
                             redirect_count=redirect_count,
-                            error=MdiError(
-                                code="live_check_redirect_blocked",
-                                message=(
-                                    f"Redirect DNS resolved to blocked IP: {block_reason}"
-                                ),
-                                source="live_check",
+                            error=_live_error(
+                                "live_check_redirect_blocked",
+                                f"Redirect DNS resolved to blocked IP: {block_reason}",
                                 retriable=False,
                             ),
                         )
@@ -513,10 +518,9 @@ async def live_check_item(
     if not validation.allowed:
         return LiveCheckResult(
             live_status=LiveStatus.BLOCKED,
-            error=MdiError(
-                code="live_check_blocked",
-                message=f"URL blocked by SSRF safety check: {validation.reason}",
-                source="live_check",
+            error=_live_error(
+                "live_check_blocked",
+                f"URL blocked by SSRF safety check: {validation.reason}",
                 retriable=False,
             ),
         )
@@ -530,11 +534,9 @@ async def live_check_item(
     if not resolved_ips:
         return LiveCheckResult(
             live_status=LiveStatus.DNS_FAILURE,
-            error=MdiError(
-                code="live_check_dns_failure",
-                message=f"DNS resolution returned no results for {hostname!r}",
-                source="live_check",
-                retriable=True,
+            error=_live_error(
+                "live_check_dns_failure",
+                f"DNS resolution returned no results for {hostname!r}",
             ),
         )
 
@@ -543,10 +545,9 @@ async def live_check_item(
         if block_reason:
             return LiveCheckResult(
                 live_status=LiveStatus.BLOCKED,
-                error=MdiError(
-                    code="live_check_blocked",
-                    message=f"DNS resolved to blocked IP — {block_reason}",
-                    source="live_check",
+                error=_live_error(
+                    "live_check_blocked",
+                    f"DNS resolved to blocked IP — {block_reason}",
                     retriable=False,
                 ),
             )
@@ -563,10 +564,8 @@ async def live_check_item(
     except Exception as exc:  # noqa: BLE001
         return LiveCheckResult(
             live_status=LiveStatus.UNKNOWN,
-            error=MdiError(
-                code="live_check_error",
-                message=f"Unexpected error during live check: {exc}",
-                source="live_check",
-                retriable=True,
+            error=_live_error(
+                "live_check_error",
+                f"Unexpected error during live check: {exc}",
             ),
         )

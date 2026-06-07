@@ -51,6 +51,7 @@ from models import (
     TriageBucket,
     TriageConfidence,
 )
+from services.error_taxonomy import has_blocking_errors
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -135,12 +136,27 @@ def _reason_hold() -> List[str]:
 
 def _reason_error(inp: TriageInput) -> List[str]:
     lines: List[str] = []
-    for e in inp.errors:
+    blocking = [e for e in inp.errors if has_blocking_errors([e])]
+    for e in blocking or inp.errors:
         lines.append(f"Processing error: {e.message} (code: {e.code}).")
     if not lines:
         lines.append("Processing failed or was blocked before VT could run.")
     lines.append("Retry when quota or connectivity allows.")
     return lines
+
+
+def _is_error_triage_path(inp: TriageInput) -> bool:
+    """
+    True when triage should route to ERROR bucket.
+
+    Blocking errors always qualify. processing_status=ERROR qualifies only when
+    there is no usable VT evidence (VT did not succeed).
+    """
+    if has_blocking_errors(inp.errors):
+        return True
+    if inp.processing_status == MdiProcessingStatus.ERROR:
+        return not _vt_complete(inp.vt_total_engines, [])
+    return False
 
 
 def _reason_flagged(inp: TriageInput, sub_reason: List[str]) -> List[str]:
@@ -367,11 +383,8 @@ def decide(inp: TriageInput) -> TriageDecision:
             triage_reason=_reason_hold(),
         )
 
-    # ── Priority 2: Error / Quota Blocked ─────────────────────────────────────
-    if (
-        inp.processing_status == MdiProcessingStatus.ERROR
-        or bool(inp.errors)
-    ):
+    # ── Priority 2: Blocking errors / failed processing without VT evidence ───
+    if _is_error_triage_path(inp):
         return TriageDecision(
             triage_bucket=TriageBucket.ERROR,
             triage_confidence=TriageConfidence.UNKNOWN,

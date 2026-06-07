@@ -194,13 +194,30 @@ class TestErrorPath:
         assert d.recommended_action == RecommendedAction.RETRY_LOOKUP
 
     def test_error_with_vt_hits_still_errors(self):
-        """Error path must win over malicious when errors list is non-empty."""
+        """Blocking error with failed processing must win over malicious VT hits."""
         d = decide(TriageInput(
             processing_status=MdiProcessingStatus.ERROR,
             vt_hits=3,
             errors=[self._err()],
         ))
         assert d.triage_bucket == TriageBucket.ERROR
+
+    def test_warning_errors_do_not_force_error_with_vt_success(self):
+        """Non-blocking enrichment warnings must not override successful VT triage."""
+        warn = MdiError(
+            code="whois_failed",
+            message="RDAP+WHOIS failed.",
+            source="domain_enrichment",
+            retriable=True,
+        )
+        d = decide(TriageInput(
+            processing_status=MdiProcessingStatus.DONE,
+            vt_hits=2,
+            vt_total_engines=70,
+            freshness=Freshness.FRESH,
+            errors=[warn],
+        ))
+        assert d.triage_bucket == TriageBucket.MALICIOUS
 
     def test_error_reason_non_empty(self):
         d = decide(TriageInput(

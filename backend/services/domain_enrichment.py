@@ -62,9 +62,19 @@ from models import (
     MdiError,
 )
 from services.age_bucket import compute_age_bucket
+from services.error_taxonomy import make_mdi_error
 from services.hold_detection import detect_hold
 
 logger = logging.getLogger("mdi.domain_enrichment")
+
+
+def _enrichment_error(code: str, message: str) -> MdiError:
+    return make_mdi_error(
+        code=code,
+        message=message,
+        source="domain_enrichment",
+        retriable=True,
+    )
 
 # Timeout for individual RDAP requests (seconds)
 _RDAP_TIMEOUT_SECONDS: float = 10.0
@@ -412,11 +422,9 @@ async def _whois_fallback(registered_domain: str) -> EnrichmentResult:
                 hold_types=[DomainHoldType.NONE],
                 source=DomainStatusSource.NOT_CHECKED,
             ),
-            error=MdiError(
-                code="whois_failed",
-                message=f"RDAP and WHOIS both failed for {registered_domain}.",
-                source="domain_enrichment",
-                retriable=True,
+            error=_enrichment_error(
+                "whois_failed",
+                f"RDAP and WHOIS both failed for {registered_domain}.",
             ),
             whois_fallback_used=True,
         )
@@ -514,10 +522,8 @@ async def enrich_domain(registered_domain: str) -> EnrichmentResult:
                 hold_types=[DomainHoldType.NONE],
                 source=DomainStatusSource.NOT_CHECKED,
             ),
-            error=MdiError(
-                code="enrichment_error",
-                message=f"Unexpected enrichment error for {registered_domain}: {exc}",
-                source="domain_enrichment",
-                retriable=True,
+            error=_enrichment_error(
+                "enrichment_error",
+                f"Unexpected enrichment error for {registered_domain}: {exc}",
             ),
         )
