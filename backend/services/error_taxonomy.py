@@ -147,7 +147,7 @@ def infer_error_category(code: str, source: Optional[str] = None) -> str:
         return _SOURCE_CATEGORY[source]
     if code in (
         "invalid_input", "unsupported_scheme", "token_too_long", "input_too_large",
-        "max_items_exceeded",
+        "max_items_exceeded", "ip_address_not_supported",
     ):
         return ErrorCategory.INPUT_VALIDATION.value
     if code in (

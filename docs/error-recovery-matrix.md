@@ -105,6 +105,7 @@ Columns: **Category · Example codes · Severity · Meaning · User-visible resu
 | Category | Codes | Sev | Meaning | User-visible | Action | Retry? | Quota | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `input_validation` | `invalid_input` | error | Token failed normalization | Parse preview rejected row; code + message | Fix input; re-validate | Yes (parse only) | None | Shown in paste validation; no job submit |
+| `input_validation` | `ip_address_not_supported` | error | IP literal, CIDR, range, or IP-hostname URL | Parse/upload rejected row; canonical message | Enter domain or domain-host URL | Yes (parse only) | None | IPv4/IPv6, CIDR, ranges, `http://8.8.8.8/` rejected; numeric labels like `123.example.com` still accepted |
 | `input_validation` | `parse_error` | error | Parser internal failure | Rejected row or HTTP error | Fix input; retry parse | Yes | None | Rare in normal ops |
 | `upload_parse` | `unsupported_file_type` | error | Not CSV/XLSX | Upload validation error | Use supported format | Yes | None | Preview only |
 | `upload_parse` | `missing_domain_column` | error | No domain/URL column detected | Upload rejected summary | Fix spreadsheet headers | Yes | None | |

@@ -51,10 +51,9 @@ class TestNormalizeToken:
         with pytest.raises(ValueError, match="invalid_domain"):
             normalize_token("localhost")
 
-    def test_bare_ipv4(self):
-        norm, itype = normalize_token("192.168.1.1")
-        assert norm == "192.168.1.1"
-        assert itype == InputType.DOMAIN
+    def test_bare_ipv4_rejected(self):
+        with pytest.raises(ValueError, match="ip_address"):
+            normalize_token("192.168.1.1")
 
     # ── Full URLs ─────────────────────────────────────────────────────────────
 
@@ -313,6 +312,49 @@ class TestParseRawInput:
 
         # No network calls should have been made
         assert call_count == [], f"Unexpected network calls: {call_count}"
+
+
+class TestMdi27IpAddressRejection:
+    """MDI-27: reject IP literals, CIDR, ranges, and IP-hostname URLs."""
+
+    IP_MESSAGE = "IP addresses are not supported"
+
+    @pytest.mark.parametrize("token", [
+        "8.8.8.8",
+        "192.168.1.1",
+        "127.0.0.1",
+        "10.0.0.1",
+        "172.16.0.1",
+        "169.254.1.1",
+        "::1",
+        "2001:4860:4860::8888",
+        "1.2.3.0/24",
+        "1.2.3.4-1.2.3.8",
+        "http://1.2.3.4",
+        "https://8.8.8.8/path",
+        "http://[::1]/",
+    ])
+    def test_ip_inputs_rejected(self, token):
+        result = parse_raw_input(token)
+        assert len(result.accepted) == 0
+        assert len(result.rejected) == 1
+        err = result.rejected[0].error
+        assert err.code == "ip_address_not_supported"
+        assert err.category == "input_validation"
+        assert err.severity == "error"
+        assert self.IP_MESSAGE in err.message
+
+    @pytest.mark.parametrize("token", [
+        "example.com",
+        "https://example.com/path",
+        "123.example.com",
+        "example123.com",
+        "1-example.com",
+    ])
+    def test_domain_inputs_still_accepted(self, token):
+        result = parse_raw_input(token)
+        assert len(result.accepted) == 1
+        assert len(result.rejected) == 0
 
 
 class TestMdi24TightenedDomainParse:

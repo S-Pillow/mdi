@@ -252,6 +252,39 @@ class TestUploadParserCSV:
         rej_originals = [r.input_original for r in result.rejected]
         assert "bad@@invalid!domain" in rej_originals
 
+    def test_csv_ip_address_rejected(self):
+        csv_content = (
+            "Domain,Created,Domain Status,Registrar,Nameservers\n"
+            "8.8.8.8,2020-01-01,ok,Test Registrar,ns1.test.com\n"
+        ).encode()
+        result = parse_upload(csv_content, "ip_only.csv")
+        assert len(result.accepted) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].error.code == "ip_address_not_supported"
+
+    def test_csv_domain_accepted(self):
+        csv_content = (
+            "Domain,Created,Domain Status,Registrar,Nameservers\n"
+            "example.com,2020-01-01,ok,Test Registrar,ns1.test.com\n"
+        ).encode()
+        result = parse_upload(csv_content, "domain_only.csv")
+        assert len(result.accepted) == 1
+        assert result.accepted[0].input_normalized == "example.com"
+        assert len(result.rejected) == 0
+
+    def test_csv_mixed_ip_and_domain(self):
+        csv_content = (
+            "Domain,Created,Domain Status,Registrar,Nameservers\n"
+            "8.8.8.8,2020-01-01,ok,Test Registrar,ns1.test.com\n"
+            "example.com,2021-01-01,ok,Test Registrar,ns2.test.com\n"
+            "192.168.1.1,2022-01-01,ok,Test Registrar,ns3.test.com\n"
+        ).encode()
+        result = parse_upload(csv_content, "mixed_ip_domain.csv")
+        assert len(result.accepted) == 1
+        assert result.accepted[0].input_normalized == "example.com"
+        assert len(result.rejected) == 2
+        assert all(r.error.code == "ip_address_not_supported" for r in result.rejected)
+
     def test_no_domain_column_rejected(self):
         data = FIXTURES / "no_domain_col.csv"
         result = parse_upload(data.read_bytes(), "no_domain_col.csv")

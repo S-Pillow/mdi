@@ -226,7 +226,10 @@ MDI's input_parser stores normalized items in two forms:
 
 Bare-domain tokens must contain at least one dot with valid labels and a
 TLD-like final label. Domain/path tokens require a valid dotted host before the
-first `/`. `localhost` and internal single-label names are not accepted.
+first `/`. `localhost` and internal single-label names are not accepted. IP
+literals (IPv4/IPv6), CIDR notation, IP ranges, and IP-hostname URLs are
+rejected with `ip_address_not_supported` (`input_validation`, source
+`input_parser`); numeric domain labels (`123.example.com`) remain valid.
 
 The VT API lookup target is derived in `vt_service._build_vt_target()`, NOT in the parser:
 

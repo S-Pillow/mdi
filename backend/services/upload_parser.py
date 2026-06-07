@@ -49,7 +49,7 @@ from models import (
 )
 from services.age_bucket import compute_age_bucket, parse_date_string
 from services.hold_detection import detect_hold
-from services.input_parser import MAX_TOKEN_LENGTH, normalize_token
+from services.input_parser import MAX_TOKEN_LENGTH, map_parse_value_error, normalize_token
 
 
 # ── Column detection ──────────────────────────────────────────────────────────
@@ -197,23 +197,7 @@ def _process_row(
     try:
         normalized, input_type = normalize_token(raw_domain, default_scheme)
     except ValueError as exc:
-        code_str = str(exc)
-        if code_str.startswith("unsupported_scheme:"):
-            scheme = code_str.split(":", 1)[1]
-            msg = f"Unsupported scheme '{scheme}'. Only http and https are accepted."
-            code = "unsupported_scheme"
-        elif code_str == "token_too_long":
-            msg = f"Value exceeds {MAX_TOKEN_LENGTH} character limit."
-            code = "token_too_long"
-        elif code_str == "token_contains_space":
-            msg = f"'{raw_domain}' contains a space and cannot be parsed as a domain or URL."
-            code = "invalid_input"
-        elif code_str.startswith("invalid_domain"):
-            msg = f"'{raw_domain}' does not appear to be a valid domain or URL."
-            code = "invalid_input"
-        else:
-            msg = f"Could not parse '{raw_domain}': {code_str}."
-            code = "invalid_input"
+        code, msg = map_parse_value_error(raw_domain, str(exc))
         result.rejected.append(RejectedItemResponse(
             input_original=raw_domain,
             position=row_number,
