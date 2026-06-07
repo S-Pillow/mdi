@@ -34,7 +34,7 @@ from models import (
 from services import job_persistence, job_store, live_check, quota_writer, triage_rules, vt_service
 from services.job_store import InMemoryJob, get_job, get_job_sync, register_recovered_job
 from services.live_check import LiveCheckResult
-from services.quota_writer import read_remaining_quota
+from services.quota_writer import QuotaLockTimeout, read_remaining_quota
 from services.vt_service import VtLookupResult
 
 logger = logging.getLogger("mdi.job_actions")
@@ -165,7 +165,23 @@ def estimate_action(
         q_min += cmin
         q_max += cmax
 
-    remaining = read_remaining_quota()
+    try:
+        remaining = read_remaining_quota()
+    except QuotaLockTimeout:
+        return JobActionEstimateResponse(
+            job_id=job.job_id,
+            action=action,
+            scope=request.scope.value if hasattr(request.scope, "value") else str(request.scope),
+            eligible_count=len(selection.eligible),
+            skipped_count=selection.skipped_count,
+            skipped_reasons_summary=selection.skipped_reasons,
+            estimated_quota_min=q_min,
+            estimated_quota_max=q_max,
+            quota_remaining=0,
+            will_exceed_quota=True,
+            message="Shared quota lock unavailable; try again shortly.",
+        )
+
     will_exceed = q_max > remaining
 
     scope_val = request.scope.value if hasattr(request.scope, "value") else str(request.scope)
@@ -347,6 +363,17 @@ async def _run_items(
     lce_before = job.live_check_error_count
 
     for result in items:
+        try:
+            remaining = read_remaining_quota(usage_file)
+        except QuotaLockTimeout:
+            logger.warning("Quota lock timeout before %s for job %s", action, job.job_id)
+            stats.errors_count += 1
+            continue
+
+        if remaining <= 0:
+            stats.errors_count += 1
+            continue
+
         if action == "refresh":
             vt_result = await vt_service.refresh_report(
                 result.input_normalized,
@@ -368,6 +395,8 @@ async def _run_items(
                 await quota_writer.increment_quota(vt_result.calls_made, usage_file)
                 job.lookups_used += vt_result.calls_made
                 stats.quota_units += vt_result.calls_made
+            except QuotaLockTimeout:
+                logger.warning("Quota lock timeout incrementing during %s", action)
             except Exception as exc:
                 logger.error("quota increment failed during action: %s", exc)
 

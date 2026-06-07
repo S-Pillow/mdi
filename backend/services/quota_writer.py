@@ -7,13 +7,11 @@ to the usage-history JSONL.
 
 Design:
   - Uses asyncio.Lock for in-process serialization (per-process).
+  - Uses fcntl.flock via quota_lock for cross-process serialization (MDI + VT Bulk).
   - Atomic write: write to .tmp, then os.replace() to avoid partial writes.
   - All write methods accept injected path arguments so tests can use
     tmp_path without touching live /var/lib/dns-tool/ files.
   - NEVER writes to vt_latest_job.json.
-  - Accepted MVP risk: two processes (MDI + VT Bulk Check) may race on
-    the same file. Atomic replace minimises corruption; the race window
-    is documented and carried forward.
 
 Usage history records are metadata-only:
   - No raw domains, URLs, or item-level results.
@@ -33,9 +31,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from services.quota_lock import QuotaLockTimeout, quota_lock
+
 logger = logging.getLogger("mdi.quota_writer")
 
 _QUOTA_LOCK = asyncio.Lock()
+
+# Re-export for callers
+__all__ = ["QuotaLockTimeout", "read_remaining_quota", "increment_quota",
+           "append_usage_history", "update_daily_history", "build_usage_history_record",
+           "DAILY_QUOTA"]
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
 
@@ -66,12 +71,7 @@ def _read_json_safe(path: Path) -> Optional[Dict[str, Any]]:
 DAILY_QUOTA = int(os.environ.get("VT_DAILY_QUOTA", "500"))
 
 
-def read_remaining_quota(usage_file: Optional[Path] = None) -> int:
-    """
-    Return the estimated remaining daily VT calls.
-    Synchronous — safe to call from async context for a quick check.
-    """
-    path = usage_file or _default_usage_file()
+def _read_remaining_quota_unlocked(path: Path) -> int:
     data = _read_json_safe(path)
     if data is None:
         return DAILY_QUOTA
@@ -80,6 +80,18 @@ def read_remaining_quota(usage_file: Optional[Path] = None) -> int:
         return DAILY_QUOTA
     used = int(data.get("daily_lookups_used", 0) or 0)
     return max(0, DAILY_QUOTA - used)
+
+
+def read_remaining_quota(usage_file: Optional[Path] = None) -> int:
+    """
+    Return the estimated remaining daily VT calls.
+
+    Uses a shared flock for consistent cross-process reads.
+    Raises QuotaLockTimeout if the lock cannot be acquired.
+    """
+    path = usage_file or _default_usage_file()
+    with quota_lock("shared"):
+        return _read_remaining_quota_unlocked(path)
 
 
 # ── Quota increment ────────────────────────────────────────────────────────────
@@ -91,16 +103,18 @@ async def increment_quota(
     """
     Atomically increment the daily VT usage counter by *amount*.
 
-    Protected by in-process asyncio.Lock.
+    Protected by in-process asyncio.Lock and cross-process exclusive flock.
     Uses tmp → os.replace() for atomic write.
+    Raises QuotaLockTimeout if the lock cannot be acquired (no file mutation).
     """
     path = usage_file or _default_usage_file()
     async with _QUOTA_LOCK:
-        return _do_increment(path, amount)
+        with quota_lock("exclusive"):
+            return _do_increment_unlocked(path, amount)
 
 
-def _do_increment(path: Path, amount: int) -> Dict[str, Any]:
-    """Synchronous body of increment_quota — called under the lock."""
+def _do_increment_unlocked(path: Path, amount: int) -> Dict[str, Any]:
+    """Synchronous increment body — caller must hold exclusive flock."""
     today = _utc_date_str()
     data = _read_json_safe(path)
 
@@ -111,16 +125,18 @@ def _do_increment(path: Path, amount: int) -> Dict[str, Any]:
     new_count = prev + amount
     new_data = {"date_utc": today, "daily_lookups_used": new_count}
 
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(new_data))
-        os.replace(tmp, path)
-    except Exception as exc:
-        logger.error("Failed to write VT usage file %s: %s", path, exc)
-        raise
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(new_data))
+    os.replace(tmp, path)
 
     return new_data
+
+
+def _do_increment(path: Path, amount: int) -> Dict[str, Any]:
+    """Backward-compatible sync increment with exclusive flock (tests/helpers)."""
+    with quota_lock("exclusive"):
+        return _do_increment_unlocked(path, amount)
 
 
 # ── Usage history append ───────────────────────────────────────────────────────
@@ -132,14 +148,16 @@ def append_usage_history(
     """
     Append a metadata-only record to the JSONL usage history file.
 
-    Synchronous — failure is logged and swallowed (does not affect the job).
-    NEVER include raw domains, URLs, or item-level content in *record*.
+    Uses exclusive flock. Failure is logged and swallowed (does not affect the job).
     """
     path = history_file or _default_history_file()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as fh:
-            fh.write(json.dumps(record) + "\n")
+        with quota_lock("exclusive"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a") as fh:
+                fh.write(json.dumps(record) + "\n")
+    except QuotaLockTimeout:
+        logger.warning("Quota lock timeout appending usage history to %s", path)
     except Exception as exc:
         logger.warning("Failed to append usage history to %s: %s", path, exc)
 
@@ -153,18 +171,21 @@ def update_daily_history(
     """
     Update the daily history JSON with today's incremental quota spend.
 
-    Failure is logged and swallowed — does not corrupt the main job.
+    Uses exclusive flock. Failure is logged and swallowed.
     """
     path = daily_file or _default_daily_file()
     today = _utc_date_str()
     try:
-        data = _read_json_safe(path) or {}
-        prev = int((data.get(today) or {}).get("quota_units", 0))
-        data[today] = {"quota_units": prev + quota_units, "tool": "mdi"}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(tmp, path)
+        with quota_lock("exclusive"):
+            data = _read_json_safe(path) or {}
+            prev = int((data.get(today) or {}).get("quota_units", 0))
+            data[today] = {"quota_units": prev + quota_units, "tool": "mdi"}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            os.replace(tmp, path)
+    except QuotaLockTimeout:
+        logger.warning("Quota lock timeout updating daily history %s", path)
     except Exception as exc:
         logger.warning("Failed to update daily history %s: %s", path, exc)
 
@@ -234,17 +255,14 @@ def build_usage_history_record(
         "held_skipped_count": held_skipped_count,
         "processing_options_summary": processing_options_summary,
         "status": status,
-        # MDI-11 enrichment counts (metadata-only — no raw domain data)
         "rdap_enriched_count": rdap_enriched_count,
         "rdap_failed_count": rdap_failed_count,
         "whois_fallback_count": whois_fallback_count,
         "hold_detected_by_enrichment_count": hold_detected_by_enrichment_count,
         "enrichment_skipped_uploaded_hold_count": enrichment_skipped_uploaded_hold_count,
-        # MDI-12 live-check counts (metadata-only — no URLs, IPs, or per-item results)
         "live_check_count": live_check_count,
         "live_check_skipped_count": live_check_skipped_count,
         "live_check_error_count": live_check_error_count,
-        # MDI-15 action aggregates (metadata-only)
         "skipped_count": skipped_count,
         "refresh_count": refresh_count,
         "scan_requested_count": scan_requested_count,
@@ -252,7 +270,6 @@ def build_usage_history_record(
         "scan_failed_count": scan_failed_count,
         "rescan_selected_count": rescan_selected_count,
         "rescan_stale_count": rescan_stale_count,
-        # MDI-15A auto-rescan aggregates (metadata-only)
         "auto_rescan_enabled": auto_rescan_enabled,
         "auto_rescan_attempted_count": auto_rescan_attempted_count,
         "auto_rescan_completed_count": auto_rescan_completed_count,

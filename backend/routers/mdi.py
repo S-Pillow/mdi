@@ -89,6 +89,7 @@ from services.job_store import (
 )
 from services import dashboard, export_service, job_actions, job_persistence, job_processor
 from services.job_store import InMemoryJob
+from services.quota_lock import QuotaLockTimeout
 from services.quota_writer import read_remaining_quota
 from services.estimate import estimate_job
 
@@ -258,7 +259,16 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         auto_rescan_stale=req.auto_rescan_stale,
         max_auto_rescans=req.max_auto_rescans,
     )
-    remaining = read_remaining_quota()
+    try:
+        remaining = read_remaining_quota()
+    except QuotaLockTimeout:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "quota_lock_timeout",
+                "message": "Shared quota lock unavailable; try again shortly.",
+            },
+        )
     calls_max = est["estimated_vt_calls_max"]
     total_max = est["total_estimated_vt_calls_max"]
     headroom = remaining - total_max
@@ -423,7 +433,16 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         auto_rescan_stale=req.auto_rescan_stale,
         max_auto_rescans=req.max_auto_rescans,
     )
-    remaining = read_remaining_quota()
+    try:
+        remaining = read_remaining_quota()
+    except QuotaLockTimeout:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "quota_lock_timeout",
+                "message": "Shared quota lock unavailable; try again shortly.",
+            },
+        )
 
     if estimated > remaining:
         raise HTTPException(

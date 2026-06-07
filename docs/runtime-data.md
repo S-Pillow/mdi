@@ -7,8 +7,24 @@ operation.  Runtime files are **never committed to source control**.
 
 ## Files in `/var/lib/dns-tool/`
 
-This directory is owned by `www-data:www-data` and is shared between the
+This directory is `root:dns-tool` mode `2770` (MDI-18B) and is shared between the
 VirusTotal Bulk Check tool (`dns-tool-backend`) and MDI (`mdi-backend`).
+
+### `vt_usage.lock` — Cross-process quota flock (MDI-19)
+
+| Field | Value |
+|---|---|
+| **Full path** | `/var/lib/dns-tool/vt_usage.lock` |
+| **Format** | Empty support file; POSIX `fcntl.flock` coordination only |
+| **Owner** | `root:dns-tool` |
+| **Permissions** | `660` |
+| **MDI uses** | `services/quota_lock.py` — shared lock for reads, exclusive for writes |
+| **VT Bulk uses** | `quota_lock.py` (dns-tool backend) — same semantics |
+| **Env override** | `VT_QUOTA_LOCK_FILE` (tests) |
+| **Timeout** | 5 seconds → `quota_lock_timeout`; no quota file mutation on timeout |
+| **Critical rule** | Do **not** hold this lock during external VT HTTP calls |
+
+Both services must deploy locking together. Partial rollout leaves the lost-update race.
 
 ### `vt_usage.json` — Shared daily VT quota counter
 

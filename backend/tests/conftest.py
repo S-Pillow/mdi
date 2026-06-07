@@ -46,3 +46,4 @@ def isolate_runtime_files(tmp_path, monkeypatch):
     monkeypatch.setenv("VT_USAGE_FILE",         str(tmp_path / "vt_usage.json"))
     monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(tmp_path / "vt_usage_history.jsonl"))
     monkeypatch.setenv("VT_DAILY_HISTORY_FILE", str(tmp_path / "vt_daily_history.json"))
+    monkeypatch.setenv("VT_QUOTA_LOCK_FILE",    str(tmp_path / "vt_usage.lock"))
