@@ -26,8 +26,8 @@ MDI-15 endpoints:
   POST /api/mdi/jobs/{job_id}/refresh  — manual VT report refresh (GET only)
   POST /api/mdi/jobs/{job_id}/scan     — manual VT new-scan request (POST + poll)
 
-Future endpoints (not yet implemented):
-  GET  /api/mdi/jobs/{job_id}/export
+MDI-16 endpoints:
+  POST /api/mdi/jobs/{job_id}/export  — CSV or JSON evidence download; no quota, no persistence
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ import uuid
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from models import (
     AgeBucket,
@@ -47,6 +48,9 @@ from models import (
     DuplicateItemResponse,
     EstimateRequest,
     EstimateResponse,
+    ExportFormat,
+    ExportRequest,
+    ExportScope,
     EvidenceStatus,
     Freshness,
     InputType,
@@ -79,7 +83,7 @@ from services.job_store import (
     InMemoryJob, create_job, get_job,
     get_latest_completed_job_sync, register_recovered_job,
 )
-from services import job_actions, job_persistence, job_processor
+from services import export_service, job_actions, job_persistence, job_processor
 from services.job_store import InMemoryJob
 from services.quota_writer import read_remaining_quota
 from services.estimate import estimate_job
@@ -609,6 +613,44 @@ async def scan_job(job_id: str, req: JobActionRequest):
     Domain-report mode items are skipped. Requires confirm=true.
     """
     return await _handle_job_action(job_id, "scan", req)
+
+
+@router.post("/jobs/{job_id}/export", tags=["Jobs"])
+async def export_job(job_id: str, req: ExportRequest) -> Response:
+    """
+    Export job results as CSV or JSON evidence (in-memory download only).
+
+    Allowed only when job status is done or error. No VT/RDAP/live calls.
+    No quota consumed. No usage history append. No server-side file write.
+    """
+    job = await job_actions.resolve_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    block_reason = export_service.validate_job_for_export(job)
+    if block_reason:
+        raise HTTPException(status_code=422, detail=block_reason)
+
+    rows, selection_error = export_service.select_export_rows(job, req)
+    if selection_error:
+        raise HTTPException(status_code=422, detail=selection_error)
+
+    if req.format == ExportFormat.CSV:
+        content = export_service.build_csv_export(job, rows, req.scope)
+        filename = export_service.build_export_filename("csv", req.scope, req.positions)
+        media_type = "text/csv; charset=utf-8"
+    else:
+        content = export_service.build_evidence_json_export(
+            job, rows, req.scope, req.positions
+        )
+        filename = export_service.build_export_filename("json", req.scope, req.positions)
+        media_type = "application/json; charset=utf-8"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Latest job recovery ────────────────────────────────────────────────────────

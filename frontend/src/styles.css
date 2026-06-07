@@ -799,6 +799,15 @@ body {
   border-color: rgba(59, 130, 246, 0.45);
   color: var(--accent-blue);
 }
+.export-status-msg {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel-2);
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
 
 /* Disabled stub buttons */
 .btn-stub {

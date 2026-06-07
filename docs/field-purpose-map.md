@@ -57,7 +57,7 @@ Purpose categories:
 | `vt_ratio` | `Optional[str]` | display | Human-readable string, e.g. `"3/72"`. Derived from `vt_hits`/`vt_total_engines`. |
 | `vt_scan_date` | `Optional[datetime]` | display, filtering, reporting | UTC timestamp of the VT scan used. Basis for `freshness`. |
 | `freshness` | `Freshness` | display, filtering, workflow | `fresh` (<5d), `stale` (5–30d), `very_stale` (>30d), `never_scanned`, `unknown`. Drives auto-rescan eligibility. |
-| `vt_engine_results` | `Optional[Dict]` | future | Raw per-engine VT results. Excluded from exports by default. Added for schema stability only. |
+| `vt_engine_results` | `Optional[List[Dict]]` | display, reporting | Non-clean VT engine detections. **Excluded from CSV**; **included in JSON evidence** (`mdi-evidence-v1`). |
 
 ### URL live activity
 
@@ -1085,18 +1085,45 @@ clean). Row hover state. Scrollable with `max-height: 520px`.
 
 ### Checkbox selection
 
-Row checkboxes and a header select-all are present and tracked in `selectedIds`
-state. They do not connect to any backend action. Bulk buttons remain disabled
-even when rows are selected. Selection is preparatory for MDI-16 export/rescan.
+Row checkboxes and a header select-all are tracked in `selectedIds` state.
+Selection drives **Export Selected** (CSV) and **Rescan Selected** (MDI-15).
 
 ### Bulk controls (`BulkControls`)
 
-Five buttons above the table:
+Six buttons above the table:
 - Bulk actions dropdown (disabled stub)
-- Export Flagged (MDI-16, disabled)
-- Export All (MDI-16, disabled)
+- **Export Flagged** (MDI-16 — CSV; flagged rows only; no quota)
+- **Export All** (MDI-16 — CSV; all rows when job done/error)
+- **Export Selected** (MDI-16 — CSV; selected positions)
 - **Rescan Selected** (MDI-15 — enabled when job complete, rows selected, scannable)
 - **Rescan Stale** (MDI-15 — enabled when eligible stale rows exist)
+
+### MDI-16 export API and fields
+
+`POST /api/mdi/jobs/{job_id}/export` — body: `format` (`csv` | `json`),
+`scope` (`all` | `flagged` | `selected`), optional `positions` (required when
+`scope=selected`; ignored for `all`/`flagged`).
+
+**CSV columns (stable order):** position, input_original, input_normalized,
+input_type, processing_status, triage_bucket, triage_confidence,
+recommended_action, evidence_status, vt_hits, vt_suspicious, vt_total_engines,
+vt_ratio, freshness, vt_scan_date, live_status, http_status_code,
+redirect_count, created_at, age_bucket, registrar, domain_status_source,
+domain_hold_has_hold, domain_hold_source, triage_reason, error_codes.
+
+**CSV exclusions:** `vt_engine_results`, full `epp_status`, `nameservers`,
+`domain_hold.raw_statuses`, stack traces, internal paths, secrets.
+
+**JSON evidence schema:** `mdi-evidence-v1` — includes job metadata block,
+scope, optional positions, and per-result objects with CSV fields plus
+`triage_reason` (list), sanitized `errors`, `vt_engine_results`, `epp_status`,
+`nameservers`, `domain_hold` (without `raw_statuses`), `vt_mode_used`.
+
+**Flagged export rule:** `triage_bucket` malicious/suspicious OR `vt_hits > 0`
+OR `vt_suspicious > 0`; held rows excluded from flagged scope (included in
+all/selected when explicitly chosen).
+
+**No usage-history write:** exports do not append to `vt_usage_history.jsonl`.
 
 Rescan actions show a confirmation modal with quota estimate before submitting.
 
@@ -1147,7 +1174,8 @@ soon"). No detail drawer in MDI-13.
 | Feature | Target ticket |
 |---|---|
 | Detail drawer / per-item panel | MDI-14 |
-| Export (CSV/XLSX) | MDI-16 |
+| Export (CSV/JSON evidence) | MDI-16 ✅ |
+| Export XLSX/PDF/ZIP | Future |
 | Auto-rescan on recovered jobs | Future |
 | Auto-rescan after manual refresh | Future |
 | Pagination (rows-per-page) | MDI-14+ |

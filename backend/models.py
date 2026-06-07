@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ─── Enumerations ─────────────────────────────────────────────────────────────
@@ -758,6 +758,47 @@ class JobActionAcceptedResponse(BaseModel):
     estimated_quota_min: int
     estimated_quota_max: int
     quota_remaining: int
+
+
+# ─── Export API models (MDI-16) ───────────────────────────────────────────────
+
+
+class ExportFormat(str, Enum):
+    """Output format for job export downloads."""
+    CSV = "csv"
+    JSON = "json"
+
+
+class ExportScope(str, Enum):
+    """Row selection scope for job export downloads."""
+    ALL = "all"
+    FLAGGED = "flagged"
+    SELECTED = "selected"
+
+
+class ExportRequest(BaseModel):
+    """Request body for POST /api/mdi/jobs/{job_id}/export."""
+    format: ExportFormat = Field(
+        ...,
+        description="[workflow] csv for tabular export; json for evidence bundle.",
+    )
+    scope: ExportScope = Field(
+        ...,
+        description="[workflow] all rows, flagged rows only, or selected positions.",
+    )
+    positions: Optional[List[int]] = Field(
+        None,
+        description=(
+            "[workflow] 1-based row positions; required when scope=selected. "
+            "Ignored for all/flagged scopes."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_selected_positions(self) -> "ExportRequest":
+        if self.scope == ExportScope.SELECTED and not self.positions:
+            raise ValueError("positions is required when scope is 'selected'.")
+        return self
 
 
 # ─── Job-submit API models ────────────────────────────────────────────────────

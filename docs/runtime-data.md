@@ -232,6 +232,24 @@ MDI-08 test.
 
 ---
 
+## MDI-16 export runtime behavior
+
+`POST /api/mdi/jobs/{job_id}/export` generates CSV or JSON evidence **entirely
+in memory** and returns it as a browser download attachment.
+
+| Guarantee | Detail |
+|---|---|
+| Server persistence | **None** — no export directories, no files written to disk |
+| Runtime mutation | **None** — `mdi_latest_job.json`, `vt_usage.json`, history files unchanged |
+| Usage history | **Not appended** — exports do not call `quota_writer.append_usage_history()` |
+| Quota | **Zero** — no VT/RDAP/WHOIS/DNS/live URL calls |
+| Downloaded content | May contain raw domains/URLs by operator intent (CSV/JSON attachment) |
+
+Exports read job state from the in-memory store or recovered
+`mdi_latest_job.json` via the same `resolve_job` path as refresh/scan actions.
+
+---
+
 ## MDI-07 runtime file access summary
 
 ### MDI-07 runtime behavior
