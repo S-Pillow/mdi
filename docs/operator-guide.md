@@ -308,17 +308,32 @@ Open a row to inspect full evidence. Sections include:
 - **Triage Reasons** — plain-language explanation strings
 - **Evidence** — evidence status, freshness, and structured `errors[]` with severity badges
 
-### Disabled actions in drawer
+### Row More Actions menu (MDI-30C)
 
-These controls are present but **not active**:
+Each results row has a **More actions** button (⋮) beside the detail eye icon.
+Clicking it opens a compact **Actions** menu with four explicit controls:
 
-| Action | Status |
-|---|---|
-| **Open in VirusTotal** | **Disabled** — deferred; button shows "coming soon" |
-| **Watchlist** | **Not implemented** |
-| **Create Block Rule** | **Not implemented** |
+| Action | Status | Quota | Notes |
+|---|---|---|---|
+| **Export evidence (JSON)** | **Active** when a row is selected and no action is in progress | **None** | Uses existing `POST /api/mdi/jobs/{job_id}/export` with `format=json`, `scope=selected` |
+| **Open in VirusTotal** | **Disabled** — no VT report URL in row data yet | **None** | Opens external tab only when a URL becomes available; does not call VT API |
+| **Refresh report** | **Active** when row is eligible (not held, has normalized input, job loaded) | **~1 unit per row** when confirmed | Reuses existing refresh modal + `POST …/refresh` |
+| **Request new scan** | **Active** when row is scannable (URL or domain, not held) | **2–4+ units** when confirmed | Reuses existing scan modal + `POST …/scan` |
 
-Do not expect these features until a future ticket enables them.
+**Menu behavior:** Opening the menu does **not** call backend APIs or consume quota.
+Disabled actions use `disabled` + `aria-disabled` and show a tooltip explaining why.
+Only one row menu is open at a time. Press **Escape** or click outside to close.
+
+**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
+automated enforcement actions do not appear in this menu.
+
+### Detail drawer actions
+
+The drawer **8. Actions** section uses the same four controls and contracts as
+the row More Actions menu (see above).
+
+**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
+automated enforcement actions do not appear in the drawer.
 
 ---
 
@@ -451,7 +466,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 | Feature | Status |
 |---|---|
-| **Open in VirusTotal** | **Disabled** — UI stub only |
+| **Open in VirusTotal** | **Disabled** — row model has no `vt_report_url` yet; menu shows explicit disabled control |
 | **Watchlist** | **Not implemented** |
 | **Create Block Rule** | **Not implemented** |
 | **Enforcement actions** | **None** — MDI does not block or quarantine |

@@ -153,6 +153,34 @@ function scanRowTitle(r, job, actionInProgress) {
 function canRefreshRow(r) {
   return !isRowHeld(r) && !!r.input_normalized
 }
+function vtReportUrlForRow(r) {
+  // Row model has no persisted vt_report_url; enable only when backend adds one.
+  if (!r?.vt_report_url) return null
+  return r.vt_report_url
+}
+function canOpenVtRow(r) {
+  return !!vtReportUrlForRow(r)
+}
+function openVtRowTitle(r) {
+  return canOpenVtRow(r)
+    ? 'Open VirusTotal report in a new tab (no quota consumed)'
+    : 'VirusTotal link unavailable.'
+}
+function refreshRowTitle(r, job, actionInProgress) {
+  if (!r || !job) return 'Job required for refresh'
+  if (actionInProgress) return 'A refresh/scan action is already in progress'
+  if (!canRefreshRow(r)) return 'Row not eligible for refresh'
+  return 'Refresh existing VT report (1 quota unit)'
+}
+function exportEvidenceRowTitle(r, actionInProgress) {
+  if (!r) return 'Select a row first'
+  if (actionInProgress) return 'An action is already in progress'
+  return 'Download evidence JSON for this row (no quota consumed)'
+}
+function handleOpenVtRow(r) {
+  const url = vtReportUrlForRow(r)
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
 function countStaleScannable(results, job) {
   return (results || []).filter(r => isRowStale(r) && canScanRow(r, job)).length
 }
@@ -1632,10 +1660,134 @@ function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confi
   )
 }
 
+// ── Row action buttons (drawer + row menu) ────────────────────────────────────
+
+function RowActionButtons({
+  r,
+  job,
+  actionInProgress,
+  onExportEvidence,
+  onRefreshRow,
+  onScanRow,
+  onAfterAction,
+  className = '',
+}) {
+  if (!r) return null
+
+  const canExport = !actionInProgress
+  const canVt = canOpenVtRow(r)
+  const canRefresh = canRefreshRow(r) && !actionInProgress && !!job
+  const canScan = canScanRow(r, job) && !actionInProgress && !!job
+
+  function runAction(handler) {
+    if (!handler) return
+    handler(r)
+    onAfterAction?.()
+  }
+
+  return (
+    <div className={`row-action-buttons${className ? ` ${className}` : ''}`}>
+      <button
+        type="button"
+        className={canExport ? 'row-action-btn row-action-btn-active' : 'row-action-btn row-action-btn-disabled'}
+        disabled={!canExport}
+        aria-disabled={!canExport ? 'true' : undefined}
+        title={exportEvidenceRowTitle(r, actionInProgress)}
+        onClick={() => canExport && runAction(onExportEvidence)}
+      >
+        ↑ Export evidence (JSON)
+      </button>
+      <button
+        type="button"
+        className={canVt ? 'row-action-btn row-action-btn-active' : 'row-action-btn row-action-btn-disabled'}
+        disabled={!canVt}
+        aria-disabled={!canVt ? 'true' : undefined}
+        title={openVtRowTitle(r)}
+        onClick={() => canVt && runAction(handleOpenVtRow)}
+      >
+        ↗ Open in VirusTotal
+      </button>
+      <button
+        type="button"
+        className={canRefresh ? 'row-action-btn row-action-btn-active' : 'row-action-btn row-action-btn-disabled'}
+        disabled={!canRefresh}
+        aria-disabled={!canRefresh ? 'true' : undefined}
+        title={refreshRowTitle(r, job, actionInProgress)}
+        onClick={() => canRefresh && runAction(onRefreshRow)}
+      >
+        ↻ Refresh report
+      </button>
+      <button
+        type="button"
+        className={canScan ? 'row-action-btn row-action-btn-active' : 'row-action-btn row-action-btn-disabled'}
+        disabled={!canScan}
+        aria-disabled={!canScan ? 'true' : undefined}
+        title={scanRowTitle(r, job, actionInProgress)}
+        onClick={() => canScan && runAction(onScanRow)}
+      >
+        ↺ Request new scan
+      </button>
+    </div>
+  )
+}
+
+function RowActionsMenu({
+  row,
+  job,
+  actionInProgress,
+  menuId,
+  open,
+  onToggle,
+  onClose,
+  onExportEvidence,
+  onRefreshRow,
+  onScanRow,
+}) {
+  return (
+    <div className="row-actions-wrap">
+      <button
+        type="button"
+        className={`icon-btn row-more-btn${open ? ' active' : ''}`}
+        aria-label={`More actions for ${row.input_normalized}`}
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-haspopup="menu"
+        title={`More actions for ${row.input_normalized}`}
+        onClick={e => {
+          e.stopPropagation()
+          onToggle()
+        }}
+      >
+        <IconMoreVertical />
+      </button>
+      {open && (
+        <div
+          className="row-actions-menu"
+          id={menuId}
+          role="menu"
+          aria-label={`Actions for ${row.input_normalized}`}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="row-actions-menu-label">Actions</div>
+          <RowActionButtons
+            r={row}
+            job={job}
+            actionInProgress={actionInProgress}
+            onExportEvidence={onExportEvidence}
+            onRefreshRow={onRefreshRow}
+            onScanRow={onScanRow}
+            onAfterAction={onClose}
+            className="row-action-buttons-menu"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Bulk controls ─────────────────────────────────────────────────────────────
 
 function BulkControls({
-  selectedCount,
   canExportAll,
   canExportFlagged,
   canExportSelected,
@@ -1652,9 +1804,6 @@ function BulkControls({
   return (
     <div className="bulk-controls">
       <span className="bulk-label">Bulk actions:</span>
-      <button className="btn-stub" disabled aria-disabled="true" title="Select rows first">
-        Actions {selectedCount > 0 ? `(${selectedCount})` : '▾'}
-      </button>
       <button
         className={canExportFlagged && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
         disabled={!canExportFlagged || actionInProgress}
@@ -1701,8 +1850,42 @@ function BulkControls({
 
 // ── Operations results table ──────────────────────────────────────────────────
 
-function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll, selectedItem, onSelectItem }) {
+function ResultsTable({
+  results,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
+  selectedItem,
+  onSelectItem,
+  job,
+  actionInProgress,
+  onExportEvidence,
+  onRefreshRow,
+  onScanRow,
+}) {
   const allSelected = results.length > 0 && results.every(r => selectedIds.has(r.position))
+  const [openMenuPosition, setOpenMenuPosition] = useState(null)
+
+  useEffect(() => {
+    if (openMenuPosition == null) return undefined
+    function handlePointerDown(e) {
+      if (e.target.closest?.('.row-actions-wrap')) return
+      setOpenMenuPosition(null)
+    }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') setOpenMenuPosition(null)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [openMenuPosition])
+
+  useEffect(() => {
+    setOpenMenuPosition(null)
+  }, [results])
 
   return (
     <div className="ops-table-wrap">
@@ -1814,15 +1997,18 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll, selec
                     >
                       <IconEye />
                     </button>
-                    <button
-                      className="btn-stub"
-                      style={{ padding: '3px 6px' }}
-                      disabled
-                      aria-disabled="true"
-                      title="More actions — coming soon"
-                    >
-                      <IconMoreVertical />
-                    </button>
+                    <RowActionsMenu
+                      row={r}
+                      job={job}
+                      actionInProgress={actionInProgress}
+                      menuId={`row-actions-menu-${r.position}`}
+                      open={openMenuPosition === r.position}
+                      onToggle={() => setOpenMenuPosition(prev => (prev === r.position ? null : r.position))}
+                      onClose={() => setOpenMenuPosition(null)}
+                      onExportEvidence={onExportEvidence}
+                      onRefreshRow={onRefreshRow}
+                      onScanRow={onScanRow}
+                    />
                   </div>
                 </td>
               </tr>
@@ -1842,6 +2028,7 @@ function TriageWorkspace({
   actionInProgress, actionMessage, exportMessage,
   onRescanSelected, onRescanStale,
   onExportAll, onExportFlagged, onExportSelected,
+  onExportEvidence, onRefreshRow, onScanRow,
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -1989,7 +2176,6 @@ function TriageWorkspace({
       {/* Bulk controls */}
       {allResults.length > 0 && (
         <BulkControls
-          selectedCount={selectedIds.size}
           canExportAll={canExportAll}
           canExportFlagged={canExportFlagged}
           canExportSelected={canExportSelected}
@@ -2032,6 +2218,11 @@ function TriageWorkspace({
           onToggleAll={handleToggleAll}
           selectedItem={selectedItem}
           onSelectItem={onSelectItem}
+          job={job}
+          actionInProgress={actionInProgress}
+          onExportEvidence={onExportEvidence}
+          onRefreshRow={onRefreshRow}
+          onScanRow={onScanRow}
         />
       )}
 
@@ -2272,33 +2463,14 @@ function DetailDrawer({
         {/* 8. ACTIONS */}
         <div className="detail-section">
           <div className="detail-section-label">8. Actions</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button
-              className={r && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
-              disabled={!r || actionInProgress}
-              title={r ? 'Download evidence JSON for this row' : 'Select a row first'}
-              onClick={() => onExportEvidence && onExportEvidence(r)}
-            >
-              ↑ Export evidence (JSON)
-            </button>
-            <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VirusTotal</button>
-            <button
-              className={canRefreshRow(r) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
-              disabled={!canRefreshRow(r) || actionInProgress || !job}
-              title={canRefreshRow(r) ? 'Refresh existing VT report (1 quota unit)' : 'Row not eligible for refresh'}
-              onClick={() => onRefreshRow && onRefreshRow(r)}
-            >
-              ↻ Refresh report
-            </button>
-            <button
-              className={canScanRow(r, job) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
-              disabled={!canScanRow(r, job) || actionInProgress || !job}
-              title={scanRowTitle(r, job, actionInProgress)}
-              onClick={() => onScanRow && onScanRow(r)}
-            >
-              ↺ Request new scan
-            </button>
-          </div>
+          <RowActionButtons
+            r={r}
+            job={job}
+            actionInProgress={actionInProgress}
+            onExportEvidence={onExportEvidence}
+            onRefreshRow={onRefreshRow}
+            onScanRow={onScanRow}
+          />
         </div>
       </div>
     </div>
@@ -2904,6 +3076,9 @@ export default function App() {
               onExportAll={handleExportAll}
               onExportFlagged={handleExportFlagged}
               onExportSelected={handleExportSelected}
+              onExportEvidence={handleExportEvidence}
+              onRefreshRow={handleDrawerRefresh}
+              onScanRow={handleDrawerScan}
             />
           )}
 

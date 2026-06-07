@@ -1144,7 +1144,31 @@ Polished operations-console table replacing the flat debug table. Columns:
 10. Created (YYYY-MM-DD)
 11. Age (age_bucket label)
 12. Evidence Status (badge)
-13. Actions (disabled eye + kebab stubs for MDI-14)
+13. Actions (detail eye + More Actions menu — MDI-30C)
+
+Row **More actions** (⋮) opens a compact menu with explicit controls: Export
+evidence (JSON), Open in VirusTotal, Refresh report, Request new scan. The detail
+drawer section **8. Actions** uses the same control set. See **Row action controls**
+below.
+
+### Row action controls (MDI-30C)
+
+Shared by the results-row More Actions menu and detail drawer section 8.
+
+| Action | Active when | Backend | External call | Quota | Runtime | Owning ticket if disabled |
+|---|---|---|---|---|---|---|
+| **Export evidence (JSON)** | Row present; no action in progress | `POST /api/mdi/jobs/{job_id}/export` (`format=json`, `scope=selected`) | No | None | Reads saved job only | — |
+| **Open in VirusTotal** | Row has `vt_report_url` (not yet populated) | None | Browser tab only when active | None | None | Future VT link ticket |
+| **Refresh report** | Row not held; normalized input; job loaded; not action-in-progress | `POST /api/mdi/jobs/{job_id}/refresh` | Yes (VT GET) when confirmed | ~1 unit per row | Updates job in memory + `mdi_latest_job.json` via existing path | — |
+| **Request new scan** | Row scannable (URL/domain, not held); job loaded; not action-in-progress | `POST /api/mdi/jobs/{job_id}/scan` | Yes (VT POST/poll) when confirmed | 2–4+ units per row | Updates job in memory + `mdi_latest_job.json` via existing path | — |
+
+**Menu open:** no backend calls, no quota, no external calls.
+
+**Not in MVP:** Watchlist, Create Block Rule, Salesforce, monitoring, enforcement.
+
+**Accessibility:** More Actions is a `<button>` with `aria-expanded`,
+`aria-controls`, and `aria-haspopup="menu"`. Disabled actions use `disabled` and
+`aria-disabled="true"` with explanatory `title`.
 
 Row left-border accents identify priority tier (critical/high/medium/low/info/
 clean). Row hover state. Scrollable with `max-height: 520px`.
@@ -1156,8 +1180,7 @@ Selection drives **Export Selected** (CSV) and **Rescan Selected** (MDI-15).
 
 ### Bulk controls (`BulkControls`)
 
-Six buttons above the table:
-- Bulk actions dropdown (disabled stub)
+Five explicit buttons above the table (vague Actions dropdown removed in MDI-30C):
 - **Export Flagged** (MDI-16 — CSV; flagged rows only; no quota)
 - **Export All** (MDI-16 — CSV; all rows when job done/error)
 - **Export Selected** (MDI-16 — CSV; selected positions)
