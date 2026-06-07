@@ -55,6 +55,7 @@ from models import (
     VtModeUsed,
 )
 from services import (
+    auto_rescan,
     domain_enrichment,
     job_persistence,
     job_store,
@@ -398,6 +399,10 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
         })
         job.processed += 1
 
+        await auto_rescan.maybe_auto_rescan_item(
+            job, normalized, usage_file=usage_file,
+        )
+
 
 # ── MDI-12 live-check pass ─────────────────────────────────────────────────────
 
@@ -548,6 +553,14 @@ def _write_history(
         processing_options_summary={
             "use_domain_reports": job.use_domain_reports,
             "stale_threshold_days": job.stale_threshold_days,
+            "auto_rescan_stale": job.auto_rescan_stale,
+            "max_auto_rescans": job.max_auto_rescans,
+            "auto_rescan_enabled": job.auto_rescan_stale,
+            "auto_rescan_attempted_count": job.auto_rescan_attempted_count,
+            "auto_rescan_completed_count": job.auto_rescan_completed_count,
+            "auto_rescan_failed_count": job.auto_rescan_failed_count,
+            "auto_rescan_skipped_count": job.auto_rescan_skipped_count,
+            "auto_rescan_quota_blocked_count": job.auto_rescan_quota_blocked_count,
         },
         status=job.status,
         rdap_enriched_count=job.rdap_enriched_count,
@@ -558,6 +571,12 @@ def _write_history(
         live_check_count=job.live_check_count,
         live_check_skipped_count=job.live_check_skipped_count,
         live_check_error_count=job.live_check_error_count,
+        auto_rescan_enabled=job.auto_rescan_stale,
+        auto_rescan_attempted_count=job.auto_rescan_attempted_count,
+        auto_rescan_completed_count=job.auto_rescan_completed_count,
+        auto_rescan_failed_count=job.auto_rescan_failed_count,
+        auto_rescan_skipped_count=job.auto_rescan_skipped_count,
+        auto_rescan_quota_blocked_count=job.auto_rescan_quota_blocked_count,
     )
     quota_writer.append_usage_history(record, history_file)
 

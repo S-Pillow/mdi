@@ -198,6 +198,12 @@ def build_usage_history_record(
     scan_failed_count: int = 0,
     rescan_selected_count: int = 0,
     rescan_stale_count: int = 0,
+    auto_rescan_enabled: bool = False,
+    auto_rescan_attempted_count: int = 0,
+    auto_rescan_completed_count: int = 0,
+    auto_rescan_failed_count: int = 0,
+    auto_rescan_skipped_count: int = 0,
+    auto_rescan_quota_blocked_count: int = 0,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
@@ -238,4 +244,11 @@ def build_usage_history_record(
         "scan_failed_count": scan_failed_count,
         "rescan_selected_count": rescan_selected_count,
         "rescan_stale_count": rescan_stale_count,
+        # MDI-15A auto-rescan aggregates (metadata-only)
+        "auto_rescan_enabled": auto_rescan_enabled,
+        "auto_rescan_attempted_count": auto_rescan_attempted_count,
+        "auto_rescan_completed_count": auto_rescan_completed_count,
+        "auto_rescan_failed_count": auto_rescan_failed_count,
+        "auto_rescan_skipped_count": auto_rescan_skipped_count,
+        "auto_rescan_quota_blocked_count": auto_rescan_quota_blocked_count,
     }

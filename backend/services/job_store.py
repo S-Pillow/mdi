@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from models import MdiResultItem
 
@@ -42,6 +42,8 @@ class InMemoryJob:
     lookups_used: int = 0             # actual VT API calls consumed
     use_domain_reports: bool = False
     stale_threshold_days: int = 7
+    auto_rescan_stale: bool = False
+    max_auto_rescans: int = 3
     error_message: Optional[str] = None
     item_order: List[str] = field(default_factory=list)  # input_normalized, in submission order
     results: Dict[str, MdiResultItem] = field(default_factory=dict)
@@ -63,6 +65,13 @@ class InMemoryJob:
     vt_refresh_count: int = 0
     vt_scan_requested_count: int = 0
     vt_scan_failed_count: int = 0
+    # ── MDI-15A auto-rescan (initial job processing only) ─────────────────────
+    auto_rescan_attempted_count: int = 0
+    auto_rescan_completed_count: int = 0
+    auto_rescan_failed_count: int = 0
+    auto_rescan_skipped_count: int = 0
+    auto_rescan_quota_blocked_count: int = 0
+    auto_rescanned_items: Set[str] = field(default_factory=set)
 
 
 # ── Store ──────────────────────────────────────────────────────────────────────

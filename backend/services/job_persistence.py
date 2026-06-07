@@ -82,6 +82,8 @@ def serialize_job(job: "job_store.InMemoryJob") -> Dict[str, Any]:  # type: igno
         "lookups_used": job.lookups_used,
         "use_domain_reports": job.use_domain_reports,
         "stale_threshold_days": job.stale_threshold_days,
+        "auto_rescan_stale": job.auto_rescan_stale,
+        "max_auto_rescans": job.max_auto_rescans,
         "error_message": job.error_message,
         "item_order": job.item_order,
         "results": results_serialized,
@@ -103,6 +105,12 @@ def serialize_job(job: "job_store.InMemoryJob") -> Dict[str, Any]:  # type: igno
         "vt_refresh_count": job.vt_refresh_count,
         "vt_scan_requested_count": job.vt_scan_requested_count,
         "vt_scan_failed_count": job.vt_scan_failed_count,
+        # MDI-15A auto-rescan
+        "auto_rescan_attempted_count": job.auto_rescan_attempted_count,
+        "auto_rescan_completed_count": job.auto_rescan_completed_count,
+        "auto_rescan_failed_count": job.auto_rescan_failed_count,
+        "auto_rescan_skipped_count": job.auto_rescan_skipped_count,
+        "auto_rescan_quota_blocked_count": job.auto_rescan_quota_blocked_count,
     }
 
 
@@ -133,6 +141,8 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
         lookups_used=int(data.get("lookups_used", 0)),
         use_domain_reports=bool(data.get("use_domain_reports", False)),
         stale_threshold_days=int(data.get("stale_threshold_days", 5)),
+        auto_rescan_stale=bool(data.get("auto_rescan_stale", False)),
+        max_auto_rescans=int(data.get("max_auto_rescans", 3)),
         error_message=data.get("error_message"),
         item_order=list(data.get("item_order") or []),
         results=results,
@@ -154,6 +164,11 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
         vt_refresh_count=int(data.get("vt_refresh_count", 0)),
         vt_scan_requested_count=int(data.get("vt_scan_requested_count", 0)),
         vt_scan_failed_count=int(data.get("vt_scan_failed_count", 0)),
+        auto_rescan_attempted_count=int(data.get("auto_rescan_attempted_count", 0)),
+        auto_rescan_completed_count=int(data.get("auto_rescan_completed_count", 0)),
+        auto_rescan_failed_count=int(data.get("auto_rescan_failed_count", 0)),
+        auto_rescan_skipped_count=int(data.get("auto_rescan_skipped_count", 0)),
+        auto_rescan_quota_blocked_count=int(data.get("auto_rescan_quota_blocked_count", 0)),
     )
 
 

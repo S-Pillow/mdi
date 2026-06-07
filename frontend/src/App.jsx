@@ -339,6 +339,8 @@ function QuotaNavWidget({ quota, loading, error }) {
 function CollapsibleSettingsPanel({
   open, id,
   staleThresholdDays, setStaleThresholdDays,
+  autoRescanStale, setAutoRescanStale,
+  maxAutoRescans, setMaxAutoRescans,
   locked,
 }) {
   if (!open) return null
@@ -381,10 +383,41 @@ function CollapsibleSettingsPanel({
           </div>
         </div>
 
+        <div style={{ marginTop: 14 }}>
+          <p className="settings-section-label">Advanced VT behavior</p>
+          <div style={{ ...ctrlStyle, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label className="settings-checkbox-row">
+              <input
+                type="checkbox"
+                checked={autoRescanStale}
+                onChange={e => setAutoRescanStale(e.target.checked)}
+                disabled={locked}
+              />
+              <span>↺ Auto-rescan stale flagged items</span>
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>Max auto-rescans per job</span>
+              <input
+                type="number" min={0} max={25}
+                value={maxAutoRescans}
+                onChange={e => {
+                  const v = parseInt(e.target.value, 10)
+                  if (!isNaN(v) && v >= 0 && v <= 25) setMaxAutoRescans(v)
+                }}
+                disabled={locked || !autoRescanStale}
+                className="settings-number-input"
+              />
+            </div>
+            <p className="settings-auto-rescan-warning">
+              Auto-rescan consumes additional VirusTotal quota and may significantly increase runtime.
+              It runs only for stale flagged URL-mode items and remains off by default.
+            </p>
+          </div>
+        </div>
+
         <div>
           <p className="settings-section-label">Coming soon</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
-            <span className="settings-placeholder" title="Auto-rescan stale items — not yet available">↺ Auto-rescan stale items</span>
             <span className="settings-placeholder" title="Export options — available in MDI-16">↑ Export options (MDI-16)</span>
             <span className="settings-placeholder" title="URL activity check settings — future">🔗 URL activity check settings</span>
           </div>
@@ -848,10 +881,15 @@ function EstimateSection({ estimate, error, stale }) {
     accepted_count, rejected_count, duplicate_count,
     eligible_vt_count, held_skipped_count,
     estimated_vt_calls_min, estimated_vt_calls_max,
+    total_estimated_vt_calls_max,
+    auto_rescan_estimated_quota_min, auto_rescan_estimated_quota_max,
+    auto_rescan_estimated_duration_seconds_max,
+    auto_rescan_note,
     quota_remaining_now, will_exceed_quota, quota_headroom,
     estimated_duration_seconds_min, estimated_duration_seconds_max,
     rate_limit_note, job_state_note, live_check_note,
   } = estimate
+  const totalVtMax = total_estimated_vt_calls_max ?? estimated_vt_calls_max
 
   return (
     <div className="card" style={{ borderColor: will_exceed_quota ? 'var(--danger)' : stale ? 'var(--warn)' : undefined }}>
@@ -864,7 +902,7 @@ function EstimateSection({ estimate, error, stale }) {
         {will_exceed_quota && (
           <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#FCA5A5', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span>⛔</span>
-            <span>Worst-case estimate ({estimated_vt_calls_max} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission will be blocked.</span>
+            <span>Worst-case estimate ({totalVtMax} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission will be blocked.</span>
           </div>
         )}
         <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -886,6 +924,12 @@ function EstimateSection({ estimate, error, stale }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <Row label="Best case"     value={`${estimated_vt_calls_min} call${estimated_vt_calls_min !== 1 ? 's' : ''}`} />
               <Row label="Worst case"    value={`${estimated_vt_calls_max} call${estimated_vt_calls_max !== 1 ? 's' : ''}`} bold />
+              {auto_rescan_estimated_quota_max > 0 && (
+                <>
+                  <Row label="Auto-rescan (extra)" value={`${auto_rescan_estimated_quota_min}–${auto_rescan_estimated_quota_max} calls`} />
+                  <Row label="Total worst case" value={`${totalVtMax} calls`} bold />
+                </>
+              )}
               <Row label="Quota remaining" value={quota_remaining_now} />
               <Row label="Headroom" value={quota_headroom >= 0 ? `+${quota_headroom}` : String(quota_headroom)} color={quota_headroom >= 0 ? 'var(--ok)' : 'var(--danger)'} />
             </div>
@@ -895,6 +939,9 @@ function EstimateSection({ estimate, error, stale }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <Row label="Best case"  value={fmtDuration(estimated_duration_seconds_min)} />
               <Row label="Worst case" value={fmtDuration(estimated_duration_seconds_max)} />
+              {auto_rescan_estimated_quota_max > 0 && (
+                <Row label="Auto-rescan (extra)" value={auto_rescan_estimated_duration_seconds_max > 0 ? `up to ${fmtDuration(auto_rescan_estimated_duration_seconds_max)}` : 'may add time'} />
+              )}
               {held_skipped_count > 0 && <Row label="Hold-skipped" value={held_skipped_count} note="0 calls" warn />}
             </div>
           </div>
@@ -903,6 +950,7 @@ function EstimateSection({ estimate, error, stale }) {
           <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Rate limit:</strong> {rate_limit_note}</p>
           <p style={{ fontSize: 11, color: 'var(--status-warning)' }}><strong>Job state:</strong> {job_state_note}</p>
           {live_check_note && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Live checks:</strong> {live_check_note}</p>}
+          {auto_rescan_note && <p style={{ fontSize: 11, color: 'var(--status-warning)' }}><strong>Auto-rescan:</strong> {auto_rescan_note}</p>}
         </div>
       </div>
     </div>
@@ -1711,6 +1759,8 @@ export default function App() {
   // Settings state
   const [useDomainReports, setUseDomainReports]     = useState(false)
   const [staleThresholdDays, setStaleThresholdDays] = useState(7)
+  const [autoRescanStale, setAutoRescanStale]       = useState(false)
+  const [maxAutoRescans, setMaxAutoRescans]         = useState(3)
 
   // VT job state
   const [submitting, setSubmitting]                 = useState(false)
@@ -1736,6 +1786,8 @@ export default function App() {
     default_scheme: 'http', max_items: MAX_ITEMS,
     use_domain_reports: useDomainReports,
     stale_threshold_days: staleThresholdDays,
+    auto_rescan_stale: autoRescanStale,
+    max_auto_rescans: maxAutoRescans,
   }
 
   async function handleEstimate() {
@@ -1949,7 +2001,7 @@ export default function App() {
 
   useEffect(() => {
     if (estimateResult) setEstimateStale(true)
-  }, [useDomainReports, staleThresholdDays])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [useDomainReports, staleThresholdDays, autoRescanStale, maxAutoRescans])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refreshQuota() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1964,6 +2016,10 @@ export default function App() {
         const data = await resp.json()
         if (cancelled) return
         setJob(data); setJobId(data.job_id); setRestoredFromSession(true)
+        if (data.stale_threshold_days != null) setStaleThresholdDays(data.stale_threshold_days)
+        if (data.use_domain_reports != null) setUseDomainReports(data.use_domain_reports)
+        if (data.auto_rescan_stale != null) setAutoRescanStale(data.auto_rescan_stale)
+        if (data.max_auto_rescans != null) setMaxAutoRescans(data.max_auto_rescans)
         if (data.status === 'queued' || data.status === 'running') {
           pollRef.current = setInterval(() => pollJob(data.job_id), 2000)
         }
@@ -2021,6 +2077,10 @@ export default function App() {
             id={settingsPanelId}
             staleThresholdDays={staleThresholdDays}
             setStaleThresholdDays={setStaleThresholdDays}
+            autoRescanStale={autoRescanStale}
+            setAutoRescanStale={setAutoRescanStale}
+            maxAutoRescans={maxAutoRescans}
+            setMaxAutoRescans={setMaxAutoRescans}
             locked={settingsLocked}
           />
         </div>

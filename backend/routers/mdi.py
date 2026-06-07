@@ -244,10 +244,16 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
     eligible_items = accepted
     held_skipped_count = 0
 
-    est = estimate_job(eligible_items, req.use_domain_reports)
+    est = estimate_job(
+        eligible_items,
+        req.use_domain_reports,
+        auto_rescan_stale=req.auto_rescan_stale,
+        max_auto_rescans=req.max_auto_rescans,
+    )
     remaining = read_remaining_quota()
     calls_max = est["estimated_vt_calls_max"]
-    headroom = remaining - calls_max
+    total_max = est["total_estimated_vt_calls_max"]
+    headroom = remaining - total_max
 
     return EstimateResponse(
         accepted_count=len(accepted),
@@ -261,14 +267,23 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         url_report_mode_count=est["url_report_mode_count"],
         estimated_vt_calls_min=est["estimated_vt_calls_min"],
         estimated_vt_calls_max=calls_max,
+        auto_rescan_estimated_quota_min=est["auto_rescan_estimated_quota_min"],
+        auto_rescan_estimated_quota_max=est["auto_rescan_estimated_quota_max"],
+        total_estimated_vt_calls_max=total_max,
+        auto_rescan_estimated_duration_seconds_min=est["auto_rescan_estimated_duration_seconds_min"],
+        auto_rescan_estimated_duration_seconds_max=est["auto_rescan_estimated_duration_seconds_max"],
+        auto_rescan_note=est["auto_rescan_note"],
         estimated_enrichment_lookups=est["estimated_enrichment_lookups"],
         estimated_enrichment_duration_seconds_min=est["estimated_enrichment_duration_seconds_min"],
         estimated_enrichment_duration_seconds_max=est["estimated_enrichment_duration_seconds_max"],
         quota_remaining_now=remaining,
-        will_exceed_quota=calls_max > remaining,
+        will_exceed_quota=total_max > remaining,
         quota_headroom=headroom,
         estimated_duration_seconds_min=est["estimated_duration_seconds_min"],
-        estimated_duration_seconds_max=est["estimated_duration_seconds_max"],
+        estimated_duration_seconds_max=(
+            est["estimated_duration_seconds_max"]
+            + est["auto_rescan_estimated_duration_seconds_max"]
+        ),
         rate_limit_note=est["rate_limit_note"],
         job_state_note=est["job_state_note"],
         enrichment_note=est["enrichment_note"],
@@ -299,13 +314,24 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
 
 # ── Job submit ─────────────────────────────────────────────────────────────────
 
-def _estimate_requests(items: list, use_domain_reports: bool) -> int:
+def _estimate_requests(
+    items: list,
+    use_domain_reports: bool,
+    *,
+    auto_rescan_stale: bool = False,
+    max_auto_rescans: int = 3,
+) -> int:
     """
     Conservative (max) VT API call estimate for the submit flow.
     Delegates to the shared estimate_job helper to guarantee parity with
     the /estimate endpoint.
     """
-    return estimate_job(items, use_domain_reports)["estimated_vt_calls_max"]
+    return estimate_job(
+        items,
+        use_domain_reports,
+        auto_rescan_stale=auto_rescan_stale,
+        max_auto_rescans=max_auto_rescans,
+    )["total_estimated_vt_calls_max"]
 
 
 def _make_pending_result(item, input_type: InputType) -> MdiResultItem:
@@ -383,7 +409,12 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
     eligible_items = accepted
 
     held_skipped_count = len(held_items)
-    estimated = _estimate_requests(eligible_items, req.use_domain_reports)
+    estimated = _estimate_requests(
+        eligible_items,
+        req.use_domain_reports,
+        auto_rescan_stale=req.auto_rescan_stale,
+        max_auto_rescans=req.max_auto_rescans,
+    )
     remaining = read_remaining_quota()
 
     if estimated > remaining:
@@ -392,8 +423,9 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
             detail={
                 "error": "quota_blocked",
                 "message": (
-                    f"Estimated {estimated} VT API requests required but only "
-                    f"{remaining} remain today. Reduce input size or wait until tomorrow."
+                    f"Estimated {estimated} VT API requests required (including auto-rescan "
+                    f"worst-case) but only {remaining} remain today. Reduce input size, "
+                    "disable auto-rescan, or wait until tomorrow."
                 ),
                 "estimated_requests": estimated,
                 "quota_remaining": remaining,
@@ -412,6 +444,8 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         estimated_requests=estimated,
         use_domain_reports=req.use_domain_reports,
         stale_threshold_days=req.stale_threshold_days,
+        auto_rescan_stale=req.auto_rescan_stale,
+        max_auto_rescans=req.max_auto_rescans,
     )
 
     # Pre-populate results: held items first, then pending eligible items
@@ -478,6 +512,13 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         vt_refresh_count=job.vt_refresh_count,
         vt_scan_requested_count=job.vt_scan_requested_count,
         vt_scan_failed_count=job.vt_scan_failed_count,
+        auto_rescan_stale=job.auto_rescan_stale,
+        max_auto_rescans=job.max_auto_rescans,
+        auto_rescan_attempted_count=job.auto_rescan_attempted_count,
+        auto_rescan_completed_count=job.auto_rescan_completed_count,
+        auto_rescan_failed_count=job.auto_rescan_failed_count,
+        auto_rescan_skipped_count=job.auto_rescan_skipped_count,
+        auto_rescan_quota_blocked_count=job.auto_rescan_quota_blocked_count,
     )
 
 

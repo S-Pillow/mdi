@@ -428,7 +428,7 @@ class MdiJobOptions(BaseModel):
         description="[workflow] Only auto-rescan reports older than this threshold."
     )
     max_auto_rescans: int = Field(
-        25,
+        3,
         ge=0,
         le=100,
         description="[workflow] Maximum stale items to auto-rescan per job run."
@@ -786,6 +786,14 @@ class JobSubmitRequest(BaseModel):
         7, ge=1, le=90,
         description="[workflow] Reports older than this many days are STALE.",
     )
+    auto_rescan_stale: bool = Field(
+        False,
+        description="[workflow] Auto-request VT scan for stale flagged URL-mode items.",
+    )
+    max_auto_rescans: int = Field(
+        3, ge=0, le=25,
+        description="[workflow] Max auto-rescans per job when auto_rescan_stale is enabled.",
+    )
 
 
 class JobSubmitResponse(BaseModel):
@@ -860,6 +868,28 @@ class JobStatusResponse(BaseModel):
     vt_scan_failed_count: int = Field(
         0, description="[display] Cumulative scan failures on this job."
     )
+    # ── MDI-15A auto-rescan options and counters ───────────────────────────────
+    auto_rescan_stale: bool = Field(
+        False, description="[display] Saved job option: auto-rescan enabled at submit."
+    )
+    max_auto_rescans: int = Field(
+        3, description="[display] Saved job option: max auto-rescans per job."
+    )
+    auto_rescan_attempted_count: int = Field(
+        0, description="[display] Auto-rescan VT scan attempts during initial processing."
+    )
+    auto_rescan_completed_count: int = Field(
+        0, description="[display] Auto-rescans that returned an updated VT report."
+    )
+    auto_rescan_failed_count: int = Field(
+        0, description="[display] Auto-rescans that failed or returned scan pending."
+    )
+    auto_rescan_skipped_count: int = Field(
+        0, description="[display] Items evaluated but skipped for auto-rescan."
+    )
+    auto_rescan_quota_blocked_count: int = Field(
+        0, description="[display] Auto-rescans skipped due to insufficient quota."
+    )
 
 
 # ─── Estimate API models ──────────────────────────────────────────────────────
@@ -894,6 +924,14 @@ class EstimateRequest(BaseModel):
         ge=1,
         le=90,
         description="[workflow] Informational only for estimate; affects VT freshness at job time.",
+    )
+    auto_rescan_stale: bool = Field(
+        False,
+        description="[workflow] Include conservative auto-rescan quota in estimate.",
+    )
+    max_auto_rescans: int = Field(
+        3, ge=0, le=25,
+        description="[workflow] Max auto-rescans per job for estimate upper bound.",
     )
 
 
@@ -973,6 +1011,33 @@ class EstimateResponse(BaseModel):
             "Domain-mode items = 1 call; URL-mode items = 3 calls (GET + POST submit + GET)."
         ),
     )
+    auto_rescan_estimated_quota_min: int = Field(
+        0,
+        description="[display] MDI-15A: minimum additional VT calls from auto-rescan (always 0).",
+    )
+    auto_rescan_estimated_quota_max: int = Field(
+        0,
+        description="[display] MDI-15A: worst-case additional VT calls from auto-rescan.",
+    )
+    total_estimated_vt_calls_max: int = Field(
+        ...,
+        description=(
+            "[display] Base worst-case VT calls plus auto-rescan worst-case. "
+            "Submit guard uses this when auto-rescan is enabled."
+        ),
+    )
+    auto_rescan_estimated_duration_seconds_min: float = Field(
+        0.0,
+        description="[display] MDI-15A: minimum additional runtime from auto-rescan.",
+    )
+    auto_rescan_estimated_duration_seconds_max: float = Field(
+        0.0,
+        description="[display] MDI-15A: worst-case additional runtime from auto-rescan.",
+    )
+    auto_rescan_note: str = Field(
+        "",
+        description="[display] MDI-15A: informational note about conditional auto-rescan usage.",
+    )
 
     # ── MDI-11 enrichment estimate ────────────────────────────────────────────
     estimated_enrichment_lookups: int = Field(
@@ -1006,14 +1071,14 @@ class EstimateResponse(BaseModel):
     will_exceed_quota: bool = Field(
         ...,
         description=(
-            "[display] True when estimated_vt_calls_max > quota_remaining_now. "
+            "[display] True when total_estimated_vt_calls_max > quota_remaining_now. "
             "The submit endpoint will hard-stop if this condition is met."
         ),
     )
     quota_headroom: int = Field(
         ...,
         description=(
-            "[display] quota_remaining_now minus estimated_vt_calls_max. "
+            "[display] quota_remaining_now minus total_estimated_vt_calls_max. "
             "Negative values indicate over-quota. Zero means exactly at limit."
         ),
     )
