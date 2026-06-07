@@ -1270,6 +1270,41 @@ body {
 .badge-skipped-hold{background: rgba(139,92,246,0.16);  color: #C4B5FD; border-color: rgba(139,92,246,0.30); }
 .badge-none-ev    { background: rgba(148,163,184,0.12); color: #94A3B8; border-color: rgba(148,163,184,0.25); }
 
+/* Error severity badges (MDI-22B) */
+.badge-warning { background: rgba(245,158,11,0.18);  color: #FCD34D; border-color: rgba(245,158,11,0.35); }
+.badge-skip    { background: rgba(148,163,184,0.16); color: #CBD5E1; border-color: rgba(148,163,184,0.30); }
+.badge-info    { background: rgba(100,116,139,0.14); color: #94A3B8; border-color: rgba(100,116,139,0.28); }
+
+/* Structured error notices */
+.error-notice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.error-notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+}
+.error-notice-row--error   { border-left-color: rgba(239,68,68,0.55);  background: rgba(239,68,68,0.06); }
+.error-notice-row--warning { border-left-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.06); }
+.error-notice-row--skip    { border-left-color: rgba(148,163,184,0.45);background: rgba(148,163,184,0.06); }
+.error-notice-row--info    { border-left-color: rgba(100,116,139,0.45);background: rgba(100,116,139,0.06); }
+.error-code    { font-family: Menlo, Consolas, monospace; font-size: 10px; color: var(--text-secondary); }
+.error-message { color: var(--text-secondary); }
+.error-meta    { color: var(--text-muted); font-size: 9px; width: 100%; }
+
+.evidence-err-icon { margin-left: 4px; font-size: 10px; font-weight: 700; }
+.evidence-err-icon--error   { color: var(--risk-critical); }
+.evidence-err-icon--warning { color: var(--warn); }
+.evidence-err-icon--skip    { color: var(--text-muted); font-weight: 600; }
+
 /* ── Confidence text ─────────────────────────────────────── */
 .conf-high   { color: #FCA5A5; font-weight: 700; }
 .conf-medium { color: #FCD34D; font-weight: 600; }

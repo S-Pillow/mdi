@@ -105,6 +105,17 @@ Purpose categories:
 
 **Important:** Warnings and skips must not be displayed or triaged as failures. Only `severity=error` (or `blocks_triage=true`) forces the ERROR bucket when combined with failed processing / no usable VT evidence.
 
+### Frontend display severity (MDI-22B)
+
+| Severity | UI meaning |
+|---|---|
+| `error` | Blocking failure — red styling, critical indicator |
+| `warning` | Partial evidence — amber styling, softer indicator |
+| `skip` | Intentional/non-failure — muted styling |
+| `info` | Operational note — muted informational styling |
+
+The frontend prefers API-provided `severity` when present; legacy string errors and objects without severity use a client-side fallback map aligned with the backend taxonomy.
+
 ---
 
 ## Job-level fields (`MdiJobSummary` — metadata-only dashboard record)
