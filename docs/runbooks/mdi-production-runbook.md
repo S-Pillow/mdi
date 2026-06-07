@@ -132,9 +132,9 @@ compromised.
 | Path | Owner:Group | Mode | Notes |
 |---|---|---|---|
 | `/var/lib/dns-tool/` | root:dns-tool | 2770 | setgid; both services via `dns-tool` group |
-| `vt_usage.json` | root:dns-tool | 660 | Shared quota counter |
-| `vt_usage_history.jsonl` | root:dns-tool | 660 | Shared metadata history (append-only) |
-| `vt_daily_history.json` | root:dns-tool | 660 | Shared daily totals |
+| `vt_usage.json` | *:dns-tool | 660 | Shared quota counter; owner = last writer |
+| `vt_usage_history.jsonl` | *:dns-tool | 660 | Shared metadata history (append-only) |
+| `vt_daily_history.json` | *:dns-tool | 660 | Shared daily totals |
 | `vt_usage.lock` | root:dns-tool | 660 | Shared POSIX flock (MDI-19) |
 | `mdi_latest_job.json` | mdi:mdi | 600 | MDI-only job recovery |
 | `vt_latest_job.json` | www-data:www-data | 600 | VT Bulk only |

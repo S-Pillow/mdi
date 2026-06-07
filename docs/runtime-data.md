@@ -11,12 +11,16 @@ operation.  Runtime files are **never committed to source control**.
 
 ### Permission matrix (current)
 
+Shared quota files use **group `dns-tool` and mode `660`**. Owner may be
+`root`, `mdi`, or `www-data` depending on the last writer — non-root
+`os.replace` cannot preserve `root` ownership.
+
 | Path | Owner:Group | Mode | Shared? |
 |---|---|---|---|
 | `/var/lib/dns-tool/` | root:dns-tool | 2770 | Yes |
-| `vt_usage.json` | root:dns-tool | 660 | Yes — MDI + VT Bulk |
-| `vt_usage_history.jsonl` | root:dns-tool | 660 | Yes — metadata append |
-| `vt_daily_history.json` | root:dns-tool | 660 | Yes |
+| `vt_usage.json` | *:dns-tool | 660 | Yes — MDI + VT Bulk |
+| `vt_usage_history.jsonl` | *:dns-tool | 660 | Yes — metadata append |
+| `vt_daily_history.json` | *:dns-tool | 660 | Yes |
 | `vt_usage.lock` | root:dns-tool | 660 | Yes — flock coordination |
 | `mdi_latest_job.json` | mdi:mdi | 600 | **No** — MDI only |
 | `vt_latest_job.json` | www-data:www-data | 600 | **No** — VT Bulk only |
