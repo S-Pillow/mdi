@@ -52,15 +52,36 @@ LIVE_CHECK_NOTE: str = (
     "The exact count is not known until VT processing completes."
 )
 
-AUTO_RESCAN_QUOTA_PER_ITEM_MAX: int = 4
+AUTO_RESCAN_URL_QUOTA_PER_ITEM_MAX: int = 4
+AUTO_RESCAN_DOMAIN_QUOTA_PER_ITEM_MAX: int = 5
+
+
+def _auto_rescan_slots(
+    *,
+    max_auto_rescans: int,
+    domain_report_mode_count: int,
+    url_report_mode_count: int,
+) -> tuple[int, int, int]:
+    """Return (domain_slots, url_slots, quota_max) for auto-rescan estimate."""
+    eligible = domain_report_mode_count + url_report_mode_count
+    if max_auto_rescans <= 0 or eligible <= 0:
+        return 0, 0, 0
+    slots = min(max_auto_rescans, eligible)
+    domain_slots = min(domain_report_mode_count, slots)
+    url_slots = min(url_report_mode_count, slots - domain_slots)
+    quota_max = (
+        domain_slots * AUTO_RESCAN_DOMAIN_QUOTA_PER_ITEM_MAX
+        + url_slots * AUTO_RESCAN_URL_QUOTA_PER_ITEM_MAX
+    )
+    return domain_slots, url_slots, quota_max
 
 
 def _auto_rescan_note(max_calls: int) -> str:
     if max_calls <= 0:
         return ""
     return (
-        f"Auto-rescan may add up to {max_calls} VT calls. "
-        "Actual usage depends on how many stale flagged URL-mode rows are found."
+        f"Auto-rescan may add up to {max_calls} VT calls (URL scans and domain reanalysis). "
+        "Actual usage depends on how many stale flagged rows are found during processing."
     )
 
 
@@ -159,10 +180,16 @@ def estimate_job(
 
     auto_rescan_quota_min = 0
     auto_rescan_quota_max = 0
+    auto_rescan_domain_eligible_max = 0
+    auto_rescan_url_eligible_max = 0
     if auto_rescan_stale and max_auto_rescans > 0:
-        auto_rescan_quota_max = (
-            min(max_auto_rescans, url_report_mode_count) * AUTO_RESCAN_QUOTA_PER_ITEM_MAX
+        domain_slots, url_slots, auto_rescan_quota_max = _auto_rescan_slots(
+            max_auto_rescans=max_auto_rescans,
+            domain_report_mode_count=domain_report_mode_count,
+            url_report_mode_count=url_report_mode_count,
         )
+        auto_rescan_domain_eligible_max = domain_slots
+        auto_rescan_url_eligible_max = url_slots
     auto_rescan_duration_min = 0.0
     auto_rescan_duration_max = max(
         0.0,
@@ -193,6 +220,8 @@ def estimate_job(
         "live_check_note": LIVE_CHECK_NOTE,
         "auto_rescan_estimated_quota_min": auto_rescan_quota_min,
         "auto_rescan_estimated_quota_max": auto_rescan_quota_max,
+        "auto_rescan_domain_eligible_max": auto_rescan_domain_eligible_max,
+        "auto_rescan_url_eligible_max": auto_rescan_url_eligible_max,
         "total_estimated_vt_calls_max": total_vt_max,
         "auto_rescan_estimated_duration_seconds_min": auto_rescan_duration_min,
         "auto_rescan_estimated_duration_seconds_max": auto_rescan_duration_max,

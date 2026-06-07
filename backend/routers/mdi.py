@@ -304,6 +304,8 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         estimated_vt_calls_max=calls_max,
         auto_rescan_estimated_quota_min=est["auto_rescan_estimated_quota_min"],
         auto_rescan_estimated_quota_max=est["auto_rescan_estimated_quota_max"],
+        auto_rescan_domain_eligible_max=est["auto_rescan_domain_eligible_max"],
+        auto_rescan_url_eligible_max=est["auto_rescan_url_eligible_max"],
         total_estimated_vt_calls_max=total_max,
         auto_rescan_estimated_duration_seconds_min=est["auto_rescan_estimated_duration_seconds_min"],
         auto_rescan_estimated_duration_seconds_max=est["auto_rescan_estimated_duration_seconds_max"],

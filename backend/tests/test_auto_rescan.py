@@ -302,22 +302,148 @@ def test_held_stale_flagged_not_auto_rescanned(tmp_path):
     assert post_calls == []
 
 
-def test_domain_report_mode_stale_flagged_skipped(tmp_path):
+def test_domain_report_mode_stale_flagged_attempted(tmp_path):
     _make_job(
         "j-dom",
         [("dom.com", "dom.com", InputType.DOMAIN)],
         auto_rescan_stale=True,
         use_domain_reports=True,
     )
+    analyse_posts = []
+    analysis_polls = 0
 
     async def _vt_side(method, url, **kwargs):
+        nonlocal analysis_polls
+        if method == "POST" and "/domains/" in url and url.endswith("/analyse"):
+            analyse_posts.append(url)
+            return _mock_resp(200, {"data": {"id": "analysis-dom-1", "type": "analysis"}})
+        if method == "GET" and "/analyses/" in url:
+            analysis_polls += 1
+            return _mock_resp(200, {"data": {"attributes": {"status": "completed"}}})
+        if method == "GET" and "/domains/" in url:
+            if not analyse_posts:
+                return _mock_resp(200, _vt_body(malicious=2, age_days=14))
+            return _mock_resp(200, _vt_body(malicious=4, age_days=1))
         if method == "GET":
             return _mock_resp(200, _vt_body(malicious=2, age_days=14))
         return _mock_resp(200, {})
 
     _process_with_vt_mock("j-dom", tmp_path, _vt_side)
     job = job_store.get_job_sync("j-dom")
+    assert job.auto_rescan_attempted_count == 1
+    assert job.auto_rescan_completed_count == 1
+    assert analyse_posts
+    result = job.results["dom.com"]
+    assert result.vt_hits == 4
+    assert result.freshness == Freshness.FRESH
+
+
+def test_domain_report_mode_stale_clean_not_auto_rescanned(tmp_path):
+    _make_job(
+        "j-dom-clean",
+        [("clean-dom.com", "clean-dom.com", InputType.DOMAIN)],
+        auto_rescan_stale=True,
+        use_domain_reports=True,
+    )
+
+    async def _vt_side(method, url, **kwargs):
+        if method == "GET" and "/domains/" in url:
+            return _mock_resp(200, _vt_body(malicious=0, age_days=14))
+        return _mock_resp(200, {})
+
+    _process_with_vt_mock("j-dom-clean", tmp_path, _vt_side)
+    job = job_store.get_job_sync("j-dom-clean")
     assert job.auto_rescan_attempted_count == 0
+    assert job.auto_rescan_skipped_count >= 1
+
+
+def test_domain_report_quota_blocked_before_vt_call(tmp_path):
+    _make_job(
+        "j-dom-quota",
+        [("quota-dom.com", "quota-dom.com", InputType.DOMAIN)],
+        auto_rescan_stale=True,
+        use_domain_reports=True,
+    )
+    analyse_posts = []
+
+    async def _vt_side(method, url, **kwargs):
+        if method == "POST" and "/analyse" in url:
+            analyse_posts.append(url)
+        if method == "GET" and "/domains/" in url:
+            return _mock_resp(200, _vt_body(malicious=2, age_days=14))
+        return _mock_resp(200, {})
+
+    # 496 used → 4 remaining; initial GET leaves 3 < 5 domain rescan minimum
+    _process_with_vt_mock("j-dom-quota", tmp_path, _vt_side, usage_used=496)
+    job = job_store.get_job_sync("j-dom-quota")
+    assert job.auto_rescan_attempted_count == 0
+    assert job.auto_rescan_quota_blocked_count >= 1
+    assert analyse_posts == []
+    err = job.results["quota-dom.com"].errors or []
+    assert any(e.code == "auto_rescan_quota_blocked" for e in err)
+
+
+def test_domain_report_pending_preserves_prior_vt(tmp_path):
+    _make_job(
+        "j-dom-pend",
+        [("pend-dom.com", "pend-dom.com", InputType.DOMAIN)],
+        auto_rescan_stale=True,
+        use_domain_reports=True,
+    )
+
+    async def _vt_side(method, url, **kwargs):
+        if method == "POST" and "/analyse" in url:
+            return _mock_resp(200, {"data": {"id": "analysis-pending"}})
+        if method == "GET" and "/analyses/" in url:
+            return _mock_resp(200, {"data": {"attributes": {"status": "queued"}}})
+        if method == "GET" and "/domains/" in url:
+            return _mock_resp(200, _vt_body(malicious=2, age_days=30))
+        return _mock_resp(404)
+
+    _process_with_vt_mock("j-dom-pend", tmp_path, _vt_side)
+    job = job_store.get_job_sync("j-dom-pend")
+    assert job.auto_rescan_attempted_count == 1
+    assert job.auto_rescan_failed_count == 1
+    result = job.results["pend-dom.com"]
+    assert result.vt_hits == 2
+    assert any(e.code == "vt_scan_pending" for e in (result.errors or []))
+
+
+def test_mixed_url_domain_auto_rescan_respects_max(tmp_path):
+    items = [
+        ("dom1.com", "dom1.com", InputType.DOMAIN),
+        ("https://mixed.example/path", "https://mixed.example/path", InputType.URL),
+        ("dom2.com", "dom2.com", InputType.DOMAIN),
+    ]
+    _make_job(
+        "j-mixed",
+        items,
+        auto_rescan_stale=True,
+        max_auto_rescans=2,
+        use_domain_reports=True,
+    )
+    post_calls = []
+
+    async def _vt_side(method, url, **kwargs):
+        if method == "POST":
+            post_calls.append(url)
+            if "/analyse" in url:
+                return _mock_resp(200, {"data": {"id": "analysis-mixed", "type": "analysis"}})
+            return _mock_resp(200, {})
+        if method == "GET" and "/analyses/" in url:
+            return _mock_resp(200, {"data": {"attributes": {"status": "completed"}}})
+        if method == "GET" and "/domains/" in url:
+            if any("/analyse" in p for p in post_calls):
+                return _mock_resp(200, _vt_body(malicious=3, age_days=1))
+            return _mock_resp(200, _vt_body(malicious=2, age_days=14))
+        if method == "GET":
+            return _mock_resp(200, _vt_body(malicious=2, age_days=14))
+        return _mock_resp(200, {})
+
+    _process_with_vt_mock("j-mixed", tmp_path, _vt_side)
+    job = job_store.get_job_sync("j-mixed")
+    assert job.auto_rescan_attempted_count == 2
+    assert len(post_calls) == 2
 
 
 def test_max_auto_rescans_enforced(tmp_path):
@@ -550,8 +676,40 @@ def test_estimate_includes_auto_rescan_max_quota():
     assert resp.status_code == 200
     data = resp.json()
     assert data["auto_rescan_estimated_quota_max"] == 8  # min(3, 2 url-mode) * 4
+    assert data["auto_rescan_url_eligible_max"] == 2
+    assert data["auto_rescan_domain_eligible_max"] == 0
     assert data["total_estimated_vt_calls_max"] == data["estimated_vt_calls_max"] + 8
-    assert "Auto-rescan may add up to" in data["auto_rescan_note"]
+    assert "URL scans and domain reanalysis" in data["auto_rescan_note"]
+
+
+def test_estimate_domain_report_auto_rescan_max_quota():
+    resp = client.post("/api/mdi/jobs/estimate", json={
+        "raw_input": "a.com\nb.com\nc.com",
+        "use_domain_reports": True,
+        "auto_rescan_stale": True,
+        "max_auto_rescans": 3,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["auto_rescan_estimated_quota_max"] == 15  # min(3, 3 domains) * 5
+    assert data["auto_rescan_domain_eligible_max"] == 3
+    assert data["auto_rescan_url_eligible_max"] == 0
+    assert data["total_estimated_vt_calls_max"] > 0
+
+
+def test_estimate_mixed_url_domain_auto_rescan_slot_cap():
+    resp = client.post("/api/mdi/jobs/estimate", json={
+        "raw_input": "a.com\nhttps://b.com/path\nc.com",
+        "use_domain_reports": True,
+        "auto_rescan_stale": True,
+        "max_auto_rescans": 2,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    # slots=2: domain_slots=2, url_slots=0 → 2*5=10
+    assert data["auto_rescan_domain_eligible_max"] == 2
+    assert data["auto_rescan_url_eligible_max"] == 0
+    assert data["auto_rescan_estimated_quota_max"] == 10
 
 
 def test_submit_blocks_when_total_exceeds_remaining(tmp_path, monkeypatch):

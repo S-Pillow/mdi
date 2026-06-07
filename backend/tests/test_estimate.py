@@ -904,3 +904,85 @@ class TestMdi12LiveCheckEstimate:
         raw = "\n".join(f"domain{i}.com" for i in range(100))
         resp = _post_estimate(raw)
         assert resp["estimated_live_check_count"] == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MDI-28C — auto-rescan estimate with domain-report rows
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMdi28cAutoRescanEstimate:
+    """Domain-report and mixed URL/domain auto-rescan estimate fields."""
+
+    def test_domain_report_batch_auto_rescan_max_positive(self):
+        resp = _post_estimate(
+            "a.com\nb.com\nc.com",
+            use_domain_reports=True,
+            auto_rescan_stale=True,
+            max_auto_rescans=3,
+        )
+        assert resp["auto_rescan_estimated_quota_max"] == 15
+        assert resp["auto_rescan_domain_eligible_max"] == 3
+        assert resp["auto_rescan_url_eligible_max"] == 0
+        assert resp["total_estimated_vt_calls_max"] == (
+            resp["estimated_vt_calls_max"] + resp["auto_rescan_estimated_quota_max"]
+        )
+
+    def test_mixed_url_domain_estimate_uses_domain_x5_url_x4(self):
+        resp = _post_estimate(
+            "a.com\nhttps://b.com/path\nc.com\nd.com",
+            use_domain_reports=True,
+            auto_rescan_stale=True,
+            max_auto_rescans=3,
+        )
+        # 3 domain slots + 0 url slots (domains fill cap first) → 15
+        assert resp["auto_rescan_domain_eligible_max"] == 3
+        assert resp["auto_rescan_url_eligible_max"] == 0
+        assert resp["auto_rescan_estimated_quota_max"] == 15
+
+    def test_mixed_slot_cap_prefers_domains_then_urls(self):
+        resp = _post_estimate(
+            "a.com\nhttps://b.com/path",
+            use_domain_reports=True,
+            auto_rescan_stale=True,
+            max_auto_rescans=2,
+        )
+        assert resp["auto_rescan_domain_eligible_max"] == 1
+        assert resp["auto_rescan_url_eligible_max"] == 1
+        assert resp["auto_rescan_estimated_quota_max"] == 9  # 5 + 4
+
+    def test_submit_blocks_when_total_exceeds_remaining(self, tmp_path):
+        usage_file = _make_usage_file(tmp_path, used=498)
+        old_env = os.environ.get("VT_USAGE_FILE")
+        try:
+            os.environ["VT_USAGE_FILE"] = str(usage_file)
+            resp = client.post("/api/mdi/jobs/submit", json={
+                "raw_input": "a.com\nb.com\nc.com",
+                "use_domain_reports": True,
+                "auto_rescan_stale": True,
+                "max_auto_rescans": 3,
+            })
+            assert resp.status_code == 429
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_USAGE_FILE", None)
+            else:
+                os.environ["VT_USAGE_FILE"] = old_env
+
+    def test_estimate_job_unit_mixed_slots(self):
+        from models import MdiInputItem
+        items = [
+            MdiInputItem(input_original="a.com", input_normalized="a.com",
+                         input_type=InputType.DOMAIN, position=1),
+            MdiInputItem(input_original="http://b.com/", input_normalized="http://b.com/",
+                         input_type=InputType.URL, position=2),
+        ]
+        result = estimate_job(
+            items,
+            use_domain_reports=True,
+            auto_rescan_stale=True,
+            max_auto_rescans=2,
+        )
+        assert result["auto_rescan_domain_eligible_max"] == 1
+        assert result["auto_rescan_url_eligible_max"] == 1
+        assert result["auto_rescan_estimated_quota_max"] == 9

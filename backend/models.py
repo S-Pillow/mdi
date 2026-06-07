@@ -1179,6 +1179,14 @@ class EstimateResponse(BaseModel):
         0,
         description="[display] MDI-15A: worst-case additional VT calls from auto-rescan.",
     )
+    auto_rescan_domain_eligible_max: int = Field(
+        0,
+        description="[display] MDI-28C: worst-case domain-report auto-rescan slots.",
+    )
+    auto_rescan_url_eligible_max: int = Field(
+        0,
+        description="[display] MDI-28C: worst-case URL-mode auto-rescan slots.",
+    )
     total_estimated_vt_calls_max: int = Field(
         ...,
         description=(

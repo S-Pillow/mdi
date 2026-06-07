@@ -1259,12 +1259,20 @@ Usage history action aggregates: `refresh_count`, `scan_requested_count`,
 | `auto_rescan_enabled` | history | Mirror of `auto_rescan_stale` on job record |
 
 Estimate fields: `auto_rescan_estimated_quota_min/max`,
+`auto_rescan_domain_eligible_max`, `auto_rescan_url_eligible_max`,
 `total_estimated_vt_calls_max`, `auto_rescan_estimated_duration_seconds_min/max`,
 `auto_rescan_note`.
 
-Auto-rescan eligibility: stale flagged URL-mode items only; not held, not
-domain-report mode, not clean/fresh/error. One attempt per row per job.
-Runs only during initial `process_job` — not on recovery or manual actions.
+Auto-rescan estimate formula (worst case):
+`slots = min(max_auto_rescans, domain_report_mode_count + url_report_mode_count)`;
+`domain_slots = min(domain_report_mode_count, slots)`;
+`url_slots = min(url_report_mode_count, slots - domain_slots)`;
+`auto_rescan_estimated_quota_max = domain_slots × 5 + url_slots × 4`.
+
+Auto-rescan eligibility: stale or very_stale flagged/suspicious items; not held,
+not clean/fresh/error. Domain-report bare domains use MDI-28 domain reanalysis path.
+One attempt per row per job. Runs only during initial `process_job` — not on
+recovery or manual actions. IP inputs rejected before job creation (MDI-27).
 
 ### Disabled / deferred UI actions
 

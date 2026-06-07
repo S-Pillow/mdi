@@ -165,7 +165,6 @@ Columns: **Category · Example codes · Severity · Meaning · User-visible resu
 | `auto_rescan` | `auto_rescan_quota_blocked` | warning/info | Auto-rescan skipped for quota | Info/warning in errors[] | Disable auto-rescan; retry job tomorrow | N/A | 0 | During initial job only |
 | `auto_rescan` | `auto_rescan_job_limit` | info | Per-job max rescans reached | INFO notice | Expected cap | No | 0 | |
 | `auto_rescan` | `auto_rescan_held` | info | Held item | INFO/skip | Expected | No | 0 | |
-| `auto_rescan` | `auto_rescan_domain_report_mode` | info | Domain-report mode | INFO | Use URL mode for auto-rescan | No | 0 | |
 | `auto_rescan` | `auto_rescan_not_stale` | info | Item not stale | INFO | Expected | No | 0 | |
 | `auto_rescan` | `auto_rescan_not_flagged` | info | Item not flagged | INFO | Expected | No | 0 | |
 
