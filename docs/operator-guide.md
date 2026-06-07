@@ -242,17 +242,25 @@ triage bucket when VT succeeded.
 
 ### Accepted input shape (parse / upload)
 
-Bare domains must be **dotted public-style names** (e.g. `example.com`,
-`sub.example.com`). **Single-label hostnames** (`localhost`, `printer01`, bare
-words like `not` or `valid`) and malformed fragments (`domain/.com`,
-`example..com`) are rejected at parse-preview with `invalid_input`. Internal
-hostname inventory is out of scope unless a future setting adds it.
+MDI accepts **domains** and **URLs with domain hostnames** only (e.g.
+`example.com`, `https://example.com/path`, `123.example.com`). **IP addresses**
+(IPv4/IPv6 literals), **CIDR notation** (`1.2.3.0/24`), **IP ranges**
+(`1.2.3.4-1.2.3.8`), and **IP-hostname URLs** (`http://8.8.8.8/`,
+`http://[::1]/`) are rejected at parse-preview and upload validation with
+`ip_address_not_supported`. No quota is consumed for rejected IP input.
+
+Bare domains must be **dotted public-style names**. **Single-label hostnames**
+(`localhost`, `printer01`, bare words like `not` or `valid`) and malformed
+fragments (`domain/.com`, `example..com`) are rejected with `invalid_input`.
+Numeric domain labels (`123.example.com`, `example123.com`, `1-example.com`) are
+still accepted. Internal hostname inventory is out of scope unless a future
+setting adds it.
 
 ### When to retry, refresh, or scan
 
 | Situation | Preferred action |
 |---|---|
-| Parse-time rejection (`invalid_input`) | Fix input; wait for auto-validation — do **not** Run MDI Check until accepted |
+| Parse-time rejection (`invalid_input`, `ip_address_not_supported`) | Fix input; wait for auto-validation — do **not** Run MDI Check until accepted |
 | VT failure / quota block on row (`retry_lookup`) | New job later when quota allows |
 | Stale VT report (`refresh_report`) | **Refresh Report** (~1 quota unit) |
 | Very stale / pending scan (`request_new_scan`) | **Request New Scan** (~2–4 units); URL-mode only |

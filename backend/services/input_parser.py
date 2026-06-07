@@ -18,6 +18,7 @@ No external APIs are contacted.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -34,18 +35,24 @@ DEFAULT_MAX_ITEMS: int = 500
 DEFAULT_MAX_RAW_CHARS: int = 100_000
 MAX_TOKEN_LENGTH: int = 2_048
 
-# MDI accepts dotted public-style domains and IPv4 literals only — not single-label
-# hostnames (e.g. localhost, printer01) unless a future setting adds them.
+# MDI accepts dotted public-style domain hostnames only — not IP literals, CIDR,
+# IP ranges, or single-label hostnames (e.g. localhost, printer01).
 _ASCII_LABEL_RE = re.compile(
     r"^[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?$",
     re.IGNORECASE,
 )
 _PUNYCODE_LABEL_RE = re.compile(r"^xn--[a-z0-9-]+$", re.IGNORECASE)
 _ASCII_TLD_RE = re.compile(r"^[a-z]{2,63}$", re.IGNORECASE)
-_IPV4_RE = re.compile(
-    r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$"
+_IPV4_RANGE_RE = re.compile(
+    r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*-\s*"
+    r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$"
 )
 _RESERVED_HOSTS: frozenset = frozenset({"localhost"})
+
+IP_ADDRESS_NOT_SUPPORTED_CODE = "ip_address_not_supported"
+IP_ADDRESS_NOT_SUPPORTED_MESSAGE = (
+    "IP addresses are not supported. Enter a domain or URL with a domain hostname."
+)
 
 
 # ── Output structures ──────────────────────────────────────────────────────────
@@ -130,19 +137,51 @@ def _is_valid_tld(label: str) -> bool:
     return bool(_ASCII_TLD_RE.match(label)) and label.isascii()
 
 
-def _is_valid_ipv4(s: str) -> bool:
-    if not _IPV4_RE.match(s):
+def _hostname_is_ip_literal(hostname: str) -> bool:
+    """Return True if hostname is an IPv4 or IPv6 literal (no DNS calls)."""
+    if not hostname:
         return False
-    parts = [int(p) for p in s.split(".")]
-    return all(0 <= p <= 255 for p in parts)
+    host = hostname.strip().lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_cidr_token(s: str) -> bool:
+    """Return True if token looks like CIDR notation (e.g. 1.2.3.0/24)."""
+    text = s.strip()
+    if "://" in text or "/" not in text:
+        return False
+    prefix = text.split("/", 1)[1].split("%", 1)[0]
+    if not prefix.isdigit():
+        return False
+    try:
+        ipaddress.ip_network(text, strict=False)
+        return True
+    except ValueError:
+        return False
+
+
+def _token_is_ip_address_input(s: str) -> bool:
+    """Return True if a raw token is an IP literal, CIDR, or IPv4 range."""
+    text = s.strip()
+    if _IPV4_RANGE_RE.match(text):
+        return True
+    if _is_cidr_token(text):
+        return True
+    return _hostname_is_ip_literal(text)
 
 
 def _is_valid_host(host: str) -> bool:
     """
-    Return True if host is a dotted domain or IPv4 suitable for MDI triage.
+    Return True if host is a dotted domain suitable for MDI triage.
 
-    Single-label names, localhost, empty labels, and underscores are rejected.
-    Does not perform DNS resolution or network calls.
+    IP literals, single-label names, localhost, empty labels, and underscores
+    are rejected. Does not perform DNS resolution or network calls.
     """
     if not host or " " in host or "_" in host or len(host) > 253:
         return False
@@ -151,8 +190,8 @@ def _is_valid_host(host: str) -> bool:
     if not host or host in _RESERVED_HOSTS:
         return False
 
-    if _is_valid_ipv4(host):
-        return True
+    if _hostname_is_ip_literal(host):
+        return False
 
     if "." not in host:
         return False
@@ -172,6 +211,36 @@ def _make_error(code: str, message: str, source: str = "input_parser") -> MdiErr
     from services.error_taxonomy import make_mdi_error
 
     return make_mdi_error(code=code, message=message, source=source, retriable=False)
+
+
+def map_parse_value_error(raw_token: str, code_str: str) -> Tuple[str, str]:
+    """
+    Map a normalize_token ValueError code string to (error_code, message).
+
+    Shared by paste parse and upload parse for consistent operator messaging.
+    """
+    if code_str == "ip_address":
+        return IP_ADDRESS_NOT_SUPPORTED_CODE, IP_ADDRESS_NOT_SUPPORTED_MESSAGE
+    if code_str == "token_too_long":
+        return "token_too_long", f"Token exceeds {MAX_TOKEN_LENGTH} character limit."
+    if code_str == "token_contains_space":
+        return (
+            "invalid_input",
+            "Token contains a space character and cannot be parsed as a domain or URL.",
+        )
+    if code_str.startswith("unsupported_scheme:"):
+        scheme = code_str.split(":", 1)[1]
+        return (
+            "unsupported_scheme",
+            f"Unsupported scheme '{scheme}'. Only http:// and https:// are accepted.",
+        )
+    if code_str.startswith("invalid_domain:"):
+        return "invalid_input", f"'{raw_token}' does not appear to be a valid domain or URL."
+    if code_str.startswith("invalid_host:"):
+        return "invalid_input", f"'{raw_token}' does not appear to be a valid domain or URL."
+    if code_str == "missing_host":
+        return "invalid_input", f"Could not extract a hostname from '{raw_token}'."
+    return "invalid_input", f"Could not parse '{raw_token}': {code_str}."
 
 
 # ── Core normalization ─────────────────────────────────────────────────────────
@@ -204,6 +273,9 @@ def normalize_token(
     if " " in s:
         raise ValueError("token_contains_space")
 
+    if _token_is_ip_address_input(s):
+        raise ValueError("ip_address")
+
     # ── Full URL with scheme ──────────────────────────────────────────────────
     if "://" in s:
         parsed = urlparse(s)
@@ -226,6 +298,8 @@ def normalize_token(
 
         if not host:
             raise ValueError("missing_host")
+        if _hostname_is_ip_literal(host):
+            raise ValueError("ip_address")
         if not _is_valid_host(host):
             raise ValueError(f"invalid_host:{host}")
 
@@ -242,6 +316,8 @@ def normalize_token(
             host = host.rstrip(".")
         if not host:
             raise ValueError("missing_host")
+        if _hostname_is_ip_literal(host):
+            raise ValueError("ip_address")
         if not _is_valid_host(host):
             raise ValueError(f"invalid_host:{host}")
         normalized = _lowercase_url(parsed)
@@ -322,35 +398,10 @@ def parse_raw_input(
             normalized, input_type = normalize_token(raw_token, default_scheme)
         except ValueError as exc:
             code_str = str(exc)
-            # Map internal codes to user-facing messages
             if code_str == "empty_token":
                 continue   # silently skip pure whitespace/empty tokens
-            elif code_str == "token_too_long":
-                msg = f"Token exceeds {MAX_TOKEN_LENGTH} character limit."
-                code = "token_too_long"
-            elif code_str == "token_contains_space":
-                msg = "Token contains a space character and cannot be parsed as a domain or URL."
-                code = "invalid_input"
-            elif code_str.startswith("unsupported_scheme:"):
-                scheme = code_str.split(":", 1)[1]
-                msg = (
-                    f"Unsupported scheme '{scheme}'. "
-                    "Only http:// and https:// are accepted."
-                )
-                code = "unsupported_scheme"
-            elif code_str.startswith("invalid_domain:"):
-                msg = f"'{raw_token}' does not appear to be a valid domain or URL."
-                code = "invalid_input"
-            elif code_str.startswith("invalid_host:"):
-                msg = f"'{raw_token}' does not appear to be a valid domain or URL."
-                code = "invalid_input"
-            elif code_str == "missing_host":
-                msg = f"Could not extract a hostname from '{raw_token}'."
-                code = "invalid_input"
-            else:
-                msg = f"Could not parse '{raw_token}': {code_str}."
-                code = "invalid_input"
 
+            code, msg = map_parse_value_error(raw_token, code_str)
             result.rejected.append(RejectedItem(
                 input_original=raw_token,
                 position=position,
