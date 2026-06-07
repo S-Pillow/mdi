@@ -4,6 +4,11 @@ Each field in `MdiResultItem` and related models is classified by its
 primary purpose.  A field may serve more than one purpose; the primary
 purpose determines where it must be present (display, export, etc.).
 
+**Operator context:** For how fields appear in the UI, exports, and dashboard,
+see [Operator Guide](operator-guide.md) (§7–§8 results table and detail drawer,
+§12 exports, §13 dashboard). This document is a technical field reference, not
+a runbook.
+
 Purpose categories:
 - **display**       — rendered in the results table or detail drawer
 - **workflow**      — used to drive hold-skip, rescan, or routing decisions
@@ -1184,20 +1189,16 @@ Auto-rescan eligibility: stale flagged URL-mode items only; not held, not
 domain-report mode, not clean/fresh/error. One attempt per row per job.
 Runs only during initial `process_job` — not on recovery or manual actions.
 
-### Disabled row action stubs
+### Disabled / deferred UI actions
 
-Each row has an eye icon button and a kebab-menu button. Both are `disabled`
-with tooltips ("Detail view — coming soon (MDI-14)" and "More actions — coming
-soon"). No detail drawer in MDI-13.
-
-### What is deferred
-
-| Feature | Target ticket |
+| Feature | Status |
 |---|---|
-| Detail drawer / per-item panel | MDI-14 |
-| Export (CSV/JSON evidence) | MDI-16 ✅ |
+| **Open in VirusTotal** | **Disabled** — UI stub; not active in production |
+| **Watchlist** | **Not implemented** |
+| **Create Block Rule** | **Not implemented** |
 | Export XLSX/PDF/ZIP | Future |
 | Auto-rescan on recovered jobs | Future |
 | Auto-rescan after manual refresh | Future |
-| Pagination (rows-per-page) | MDI-14+ |
-| Per-row WHOIS / Open in VT links | MDI-14 |
+
+Detail drawer, CSV/JSON export, and dashboard are implemented — see
+[Operator Guide](operator-guide.md).
