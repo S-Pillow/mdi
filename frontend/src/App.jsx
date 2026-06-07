@@ -849,7 +849,8 @@ function CollapsibleSettingsPanel({
             </div>
             <p className="settings-auto-rescan-warning">
               Auto-rescan consumes additional VirusTotal quota and may significantly increase runtime.
-              It runs only for stale flagged URL-mode items and remains off by default.
+              When enabled, it may request URL scans and domain reanalysis for stale flagged items.
+              It remains off by default.
             </p>
           </div>
         </div>
@@ -1334,6 +1335,7 @@ function EstimateSection({ estimate, error, stale }) {
     estimated_vt_calls_min, estimated_vt_calls_max,
     total_estimated_vt_calls_max,
     auto_rescan_estimated_quota_min, auto_rescan_estimated_quota_max,
+    auto_rescan_domain_eligible_max, auto_rescan_url_eligible_max,
     auto_rescan_estimated_duration_seconds_max,
     auto_rescan_note,
     quota_remaining_now, will_exceed_quota, quota_headroom,
@@ -1378,6 +1380,13 @@ function EstimateSection({ estimate, error, stale }) {
               {auto_rescan_estimated_quota_max > 0 && (
                 <>
                   <Row label="Auto-rescan (extra)" value={`${auto_rescan_estimated_quota_min}–${auto_rescan_estimated_quota_max} calls`} />
+                  {(auto_rescan_domain_eligible_max > 0 || auto_rescan_url_eligible_max > 0) && (
+                    <Row
+                      label="Auto-rescan slots"
+                      value={`${auto_rescan_domain_eligible_max} domain · ${auto_rescan_url_eligible_max} URL`}
+                      note="worst case"
+                    />
+                  )}
                   <Row label="Total worst case" value={`${totalVtMax} calls`} bold />
                 </>
               )}

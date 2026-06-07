@@ -122,7 +122,6 @@ _AUTO_RESCAN_SKIP_CODES = frozenset({
     "auto_rescan_no_vt_data",
     "auto_rescan_not_flagged",
     "auto_rescan_not_stale",
-    "auto_rescan_domain_report_mode",
 })
 
 

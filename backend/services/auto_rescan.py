@@ -1,8 +1,8 @@
 """
-MDI-15A auto-rescan service — stale flagged URL-mode items during initial job processing.
+MDI-15A/MDI-28C auto-rescan service — stale flagged items during initial job processing.
 
 Runs inline after the first VT report and initial triage, before the live-check pass.
-Reuses MDI-15 scan plumbing (request_new_scan, reprocess_item_after_vt).
+Reuses MDI-15/MDI-28 scan plumbing (request_new_scan, reprocess_item_after_vt).
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from services.quota_writer import QuotaLockTimeout, read_remaining_quota
 logger = logging.getLogger("mdi.auto_rescan")
 
 _STALE_FRESHNESS = frozenset({Freshness.STALE, Freshness.VERY_STALE})
-_MIN_SCAN_QUOTA = 2
 
 
 def _is_held(result: MdiResultItem) -> bool:
@@ -59,15 +58,16 @@ def evaluate_auto_rescan_eligibility(
         return False, "auto_rescan_not_flagged"
     if result.freshness not in _STALE_FRESHNESS:
         return False, "auto_rescan_not_stale"
-    # MDI-28: manual domain rescan supported; auto-rescan domain support deferred.
-    if result.input_type == InputType.DOMAIN and job.use_domain_reports:
-        return False, "auto_rescan_domain_report_mode"
     if job.auto_rescan_attempted_count >= job.max_auto_rescans:
         return False, "auto_rescan_job_limit"
     if result.input_normalized in job.auto_rescanned_items:
         return False, "auto_rescan_job_limit"
     remaining = remaining_quota if remaining_quota is not None else read_remaining_quota()
-    if remaining < _MIN_SCAN_QUOTA:
+    if result.input_type == InputType.DOMAIN and job.use_domain_reports:
+        min_quota = vt_service.DOMAIN_RESCAN_QUOTA_MAX
+    else:
+        min_quota = vt_service.URL_SCAN_QUOTA_MIN
+    if remaining < min_quota:
         return False, "auto_rescan_quota_blocked"
     return True, None
 

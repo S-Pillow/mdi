@@ -19,7 +19,7 @@ domains and URLs submitted by operators. For each accepted item, MDI may:
 - Run optional live URL checks on flagged items
 - Classify items into triage buckets with recommended actions
 - Support manual VT report refresh and new-scan requests
-- Optionally auto-rescan stale flagged URL-mode items during initial job processing
+- Optionally auto-rescan stale flagged items (URL scans and domain reanalysis) during initial job processing
 - Export CSV summaries or JSON evidence
 - Show an operational dashboard (metadata-only aggregates)
 
@@ -338,9 +338,6 @@ create a new job.
 Use sparingly on high-priority items. Prefer **Refresh Report** when an
 existing report may still be useful.
 
-**Auto-rescan** does not yet use domain rescan — stale flagged bare domains in
-domain-report mode are skipped during job processing (deferred to a follow-up).
-
 ---
 
 ## 12. Auto-rescan stale flagged items
@@ -353,16 +350,19 @@ domain-report mode are skipped during job processing (deferred to a follow-up).
 ### Behavior
 
 - Runs **only during initial job processing** (inline after first VT pass)
-- Targets **stale flagged URL-mode** items only (not held, not domain-report mode)
+- Targets **stale flagged or suspicious** items only (not held, not clean, not fresh)
+- May request **URL scans** (URL-report mode) or **domain reanalysis** (domain-report bare domains)
 - Does **not** run on recovered jobs
 - Does **not** run after manual refresh or Request New Scan
+- Domain auto-rescan may produce `vt_scan_pending` — prior VT evidence is preserved; no retry loop
 - Stops when quota is exhausted (`auto_rescan_quota_blocked_count` may increment)
+- IP inputs remain rejected at parse/upload (MDI-27)
 
 ### Quota warning
 
-Worst-case auto-rescan adds up to `min(max_auto_rescans, url_report_count) × 4`
-VT units to the estimate max. **Do not enable** on large batches without
-reviewing estimate totals and shared quota with VT Bulk Check operators.
+Worst-case auto-rescan adds up to `domain_slots × 5 + url_slots × 4` VT units
+(where slots are capped by `max_auto_rescans`) to the estimate max. **Do not enable**
+on large batches without reviewing estimate totals and shared quota with VT Bulk Check operators.
 
 ---
 

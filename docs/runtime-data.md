@@ -649,7 +649,9 @@ Added to `EstimateResponse` (no runtime file interaction when estimating):
 | Field | Description |
 |---|---|
 | `auto_rescan_estimated_quota_min` | Always `0` when enabled |
-| `auto_rescan_estimated_quota_max` | `min(max_auto_rescans, url_report_mode_count) × 4` |
+| `auto_rescan_estimated_quota_max` | `domain_slots × 5 + url_slots × 4` (slots capped by `max_auto_rescans`) |
+| `auto_rescan_domain_eligible_max` | Worst-case domain-report auto-rescan slots |
+| `auto_rescan_url_eligible_max` | Worst-case URL-mode auto-rescan slots |
 | `total_estimated_vt_calls_max` | Base worst-case + auto-rescan worst-case |
 | `auto_rescan_estimated_duration_seconds_min` | `0` |
 | `auto_rescan_estimated_duration_seconds_max` | Sequential VT gap overhead for auto-rescan max |
