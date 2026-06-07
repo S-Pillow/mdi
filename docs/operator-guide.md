@@ -71,6 +71,18 @@ Use the UI control to dismiss the restored session when you want a fresh start.
 This clears the in-browser view; it does not delete server-side recovery data
 until a new job completes and overwrites the recovery file.
 
+**Saved job options vs next-run Settings:** A recovered job shows a read-only
+**"Job ran with…"** summary (domain reports, auto-rescan, max auto-rescans,
+stale threshold) from the saved job record. These are **historical options for
+that job**, not the editable Settings for your next run. Editable Settings in
+the sidebar and Settings panel always reflect **defaults or your choices for the
+next job** — auto-rescan remains **OFF** by default until you enable it.
+
+**Dismiss or Clear** (when results are visible) removes the displayed job and
+**resets editable Settings to new-job defaults**. You can manually change
+Settings again before Estimate or Run MDI Check. If auto-rescan appeared ON only
+because a recovered job had been run with it ON, dismiss/clear returns it to OFF.
+
 ---
 
 ## 3. Input workflow
@@ -170,7 +182,8 @@ job.
 
 If you see a restored session, that job is **read-only for auto-rescan** —
 auto-rescan runs only during **initial** job submission processing, not on
-recovered jobs.
+recovered jobs. The **Job ran with…** line shows whether that saved job was
+submitted with auto-rescan enabled; it does not change your next-run Settings.
 
 ### What not to do during a job
 

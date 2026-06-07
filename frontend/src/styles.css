@@ -771,6 +771,27 @@ body {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+.job-ran-with-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  line-height: 1.45;
+}
+.job-ran-with-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.job-ran-with-values {
+  color: var(--text-muted);
+}
 .job-counters-row {
   font-size: 10px;
   color: var(--text-muted);
