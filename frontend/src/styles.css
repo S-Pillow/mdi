@@ -247,6 +247,30 @@ body {
   padding: 6px 10px;
   line-height: 1.5;
 }
+.settings-info-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+.settings-info-block {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elevated);
+}
+.settings-info-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0 0 4px;
+}
+.settings-info-text {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
 
 /* MDI-17 operational dashboard panel */
 .nav-dashboard-anchor {
@@ -651,6 +675,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.proc-run-options-note {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+}
+.proc-opt-readonly { opacity: 0.9; }
+.proc-opt-status-icon {
+  width: 13px;
+  flex-shrink: 0;
+  color: var(--risk-clean);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
 }
 .proc-opt-row {
   display: flex;

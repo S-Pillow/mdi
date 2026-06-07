@@ -514,28 +514,43 @@ const settingsPayload = {
 
 This guarantees estimate/submit parity — both calls always send the same settings.
 
-### SettingsSection UI groups (MDI-09)
+### SettingsSection UI groups (MDI-09, updated MDI-30B)
 
-**Group 1 — Functional (wired):**
+Settings are split between **Run Options** (sidebar) and **Advanced Settings** (nav gear menu).
+Both feed `settingsPayload` for estimate/submit. Values are saved with the job at submit time.
 
-| Control | Maps to | Default |
+**Run Options (sidebar — active):**
+
+| Control | Maps to | Default | Quota |
+|---|---|---|---|
+| Domain reports for bare domains | `use_domain_reports` | URL report (false) | Affects VT calls on run |
+| Live checks: flagged items only | *(read-only)* | Always on | Live checks on run (flagged only) |
+
+**Advanced Settings (gear menu — active):**
+
+| Control | Maps to | Default | Quota |
+|---|---|---|---|
+| Stale threshold | `stale_threshold_days` | 7 days | None (classification only) |
+| Auto-rescan stale flagged | `auto_rescan_stale` | **OFF** | Additional VT on initial job only |
+| Max auto-rescans per job | `max_auto_rescans` | 3 | Caps auto-rescan VT use |
+
+**Advanced Settings (informational — read-only, MDI-30B):**
+
+| Topic | Status | Note |
 |---|---|---|
-| VT Report Mode toggle | `useDomainReports` | URL report (false) |
-| Stale Threshold input | `staleThresholdDays` | 7 days |
+| Exports | Handled elsewhere | Bulk actions, row menu, drawer — MDI-16; no Settings config |
+| Live-check scope | Deferred | Fixed to flagged items today; future backlog |
 
-**Group 2 — Disabled placeholders:**
+**Removed misleading placeholders (MDI-30B):** “Export options (MDI-16) coming soon” and vague
+“URL activity check settings” stubs replaced with accurate informational copy.
 
-| Row | Status | Note |
-|---|---|---|
-| Auto-Rescan Stale Results | Disabled/OFF | Not implemented; will consume additional VT quota when live |
-| URL Activity Check | Disabled/OFF | Deferred until URL Activity Scanner integration |
-| Export Results | Disabled | Deferred until export feature |
+**Not shown in Settings:** Watchlist, Create Block Rule, Salesforce, enforcement actions.
 
-**Group 3 — Read-only info:**
+**Read-only reference (unchanged):**
 
-- VT hit definition (MALICIOUS ≥ 1 engine / SUSPICIOUS ≥ 1 engine) — no control yet
-- Max items: 500
-- Default scheme: HTTP
+- VT hit definition (MALICIOUS ≥ 1 / SUSPICIOUS ≥ 1 engine)
+- Max items: 500 (hardcoded in payload)
+- Default scheme: HTTP (hardcoded in payload)
 
 ### Saved job settings display (MDI-09)
 
@@ -1042,8 +1057,9 @@ button** in the `<nav>` bar (right-aligned).
   panel element ID) for accessibility.
 - The `CollapsibleSettingsPanel` renders inline below the nav (via CSS
   `settings-panel` class), collapsed by default (zero vertical space).
-- Panel contents: VT Report Mode toggle, Stale Threshold input, plus disabled
-  placeholders for Auto-rescan, URL activity check, and Export options.
+- Panel title: **Advanced Settings** — stale threshold, auto-rescan controls, and
+  read-only export/live-check reference notes (MDI-30B).
+- Sidebar panel title: **Run Options** — domain report mode and read-only live-check rule.
 - `settingsLocked` behavior is preserved: controls are greyed out while a job
   is active or a recovered job is shown.
 
@@ -1169,6 +1185,20 @@ Shared by the results-row More Actions menu and detail drawer section 8.
 **Accessibility:** More Actions is a `<button>` with `aria-expanded`,
 `aria-controls`, and `aria-haspopup="menu"`. Disabled actions use `disabled` and
 `aria-disabled="true"` with explanatory `title`.
+
+### Settings control contract (MDI-30B)
+
+| Control | Location | Status | Payload field | Quota | Runtime | Notes |
+|---|---|---|---|---|---|---|
+| Domain reports for bare domains | Run Options (sidebar) | Active | `use_domain_reports` | On run | Job options saved at submit | — |
+| Live checks: flagged only | Run Options (sidebar) | Read-only info | *(fixed backend rule)* | On run (flagged) | — | Future backlog for scope toggle |
+| Stale threshold | Advanced Settings (gear) | Active | `stale_threshold_days` | None | Job options saved at submit | Default 7 |
+| Auto-rescan stale flagged | Advanced Settings (gear) | Active (default OFF) | `auto_rescan_stale` | Additional VT on initial job | Job counters/history | Use cautiously |
+| Max auto-rescans | Advanced Settings (gear) | Active | `max_auto_rescans` | Caps auto-rescan | — | Disabled when auto-rescan off |
+| Exports reference | Advanced Settings (gear) | Read-only info | — | None | — | Points to bulk/row/drawer — MDI-16 |
+| Live-check reference | Advanced Settings (gear) | Read-only deferred | — | None | — | Future backlog |
+
+**Removed:** vague “Coming soon” export/URL activity placeholders.
 
 Row left-border accents identify priority tier (critical/high/medium/low/info/
 clean). Row hover state. Scrollable with `max-height: 520px`.

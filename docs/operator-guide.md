@@ -74,9 +74,10 @@ until a new job completes and overwrites the recovery file.
 **Saved job options vs next-run Settings:** A recovered job shows a read-only
 **"Job ran with…"** summary (domain reports, auto-rescan, max auto-rescans,
 stale threshold) from the saved job record. These are **historical options for
-that job**, not the editable Settings for your next run. Editable Settings in
-the sidebar and Settings panel always reflect **defaults or your choices for the
-next job** — auto-rescan remains **OFF** by default until you enable it.
+that job**, not the editable Run Options / Advanced Settings for your next run.
+Editable settings in the sidebar (**Run Options**) and gear menu (**Advanced Settings**)
+always reflect **defaults or your choices for the next job** — auto-rescan remains
+**OFF** by default until you enable it in Advanced Settings.
 
 **Dismiss or Clear** (when results are visible) removes the displayed job and
 **resets editable Settings to new-job defaults**. You can manually change
@@ -132,6 +133,28 @@ of URL reports. Use when your input is primarily registered domains.
 (`POST /domains/{domain}/analyse`). **Refresh Report** re-fetches the existing
 domain report only (lower cost). See §10–§11.
 
+### Settings structure (Run Options vs Advanced Settings)
+
+MDI splits configurable options into two places. Both apply to your **next**
+Estimate or Run MDI Check and are **saved with the job at submit time**.
+
+| Location | Label in UI | Controls |
+|---|---|---|
+| **Sidebar** | **Run Options** | Domain reports for bare domains (active); live-check scope (read-only — flagged items only, not configurable today) |
+| **Nav gear menu** | **Advanced Settings** | Stale threshold (active); auto-rescan + max auto-rescans (active, **OFF by default**, quota-consuming when enabled) |
+
+**Exports are not configured in Settings.** Use Results bulk actions, row More
+Actions, or the detail drawer after a job completes. Exports do not consume VT quota.
+
+**Live-check scope** is fixed today (eligible flagged items during processing).
+Custom live-check settings are deferred (future backlog).
+
+**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring,
+or automated enforcement — these do not appear in Settings.
+
+When reviewing a recovered or in-progress job, both panels show **Locked**;
+editable values apply to the next run only. See §2 for dismiss/clear behavior.
+
 ---
 
 ## 4. Estimate before running
@@ -177,7 +200,7 @@ other operators or waiting for UTC midnight rollover.
 
 After a satisfactory estimate:
 
-1. Review processing options (domain reports, stale threshold, auto-rescan)
+1. Review **Run Options** (domain reports) and **Advanced Settings** (stale threshold, auto-rescan)
 2. Click **Run MDI Check**
 3. Monitor progress in the UI (status polling)
 
@@ -407,13 +430,16 @@ on large batches without reviewing estimate totals and shared quota with VT Bulk
 
 Exports are **browser downloads** generated in memory by the backend. They
 **do not consume VT quota** and **do not write server-side export files**.
+They are **not configured in Settings** — use the Results area after a job completes:
 
-| Export | Scope |
-|---|---|
-| **Export All CSV** | All rows in current job |
-| **Export Selected CSV** | Checked rows only |
-| **Export Flagged CSV** | Flagged rows (malicious/suspicious with VT hits) |
-| **Evidence JSON** | Selected row(s) — full `mdi-evidence-v1` structure |
+| Export | Where | Scope |
+|---|---|---|
+| **Export All CSV** | Bulk actions | All rows in current job |
+| **Export Selected CSV** | Bulk actions | Checked rows only |
+| **Export Flagged CSV** | Bulk actions | Flagged rows (malicious/suspicious with VT hits) |
+| **Evidence JSON** | Row More Actions or detail drawer | Selected row — full `mdi-evidence-v1` structure |
+
+Additional export scopes (clean-only, stale-only, etc.) may be reviewed in a future ticket.
 
 ### CSV injection mitigation
 

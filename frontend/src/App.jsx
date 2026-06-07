@@ -842,12 +842,16 @@ function CollapsibleSettingsPanel({
   if (!open) return null
   const ctrlStyle = locked ? { opacity: 0.55, pointerEvents: 'none' } : {}
   return (
-    <div className="settings-panel" id={id} role="region" aria-label="MDI Settings">
+    <div className="settings-panel" id={id} role="region" aria-label="Advanced Settings">
       <div className="settings-panel-header">
-        <span className="settings-panel-title">Settings</span>
+        <span className="settings-panel-title">Advanced Settings</span>
         {locked && <span style={{ fontSize: 9, color: 'var(--status-warning)' }}>Locked</span>}
       </div>
       <div className="settings-panel-body">
+        <p className="settings-info-note">
+          These options apply to your next Estimate or Run MDI Check. Values are saved with the job at submit time.
+          Domain report mode is configured under Run Options in the sidebar.
+        </p>
         {locked && (
           <p className="settings-panel-locked-msg">
             Settings are locked while reviewing results. Saved options for this job are shown above.
@@ -856,7 +860,7 @@ function CollapsibleSettingsPanel({
         )}
 
         <div>
-          <p className="settings-section-label">VT Processing</p>
+          <p className="settings-section-label">VT freshness</p>
           <div style={{ ...ctrlStyle, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>Stale threshold</span>
@@ -870,18 +874,19 @@ function CollapsibleSettingsPanel({
                   }}
                   disabled={locked}
                   className="settings-number-input"
+                  aria-label="Stale threshold in days"
                 />
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>days</span>
               </div>
             </div>
             <p style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4 }}>
-              VT reports older than this are classified Stale. Default: 7 days.
+              VT reports older than this are classified Stale. Default: 7 days. No quota consumed by this setting alone.
             </p>
           </div>
         </div>
 
         <div style={{ marginTop: 14 }}>
-          <p className="settings-section-label">Advanced VT behavior</p>
+          <p className="settings-section-label">Auto-rescan (initial job only)</p>
           <div style={{ ...ctrlStyle, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <label className="settings-checkbox-row">
               <input
@@ -903,21 +908,33 @@ function CollapsibleSettingsPanel({
                 }}
                 disabled={locked || !autoRescanStale}
                 className="settings-number-input"
+                aria-label="Maximum auto-rescans per job"
               />
             </div>
             <p className="settings-auto-rescan-warning">
-              Auto-rescan consumes additional VirusTotal quota and may significantly increase runtime.
-              When enabled, it may request URL scans and domain reanalysis for stale flagged items.
-              It remains off by default.
+              Available and off by default. When enabled, auto-rescan runs only during initial job submission
+              (not on recovered jobs) and may consume additional VirusTotal quota — use cautiously on large batches.
+              It may request URL scans and domain reanalysis for stale flagged items.
             </p>
           </div>
         </div>
 
-        <div>
-          <p className="settings-section-label">Coming soon</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
-            <span className="settings-placeholder" title="Export options — available in MDI-16">↑ Export options (MDI-16)</span>
-            <span className="settings-placeholder" title="URL activity check settings — future">🔗 URL activity check settings</span>
+        <div style={{ marginTop: 14 }}>
+          <p className="settings-section-label">Exports and live checks</p>
+          <div className="settings-info-block">
+            <p className="settings-info-heading">Exports</p>
+            <p className="settings-info-text">
+              Exports are available from Results bulk actions, row More Actions, and the detail drawer.
+              CSV (all, flagged, selected) and JSON evidence per row require a completed job. No export consumes VT quota.
+              Additional export scopes may be reviewed in a future ticket.
+            </p>
+          </div>
+          <div className="settings-info-block" style={{ marginTop: 8 }}>
+            <p className="settings-info-heading">Live checks</p>
+            <p className="settings-info-text">
+              Live checks currently run for eligible flagged items during job processing. Scope is fixed today —
+              custom live-check controls are deferred (future backlog). See Run Options in the sidebar for the current rule.
+            </p>
           </div>
         </div>
       </div>
@@ -1250,10 +1267,14 @@ function ProcessingOptions({ useDomainReports, setUseDomainReports, locked }) {
   return (
     <div className="proc-options-panel">
       <div className="panel-label-row">
-        <span className="panel-section-label">Processing Options</span>
+        <span className="panel-section-label">Run Options</span>
         {locked && <span style={{ fontSize: 9, color: 'var(--status-warning)' }}>Locked</span>}
       </div>
       <div className="proc-options-body">
+        <p className="proc-run-options-note">
+          Options here apply to your next Estimate or Run MDI Check and are saved with the job at submit time.
+          Stale threshold and auto-rescan are under Advanced Settings (gear menu).
+        </p>
         {locked && (
           <p className="proc-locked-note">
             Locked while reviewing results. Saved job options are shown above; settings here apply to your next run.
@@ -1274,20 +1295,20 @@ function ProcessingOptions({ useDomainReports, setUseDomainReports, locked }) {
                 Domain reports for bare domains
               </label>
               <span className="proc-opt-desc">
-                Use domain report instead of URL report when enabled.
+                When enabled, bare domains use VT domain reports (typically fewer calls). When off, URL report mode is used.
               </span>
             </div>
           </div>
 
           <hr className="proc-divider" />
 
-          <div className="proc-opt-row" style={{ opacity: 0.75 }}>
-            <span style={{ width: 13, flexShrink: 0, color: 'var(--risk-clean)', fontSize: 11, fontWeight: 700, textAlign: 'center' }}>✓</span>
+          <div className="proc-opt-row proc-opt-readonly">
+            <span className="proc-opt-status-icon" aria-hidden="true">✓</span>
             <div className="proc-opt-info">
-              <span className="proc-opt-name" style={{ color: 'var(--text-secondary)' }}>
-                Live checks: flagged items only
+              <span className="proc-opt-name">Live checks: flagged items only</span>
+              <span className="proc-opt-desc">
+                Live checks run for eligible flagged items during processing. Not user-configurable today — future backlog.
               </span>
-              <span className="proc-opt-desc">Reduces runtime. Always enabled.</span>
             </div>
           </div>
         </div>
@@ -2980,9 +3001,9 @@ export default function App() {
             onClick={() => { setSettingsOpen(v => !v); setDashboardOpen(false) }}
             aria-expanded={settingsOpen}
             aria-controls={settingsPanelId}
-            title="Advanced settings"
+            title="Advanced Settings — stale threshold, auto-rescan, and reference info"
           >
-            <IconGear /> Settings
+            <IconGear /> Advanced
           </button>
           <CollapsibleSettingsPanel
             open={settingsOpen}
