@@ -31,6 +31,9 @@ MDI-16 endpoints:
 
 MDI-17 endpoints:
   GET  /api/mdi/dashboard             — read-only operational dashboard; metadata-only
+
+MDI-26 endpoints:
+  GET  /api/mdi/version               — deploy build identity (read-only)
 """
 
 from __future__ import annotations
@@ -49,6 +52,8 @@ from models import (
     DomainHoldType,
     DomainStatusSource,
     DashboardResponse,
+    HealthResponse,
+    VersionResponse,
     DuplicateItemResponse,
     EstimateRequest,
     EstimateResponse,
@@ -80,6 +85,7 @@ from models import (
     UploadPreviewResponse,
     VtModeUsed,
 )
+from services.build_info import APP_VERSION, load_build_info
 from services.vt_quota import get_usage_summary
 from services.input_parser import parse_raw_input
 from services.upload_parser import parse_upload
@@ -98,10 +104,21 @@ router = APIRouter(prefix="/api/mdi")
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 
-@router.get("/health", tags=["Health"])
-async def health() -> Dict[str, str]:
+@router.get("/health", tags=["Health"], response_model=HealthResponse)
+async def health() -> HealthResponse:
     """Service liveness check. No external calls."""
-    return {"status": "ok", "service": "mdi", "version": "shell"}
+    return HealthResponse(
+        status="ok",
+        service="mdi",
+        version=APP_VERSION,
+        build_info=load_build_info(),
+    )
+
+
+@router.get("/version", tags=["Health"], response_model=VersionResponse)
+async def version() -> VersionResponse:
+    """Deploy build identity for production audits. No external calls."""
+    return VersionResponse(build_info=load_build_info())
 
 
 # ── Usage ──────────────────────────────────────────────────────────────────────

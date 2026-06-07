@@ -1170,6 +1170,30 @@ all/selected when explicitly chosen).
 
 **No usage-history write:** exports do not append to `vt_usage_history.jsonl`.
 
+### MDI-26 health / version API
+
+`GET /api/mdi/health` — liveness plus deploy identity.
+
+| Field | Type | Purpose | Notes |
+|---|---|---|---|
+| `status` | `str` | audit | Always `"ok"` when service is running. |
+| `service` | `str` | audit | `"mdi"`. |
+| `version` | `str` | audit | Semantic app version (e.g. `0.3.0`); not git commit. |
+| `build_info` | `BuildInfo` | audit | Deploy marker; see below. |
+
+`GET /api/mdi/version` — deploy audit endpoint returning `{ "build_info": … }`.
+
+| Field | Type | Purpose | Notes |
+|---|---|---|---|
+| `build_info.app` | `str` | audit | `"mdi"`. |
+| `build_info.commit` | `str?` | audit | Git SHA from deploy marker; `null` if missing. |
+| `build_info.branch` | `str?` | audit | Branch at deploy; `null` if missing. |
+| `build_info.built_at_utc` | `str?` | audit | ISO-8601 UTC deploy timestamp. |
+| `build_info.source` | `str` | audit | `deploy_marker`, `missing`, or `invalid`. |
+
+Marker file: `/opt/mdi/backend/build_info.json` (written at deploy; not in git).
+Backend does **not** call git at runtime. Missing marker does not fail health.
+
 ### MDI-17 operational dashboard
 
 `GET /api/mdi/dashboard` — read-only aggregate summary for windows:

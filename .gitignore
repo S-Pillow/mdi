@@ -23,6 +23,9 @@ frontend/dist/
 .env.*
 !.env.example
 
+# Deploy-time build marker — written on production deploy only
+backend/build_info.json
+
 # Backup files created by deploy scripts
 *.bak
 *.bak-*
