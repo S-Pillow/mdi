@@ -170,6 +170,20 @@ lost-update race on `vt_usage.json`.
 If only one service has flock support, concurrent writes can corrupt quota
 accounting. Treat mismatched versions as an incident.
 
+### Quota lock validation status (MDI-21)
+
+| Item | Result |
+|---|---|
+| Initial MDI-21 | **Failed** — VT Bulk stale `_USAGE_STATE` overwrote shared counter |
+| MDI-21A hotfix | VT Bulk re-reads `vt_usage.json` under flock before GET/increment |
+| MDI-21 rerun | **Passed** (after VT Bulk deploy @ `81e13a9`) |
+| Sequential | Baseline **1** → after MDI **2** → after VT **3**; endpoints agreed |
+| Concurrent | Baseline **3** → after concurrent MDI + VT **5**; no lost update |
+| Rerun quota | 4 VT units consumed |
+| Errors | No `quota_lock_timeout`, no `Permission denied` |
+| Historical note | First failed run consumed 2 calls but recorded 1; not hand-corrected |
+| Scope | Controlled validation only — **not** a stress or load test |
+
 ---
 
 ## 8. MDI-only backend deployment
@@ -456,7 +470,8 @@ sudo journalctl -u dns-tool-backend.service -f
 
 ## 17. Known limitations
 
-- Shared quota race mitigated by flock, not a full reservation model
+- Shared quota race mitigated by flock, not a full reservation model; MDI-21
+  passed controlled sequential and light concurrent validation (not a load test)
 - `vt_daily_history.json` schema differs between MDI and VT Bulk (documented, not unified)
 - Dashboard old records may lack triage/runtime aggregate fields
 - Large exports are in-memory only
