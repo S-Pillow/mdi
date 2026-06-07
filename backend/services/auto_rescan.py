@@ -12,10 +12,10 @@ from typing import Optional, Tuple
 
 from models import (
     Freshness,
-    MdiError,
     MdiProcessingStatus,
     MdiResultItem,
 )
+from services.error_taxonomy import ErrorSeverity, make_mdi_error
 from services import job_actions, job_store, quota_writer, vt_service
 from services.job_store import InMemoryJob
 from services.quota_writer import QuotaLockTimeout, read_remaining_quota
@@ -90,7 +90,7 @@ async def maybe_auto_rescan_item(
     except QuotaLockTimeout:
         job.auto_rescan_skipped_count += 1
         job.auto_rescan_quota_blocked_count += 1
-        err = MdiError(
+        err = make_mdi_error(
             code="quota_lock_timeout",
             message="Auto-rescan skipped: shared quota lock unavailable.",
             source="auto_rescan",
@@ -109,11 +109,12 @@ async def maybe_auto_rescan_item(
             job.auto_rescan_skipped_count += 1
             if skip_reason == "auto_rescan_quota_blocked":
                 job.auto_rescan_quota_blocked_count += 1
-                err = MdiError(
+                err = make_mdi_error(
                     code="auto_rescan_quota_blocked",
                     message="Auto-rescan skipped: insufficient VT quota remaining.",
                     source="auto_rescan",
                     retriable=True,
+                    severity=ErrorSeverity.WARNING.value,
                 )
                 errors = list(result.errors or [])
                 errors.append(err)

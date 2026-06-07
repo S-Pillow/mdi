@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -210,6 +210,36 @@ class MdiError(BaseModel):
         False,
         description="[workflow] Whether this error may resolve if retried."
     )
+    category: Optional[str] = Field(
+        None,
+        description="[audit] Error subsystem category, e.g. 'vt_lookup', 'rdap_whois'."
+    )
+    severity: Optional[str] = Field(
+        None,
+        description="[workflow] error | warning | skip | info — warnings/skips do not force ERROR triage."
+    )
+    blocks_triage: Optional[bool] = Field(
+        None,
+        description="[workflow] When set, overrides severity-based triage blocking. "
+        "When unset, inferred from severity (only 'error' blocks by default)."
+    )
+
+    @model_validator(mode="after")
+    def _infer_taxonomy_fields(self) -> Self:
+        """Infer category/severity/blocks_triage for persisted errors missing MDI-22 fields."""
+        from services.error_taxonomy import (
+            error_blocks_triage,
+            infer_error_category,
+            infer_error_severity,
+        )
+
+        if self.category is None:
+            self.category = infer_error_category(self.code, self.source)
+        if self.severity is None:
+            self.severity = infer_error_severity(self.code, self.category)
+        if self.blocks_triage is None:
+            self.blocks_triage = error_blocks_triage(self)
+        return self
 
 
 class MdiInputItem(BaseModel):
@@ -892,6 +922,10 @@ class JobStatusResponse(BaseModel):
     estimated_requests: int
     lookups_used: int
     quota_blocked_count: int
+    quota_lock_timeout_count: int = Field(
+        0,
+        description="[display] Items skipped due to shared VT quota lock timeout.",
+    )
     error_message: Optional[str] = None
     use_domain_reports: bool
     stale_threshold_days: int

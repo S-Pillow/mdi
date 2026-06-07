@@ -177,7 +177,9 @@ def compute_job_result_aggregates(job: InMemoryJob) -> Dict[str, Any]:
 
         for err in result.errors:
             if err.code:
-                error_code_counts[err.code] += 1
+                from services.error_taxonomy import normalize_error_code
+
+                error_code_counts[normalize_error_code(err.code)] += 1
 
     return {
         "triage_bucket_counts": dict(triage_bucket_counts),
@@ -211,6 +213,7 @@ def build_current_job_summary(job: Optional[InMemoryJob]) -> Dict[str, Any]:
         "processed": processed,
         "lookups_used": job.lookups_used,
         "quota_blocked_count": job.quota_blocked_count,
+        "quota_lock_timeout_count": job.quota_lock_timeout_count,
         "rdap_enriched_count": job.rdap_enriched_count,
         "rdap_failed_count": job.rdap_failed_count,
         "whois_fallback_count": job.whois_fallback_count,
@@ -286,8 +289,10 @@ def aggregate_window(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dic
             held_total += safe_number(record.get("held_count"))
             for k, v in (record.get("triage_bucket_counts") or {}).items():
                 triage_merged[str(k)] += int(safe_number(v))
+            from services.error_taxonomy import normalize_error_code
+
             for k, v in (record.get("error_code_counts") or {}).items():
-                error_codes_merged[str(k)] += int(safe_number(v))
+                error_codes_merged[normalize_error_code(str(k))] += int(safe_number(v))
         else:
             quality["records_missing_triage_fields"] += 1
 

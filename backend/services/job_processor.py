@@ -317,8 +317,10 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
         try:
             remaining = quota_writer.read_remaining_quota(usage_file)
         except quota_writer.QuotaLockTimeout:
-            job.quota_blocked_count += 1
-            quota_err = MdiError(
+            job.quota_lock_timeout_count += 1
+            from services.error_taxonomy import make_mdi_error
+
+            quota_err = make_mdi_error(
                 code="quota_lock_timeout",
                 message="VT quota lock unavailable; item skipped.",
                 source="job_processor",
@@ -346,7 +348,9 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
 
         if remaining <= 0:
             job.quota_blocked_count += 1
-            quota_err = MdiError(
+            from services.error_taxonomy import make_mdi_error
+
+            quota_err = make_mdi_error(
                 code="quota_exhausted",
                 message="VT daily quota exhausted before this item was processed.",
                 source="job_processor",
@@ -585,6 +589,7 @@ def _write_history(
         items_completed=job.processed,
         quota_units_consumed=job.lookups_used,
         quota_blocked_count=job.quota_blocked_count,
+        quota_lock_timeout_count=job.quota_lock_timeout_count,
         errors_count=errors_count,
         held_skipped_count=job.held_skipped,
         processing_options_summary={

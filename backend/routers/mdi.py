@@ -522,6 +522,7 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         estimated_requests=job.estimated_requests,
         lookups_used=job.lookups_used,
         quota_blocked_count=job.quota_blocked_count,
+        quota_lock_timeout_count=job.quota_lock_timeout_count,
         error_message=job.error_message,
         use_domain_reports=job.use_domain_reports,
         stale_threshold_days=job.stale_threshold_days,
@@ -652,11 +653,11 @@ async def export_job(job_id: str, req: ExportRequest) -> Response:
 
     block_reason = export_service.validate_job_for_export(job)
     if block_reason:
-        raise HTTPException(status_code=422, detail=block_reason)
+        raise HTTPException(status_code=422, detail=export_service.export_error_detail(block_reason))
 
     rows, selection_error = export_service.select_export_rows(job, req)
     if selection_error:
-        raise HTTPException(status_code=422, detail=selection_error)
+        raise HTTPException(status_code=422, detail=export_service.export_error_detail(selection_error))
 
     if req.format == ExportFormat.CSV:
         content = export_service.build_csv_export(job, rows, req.scope)

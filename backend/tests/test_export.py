@@ -193,7 +193,9 @@ class TestCsvExport:
         _register_job(_make_job(items))
         resp = _export("export-test-job", {"format": "csv", "scope": "flagged"})
         assert resp.status_code == 422
-        assert resp.json()["detail"] == "no_flagged_rows"
+        detail = resp.json()["detail"]
+        assert detail["code"] == "no_flagged_rows"
+        assert detail["category"] == "export"
 
     def test_csv_flagged_excludes_held_unless_selected_or_all(self):
         held_flagged = _make_result(
@@ -285,9 +287,11 @@ class TestJsonExport:
         _register_job(_make_job([item]))
         resp = _export("export-test-job", {"format": "json", "scope": "all"})
         errors = json.loads(resp.text)["results"][0]["errors"]
-        assert errors == [
-            {"code": "vt_429", "message": "rate limited", "source": "vt", "retriable": True}
-        ]
+        assert errors[0]["code"] == "vt_429"
+        assert errors[0]["message"] == "rate limited"
+        assert errors[0]["category"] == "vt_lookup"
+        assert errors[0]["severity"] == "error"
+        assert errors[0]["blocks_triage"] is True
 
     def test_json_epp_status_and_nameservers(self):
         item = _make_result(
@@ -345,13 +349,17 @@ class TestExportValidation:
             {"format": "csv", "scope": "selected", "positions": [99]},
         )
         assert resp.status_code == 422
-        assert "Invalid positions" in resp.json()["detail"]
+        detail = resp.json()["detail"]
+        assert detail["code"] == "invalid_selection"
+        assert "Invalid positions" in detail["message"]
 
     def test_no_flagged_rows_422(self):
         _register_job(_make_job([_make_result("clean.example")]))
         resp = _export("export-test-job", {"format": "csv", "scope": "flagged"})
         assert resp.status_code == 422
-        assert resp.json()["detail"] == "no_flagged_rows"
+        detail = resp.json()["detail"]
+        assert detail["code"] == "no_flagged_rows"
+        assert detail["category"] == "export"
 
     @pytest.mark.parametrize("status", ["queued", "running"])
     def test_in_progress_job_status_422(self, status):
@@ -365,7 +373,8 @@ class TestExportValidation:
         )
         resp = _export("export-test-job", {"format": "csv", "scope": "all"})
         assert resp.status_code == 422
-        assert resp.json()["detail"] == "action_in_progress"
+        detail = resp.json()["detail"]
+        assert detail["code"] == "action_in_progress"
 
 
 class TestExportIsolation:

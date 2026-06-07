@@ -85,11 +85,25 @@ Purpose categories:
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
-| `errors` | `List[MdiError]` | display, audit | Structured per-item errors. `code`, `message`, `source`, `retriable`. |
-| `errors[].code` | `str` | audit | Machine-readable error code, e.g. `vt_429`, `rdap_timeout`. |
+| `errors` | `List[MdiError]` | display, audit | Structured per-item errors. See MDI-22 taxonomy below. |
+| `errors[].code` | `str` | audit | Machine-readable error code (legacy `vt_*` codes remain valid). |
 | `errors[].message` | `str` | display | Human-readable message shown in detail drawer. |
-| `errors[].source` | `str` | audit | Which service/step errored: `vt`, `rdap`, `url_check`. |
-| `errors[].retriable` | `bool` | workflow | Whether a retry may succeed. Drives retry-UI visibility. |
+| `errors[].source` | `str` | audit | Which service/step produced the entry: `vt_service`, `domain_enrichment`, etc. |
+| `errors[].retriable` | `bool` | workflow | Whether a retry may succeed. |
+| `errors[].category` | `str` | audit | Subsystem: `vt_lookup`, `rdap_whois`, `live_check`, `quota`, `export`, etc. |
+| `errors[].severity` | `str` | workflow | `error` \| `warning` \| `skip` \| `info` — see definitions below. |
+| `errors[].blocks_triage` | `bool` | workflow | When true (or inferred from severity=error), forces ERROR triage bucket. |
+
+### Error severity (MDI-22)
+
+| Severity | Meaning | Triage impact |
+|---|---|---|
+| `error` | Blocking failure; primary evidence incomplete | Can force `triage_bucket=error` when VT did not succeed |
+| `warning` | Non-fatal partial evidence (e.g. RDAP/WHOIS or live-check failed) | Does **not** override successful VT triage |
+| `skip` | Intentional skip (hold, quota exhaustion, unsupported scan) | Not a failure; may still recommend `retry_lookup` when no VT ran |
+| `info` | Operational notice (e.g. auto-rescan ineligible) | Informational only |
+
+**Important:** Warnings and skips must not be displayed or triaged as failures. Only `severity=error` (or `blocks_triage=true`) forces the ERROR bucket when combined with failed processing / no usable VT evidence.
 
 ---
 
@@ -222,9 +236,12 @@ Atomic write: `vt_usage.json.tmp → os.replace() → vt_usage.json`.
 | `vt_malicious == 0, vt_suspicious > 0` | `suspicious` | `manual_review` | `complete` |
 | Both 0, engines > 0 | `clean` | `clear` | `complete` |
 | Both 0, engines == 0 (never scanned) | `pending` | `none` | `partial` |
-| VT error (429, 5xx, timeout) | `error` | `manual_review` | `partial` |
+| VT blocking error (429, 5xx, timeout) | `error` | `retry_lookup` | `partial` |
+| VT success + RDAP/WHOIS warning | follows VT | follows VT | `complete` or `partial` |
+| VT success + live-check warning | follows VT | follows VT | `complete` or `partial` |
 | Confirmed hold (held item) | `held` | `action_already_taken` | `skipped_hold` |
-| Quota exhausted mid-run | `error` | `manual_review` | `partial` |
+| Quota exhausted mid-run (skip) | `error` | `retry_lookup` | `partial` |
+| Quota lock timeout | `error` | `retry_lookup` | `partial` |
 
 ### Freshness classification (`vt_service.classify_freshness`)
 

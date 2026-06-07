@@ -123,7 +123,9 @@ def _is_valid_domain(s: str) -> bool:
 
 
 def _make_error(code: str, message: str, source: str = "input_parser") -> MdiError:
-    return MdiError(code=code, message=message, source=source, retriable=False)
+    from services.error_taxonomy import make_mdi_error
+
+    return make_mdi_error(code=code, message=message, source=source, retriable=False)
 
 
 # ── Core normalization ─────────────────────────────────────────────────────────

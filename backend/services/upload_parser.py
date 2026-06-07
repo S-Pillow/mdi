@@ -134,7 +134,9 @@ def _split_nameservers(raw: str) -> List[str]:
 # ── Error helpers ─────────────────────────────────────────────────────────────
 
 def _make_error(code: str, message: str) -> MdiError:
-    return MdiError(code=code, message=message, source="upload_parser", retriable=False)
+    from services.error_taxonomy import make_mdi_error
+
+    return make_mdi_error(code=code, message=message, source="upload_parser", retriable=False)
 
 
 # ── Output structures ─────────────────────────────────────────────────────────

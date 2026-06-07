@@ -135,7 +135,20 @@ def _vt_url_id(url: str) -> str:
 
 
 def _vt_error(code: str, message: str, retriable: bool = False) -> MdiError:
-    return MdiError(code=code, message=message, source="vt_service", retriable=retriable)
+    from services.error_taxonomy import ErrorSeverity, make_mdi_error
+
+    severity = None
+    if code == "scan_not_supported":
+        severity = ErrorSeverity.SKIP.value
+    elif code == "vt_scan_pending":
+        severity = ErrorSeverity.WARNING.value
+    return make_mdi_error(
+        code=code,
+        message=message,
+        source="vt_service",
+        retriable=retriable,
+        severity=severity,
+    )
 
 
 # ── Normalization translation ──────────────────────────────────────────────────
