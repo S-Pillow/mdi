@@ -518,6 +518,54 @@ class MdiJobSummary(BaseModel):
     )
 
 
+# ─── Health / version API models ──────────────────────────────────────────────
+
+
+class BuildInfo(BaseModel):
+    """Deploy-time build identity from build_info.json (written at deploy, not in git)."""
+    app: str = Field("mdi", description="[audit] Application identifier.")
+    commit: Optional[str] = Field(
+        None,
+        description="[audit] Git commit SHA deployed to this backend instance.",
+    )
+    branch: Optional[str] = Field(
+        None,
+        description="[audit] Git branch name at deploy time.",
+    )
+    built_at_utc: Optional[str] = Field(
+        None,
+        description="[audit] ISO-8601 UTC timestamp when the deploy marker was written.",
+    )
+    source: str = Field(
+        ...,
+        description=(
+            "[audit] Marker provenance: deploy_marker, missing, or invalid."
+        ),
+    )
+
+
+class HealthResponse(BaseModel):
+    """Response body for GET /api/mdi/health."""
+    status: str = Field("ok", description="[audit] Liveness status.")
+    service: str = Field("mdi", description="[audit] Service name.")
+    version: str = Field(
+        ...,
+        description="[audit] Semantic application version (not deploy commit).",
+    )
+    build_info: BuildInfo = Field(
+        ...,
+        description="[audit] Deploy-time build identity when marker file is present.",
+    )
+
+
+class VersionResponse(BaseModel):
+    """Response body for GET /api/mdi/version."""
+    build_info: BuildInfo = Field(
+        ...,
+        description="[audit] Deploy-time build identity.",
+    )
+
+
 # ─── Parse-preview API models ─────────────────────────────────────────────────
 
 

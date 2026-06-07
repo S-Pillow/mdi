@@ -197,6 +197,21 @@ sudo rsync -a --exclude '.git' --exclude 'frontend/dist' --exclude 'node_modules
   --exclude 'backend/venv' --exclude '.env' --exclude '.env.*' \
   /root/mdi/ /opt/mdi/
 
+# MDI-26: deploy build marker (no runtime git)
+COMMIT=$(git -C /root/mdi rev-parse HEAD)
+BRANCH=$(git -C /root/mdi rev-parse --abbrev-ref HEAD)
+sudo tee /opt/mdi/backend/build_info.json > /dev/null <<EOF
+{
+  "app": "mdi",
+  "commit": "${COMMIT}",
+  "branch": "${BRANCH}",
+  "built_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "deploy_marker"
+}
+EOF
+sudo chown mdi:mdi /opt/mdi/backend/build_info.json
+sudo chmod 644 /opt/mdi/backend/build_info.json
+
 cd /opt/mdi/backend
 sudo venv/bin/pip install -r requirements.txt   # if requirements changed
 
@@ -215,6 +230,11 @@ ps -o user= -p "$(systemctl show -p MainPID --value mdi-backend.service)"
 
 # Safe GET smoke (§12)
 curl -sS http://127.0.0.1:8011/api/mdi/usage
+
+# Deploy commit stamp (MDI-26)
+curl -sS http://127.0.0.1:8011/api/mdi/health | python3 -c \
+  "import sys,json; d=json.load(sys.stdin); print(d['build_info']['commit'])"
+curl -sS http://127.0.0.1:8011/api/mdi/version
 
 # Quota unchanged (compare daily_lookups_used before/after — metadata only)
 sudo stat /var/lib/dns-tool/vt_usage.json
@@ -322,7 +342,8 @@ sudo systemctl restart mdi-backend.service
 
 | # | Check | Command / endpoint |
 |---|---|---|
-| 1 | MDI health | `GET /api/mdi/health` → 200 |
+| 1 | MDI health | `GET /api/mdi/health` → 200; `build_info.commit` matches deploy |
+| 1b | MDI version | `GET /api/mdi/version` → 200 |
 | 2 | MDI usage | `GET /api/mdi/usage` → 200 |
 | 3 | MDI dashboard | `GET /api/mdi/dashboard` → 200 |
 | 4 | MDI recovery | `GET /api/mdi/jobs/latest` → 200 or 404 |

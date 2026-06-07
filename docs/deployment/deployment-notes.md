@@ -29,6 +29,35 @@ Secrets injected from `/etc/dns-tool/secrets.env` via `EnvironmentFile=`.
 Systemd hardening (phase 1): `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`,
 `ReadWritePaths=/var/lib/dns-tool`, `ProtectHome`, `RestrictAddressFamilies`, `LockPersonality`.
 
+### Deploy build marker (MDI-26)
+
+Production exposes deploy identity via `/opt/mdi/backend/build_info.json`.
+The backend **does not call git at runtime** — `.git` is excluded from `/opt/mdi/`.
+
+Write the marker **after rsync** and **before restart**:
+
+```bash
+COMMIT=$(git -C /root/mdi rev-parse HEAD)
+BRANCH=$(git -C /root/mdi rev-parse --abbrev-ref HEAD)
+sudo tee /opt/mdi/backend/build_info.json > /dev/null <<EOF
+{
+  "app": "mdi",
+  "commit": "${COMMIT}",
+  "branch": "${BRANCH}",
+  "built_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "deploy_marker"
+}
+EOF
+sudo chown mdi:mdi /opt/mdi/backend/build_info.json
+sudo chmod 644 /opt/mdi/backend/build_info.json
+```
+
+Schema template in repo: `backend/build_info.json.example`. **Do not commit**
+production `build_info.json` values to git (see `.gitignore`).
+
+If the marker is missing, `GET /api/mdi/health` still returns `status: ok` with
+`build_info.source: "missing"`. Use `GET /api/mdi/version` for deploy audits.
+
 ### First-time / redeploy backend
 
 ```bash
@@ -36,6 +65,21 @@ Systemd hardening (phase 1): `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=str
 sudo rsync -a --exclude '.git' --exclude 'frontend/dist' --exclude 'node_modules' \
   --exclude 'backend/venv' --exclude '.env' --exclude '.env.*' \
   /root/mdi/ /opt/mdi/
+
+# Deploy marker (see § Deploy build marker above)
+COMMIT=$(git -C /root/mdi rev-parse HEAD)
+BRANCH=$(git -C /root/mdi rev-parse --abbrev-ref HEAD)
+sudo tee /opt/mdi/backend/build_info.json > /dev/null <<EOF
+{
+  "app": "mdi",
+  "commit": "${COMMIT}",
+  "branch": "${BRANCH}",
+  "built_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "source": "deploy_marker"
+}
+EOF
+sudo chown mdi:mdi /opt/mdi/backend/build_info.json
+sudo chmod 644 /opt/mdi/backend/build_info.json
 
 # Venv
 cd /opt/mdi/backend
