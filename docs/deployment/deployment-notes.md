@@ -53,6 +53,19 @@ sudo systemctl status mdi-backend.service
 | `mdi_latest_job.json` | mdi:mdi | 600 | MDI-only job recovery |
 | `vt_latest_job.json` | www-data:www-data | 600 | VT Bulk only |
 | `/etc/dns-tool/secrets.env` | root:dns-tool | 640 | `mdi` + `www-data` via `dns-tool` group |
+| `vt_usage.lock` | root:dns-tool | 660 | Shared POSIX flock (MDI-19); support file only |
+
+### Shared quota locking (MDI-19)
+
+Both **MDI** (`mdi-backend`) and **VT Bulk Check** (`dns-tool-backend`) must use the
+same flock on `/var/lib/dns-tool/vt_usage.lock` for quota accounting reads/writes.
+
+- **Never hold the lock during external VirusTotal HTTP calls.**
+- Lock timeout: 5 seconds; failures return `quota_lock_timeout` without mutating quota files.
+- **Deploy both services in the same maintenance window** — partial rollout can still lose updates.
+- `vt_daily_history.json` schema differs between tools (known; out of scope for MDI-19).
+
+Test override: `VT_QUOTA_LOCK_FILE` (see `backend/tests/conftest.py`).
 
 ## Frontend deployment
 

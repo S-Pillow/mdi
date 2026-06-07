@@ -313,8 +313,37 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             # Pre-populated held items — already in results, skip VT entirely.
             continue
 
-        # Mid-run quota soft-check (race with VT Bulk Check is accepted MVP risk)
-        remaining = quota_writer.read_remaining_quota(usage_file)
+        # Mid-run quota check under shared flock (blocks before VT call)
+        try:
+            remaining = quota_writer.read_remaining_quota(usage_file)
+        except quota_writer.QuotaLockTimeout:
+            job.quota_blocked_count += 1
+            quota_err = MdiError(
+                code="quota_lock_timeout",
+                message="VT quota lock unavailable; item skipped.",
+                source="job_processor",
+                retriable=True,
+            )
+            dec = triage_rules.decide(triage_rules.TriageInput(
+                domain_hold_has_hold=False,
+                processing_status=MdiProcessingStatus.ERROR,
+                errors=[quota_err],
+                age_bucket=result.age_bucket,
+                live_status=result.live_status,
+            ))
+            job.results[normalized] = result.model_copy(update={
+                "processing_status": MdiProcessingStatus.ERROR,
+                "vt_mode_used": VtModeUsed.SKIPPED_QUOTA,
+                "triage_bucket": dec.triage_bucket,
+                "triage_confidence": dec.triage_confidence,
+                "recommended_action": dec.recommended_action,
+                "evidence_status": dec.evidence_status,
+                "triage_reason": dec.triage_reason,
+                "errors": [quota_err],
+            })
+            job.processed += 1
+            continue
+
         if remaining <= 0:
             job.quota_blocked_count += 1
             quota_err = MdiError(
@@ -356,6 +385,8 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             try:
                 await quota_writer.increment_quota(vt_result.calls_made, usage_file)
                 job.lookups_used += vt_result.calls_made
+            except quota_writer.QuotaLockTimeout:
+                logger.warning("Quota lock timeout incrementing for job %s", job.job_id)
             except Exception as exc:
                 logger.error("Failed to increment quota for job %s: %s", job.job_id, exc)
 

@@ -18,7 +18,7 @@ from models import (
 )
 from services import job_actions, job_store, quota_writer, vt_service
 from services.job_store import InMemoryJob
-from services.quota_writer import read_remaining_quota
+from services.quota_writer import QuotaLockTimeout, read_remaining_quota
 
 logger = logging.getLogger("mdi.auto_rescan")
 
@@ -85,7 +85,22 @@ async def maybe_auto_rescan_item(
     if result is None:
         return
 
-    remaining = read_remaining_quota(usage_file)
+    try:
+        remaining = read_remaining_quota(usage_file)
+    except QuotaLockTimeout:
+        job.auto_rescan_skipped_count += 1
+        job.auto_rescan_quota_blocked_count += 1
+        err = MdiError(
+            code="quota_lock_timeout",
+            message="Auto-rescan skipped: shared quota lock unavailable.",
+            source="auto_rescan",
+            retriable=True,
+        )
+        errors = list(result.errors or [])
+        errors.append(err)
+        job.results[normalized] = result.model_copy(update={"errors": errors})
+        return
+
     eligible, skip_reason = evaluate_auto_rescan_eligibility(
         job, result, remaining_quota=remaining,
     )
@@ -119,6 +134,8 @@ async def maybe_auto_rescan_item(
         try:
             await quota_writer.increment_quota(vt_result.calls_made, usage_file)
             job.lookups_used += vt_result.calls_made
+        except QuotaLockTimeout:
+            logger.warning("auto_rescan quota lock timeout for job %s", job.job_id)
         except Exception as exc:
             logger.error("auto_rescan quota increment failed for job %s: %s", job.job_id, exc)
 

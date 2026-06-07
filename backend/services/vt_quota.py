@@ -24,9 +24,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+from services.quota_lock import QuotaLockTimeout, quota_lock
 
 logger = logging.getLogger("mdi.vt_quota")
 
@@ -82,21 +85,8 @@ def _read_json_file(path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]
 
 # ── Public read API ────────────────────────────────────────────────────────────
 
-def read_usage_state(usage_file: Optional[Path] = None) -> Dict[str, Any]:
-    """
-    Read the current daily VT usage counter.
-
-    Returns a dict with keys:
-      date_utc           — date string from the file, or today's date on missing/stale
-      daily_lookups_used — integer counter (0 on missing/error)
-      _source            — resolved file path (string)
-      _error             — error message if file was missing or malformed, else None
-
-    Handles stale-date reset: if the file's date_utc differs from today, returns
-    daily_lookups_used=0 with today's date (matching vt-bulk-check behavior).
-    Does NOT write a reset to disk.
-    """
-    path = usage_file or _usage_file_path()
+def _read_usage_state_unlocked(path: Path) -> Dict[str, Any]:
+    """Read usage state from disk without acquiring flock (internal)."""
     today = _utc_date_str()
     data, err = _read_json_file(path)
 
@@ -111,7 +101,6 @@ def read_usage_state(usage_file: Optional[Path] = None) -> Dict[str, Any]:
 
     stored_date = data.get("date_utc", "")
     if stored_date != today:
-        # Date rolled over — new day counter starts at 0 (read-only view)
         return {
             "date_utc": today,
             "daily_lookups_used": 0,
@@ -127,14 +116,49 @@ def read_usage_state(usage_file: Optional[Path] = None) -> Dict[str, Any]:
     }
 
 
+def read_usage_state(usage_file: Optional[Path] = None) -> Dict[str, Any]:
+    """
+    Read the current daily VT usage counter under a shared flock.
+
+    Raises QuotaLockTimeout if the lock cannot be acquired.
+    Does NOT write a reset to disk on stale date.
+    """
+    path = usage_file or _usage_file_path()
+    with quota_lock("shared"):
+        return _read_usage_state_unlocked(path)
+
+
 def get_usage_summary(usage_file: Optional[Path] = None) -> Dict[str, Any]:
     """
     Return the full usage summary dict suitable for the /api/mdi/usage response.
 
-    All fields are safe to return in an API response.
-    The '_source' and '_error' internal keys are renamed to 'source' and 'error'.
+    Retries briefly on QuotaLockTimeout before returning error in response.
     """
-    state = read_usage_state(usage_file)
+    path = usage_file or _usage_file_path()
+    state = None
+    lock_error: Optional[str] = None
+    for attempt in range(3):
+        try:
+            state = read_usage_state(usage_file)
+            break
+        except QuotaLockTimeout:
+            if attempt < 2:
+                time.sleep(0.1)
+            else:
+                lock_error = QuotaLockTimeout.code
+    if state is None:
+        today = _utc_date_str()
+        return {
+            "date_utc": today,
+            "daily_lookups_used": 0,
+            "daily_limit": DAILY_LOOKUPS_LIMIT,
+            "remaining": 0,
+            "rate_limit_per_min": RATE_LIMIT_PER_MIN,
+            "source": str(path),
+            "shared_with": ["vt-bulk-check", "mdi"],
+            "mutated": False,
+            "error": lock_error,
+        }
     used = state["daily_lookups_used"]
     remaining = max(0, DAILY_LOOKUPS_LIMIT - used)
     return {
@@ -146,7 +170,7 @@ def get_usage_summary(usage_file: Optional[Path] = None) -> Dict[str, Any]:
         "source": state["_source"],
         "shared_with": ["vt-bulk-check", "mdi"],
         "mutated": False,
-        "error": state["_error"],
+        "error": state["_error"] or lock_error,
     }
 
 
@@ -173,8 +197,9 @@ def _increment_usage_for_file(path: Path, amount: int = 1) -> Dict[str, Any]:
     new_count = int(data.get("daily_lookups_used", 0)) + amount
     new_data = {"date_utc": today, "daily_lookups_used": new_count}
 
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(new_data), encoding="utf-8")
-    os.replace(tmp, path)
+    with quota_lock("exclusive"):
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(new_data), encoding="utf-8")
+        os.replace(tmp, path)
 
     return {"date_utc": today, "daily_lookups_used": new_count, "_source": str(path), "_error": None}
