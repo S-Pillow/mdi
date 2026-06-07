@@ -221,8 +221,12 @@ are identical to `MdiInputItem`.
 ### VT normalization translation (`vt_service._build_vt_target`)
 
 MDI's input_parser stores normalized items in two forms:
-- `InputType.DOMAIN` → stored as `"example.com"` (bare domain, no scheme)
+- `InputType.DOMAIN` → stored as `"example.com"` (bare **dotted** domain, no scheme; single-label hostnames rejected)
 - `InputType.URL` → stored as full URL e.g. `"https://example.net/path"`
+
+Bare-domain tokens must contain at least one dot with valid labels and a
+TLD-like final label. Domain/path tokens require a valid dotted host before the
+first `/`. `localhost` and internal single-label names are not accepted.
 
 The VT API lookup target is derived in `vt_service._build_vt_target()`, NOT in the parser:
 

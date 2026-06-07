@@ -47,10 +47,9 @@ class TestNormalizeToken:
         assert norm == "example.com"
         assert itype == InputType.DOMAIN
 
-    def test_bare_domain_single_label(self):
-        norm, itype = normalize_token("localhost")
-        assert norm == "localhost"
-        assert itype == InputType.DOMAIN
+    def test_bare_domain_single_label_rejected(self):
+        with pytest.raises(ValueError, match="invalid_domain"):
+            normalize_token("localhost")
 
     def test_bare_ipv4(self):
         norm, itype = normalize_token("192.168.1.1")
@@ -158,6 +157,48 @@ class TestNormalizeToken:
     def test_reject_token_too_long(self):
         with pytest.raises(ValueError, match="token_too_long"):
             normalize_token("a" * 2049)
+
+    def test_reject_single_label_tokens(self):
+        for token in ("not", "a", "valid", "com", "printer01"):
+            with pytest.raises(ValueError, match="invalid_domain|invalid_host"):
+                normalize_token(token)
+
+    def test_reject_malformed_bare_domains(self):
+        for token in (
+            "domain!!!",
+            "bad_domain_!!!",
+            "example..com",
+            ".com",
+            "example.",
+            "domain/.com",
+        ):
+            with pytest.raises(ValueError):
+                normalize_token(token)
+
+    def test_reject_malformed_urls(self):
+        for token in ("http://", "https://", "http:///example.com", "https://domain/.com"):
+            with pytest.raises(ValueError):
+                normalize_token(token)
+
+    def test_reject_malformed_domain_path(self):
+        for token in ("not/path", "a/b", "valid/path", ".com/path", "example..com/path"):
+            with pytest.raises(ValueError):
+                normalize_token(token)
+
+    def test_accept_dotted_bare_domains(self):
+        for token in ("example.com", "sub.example.com", "example.co.uk"):
+            norm, itype = normalize_token(token)
+            assert itype == InputType.DOMAIN
+            assert "." in norm
+
+    def test_accept_valid_urls_and_domain_paths(self):
+        norm, itype = normalize_token("https://example.com/path")
+        assert itype == InputType.URL
+        assert norm == "https://example.com/path"
+
+        norm, itype = normalize_token("example.com/path")
+        assert itype == InputType.URL
+        assert norm == "http://example.com/path"
 
 
 # ── parse_raw_input ────────────────────────────────────────────────────────────
@@ -274,6 +315,72 @@ class TestParseRawInput:
         assert call_count == [], f"Unexpected network calls: {call_count}"
 
 
+class TestMdi24TightenedDomainParse:
+    """MDI-24: bare domains require dotted TLD structure; malformed paths rejected."""
+
+    REQUIRED_INPUT = "not a valid domain!!!\nexample.com\nexample.com"
+
+    def test_required_parse_preview_counts(self):
+        result = parse_raw_input(self.REQUIRED_INPUT)
+        assert len(result.accepted) == 1
+        assert len(result.rejected) == 4
+        assert len(result.duplicates) == 1
+        assert result.accepted[0].input_normalized == "example.com"
+        rejected_tokens = {r.input_original for r in result.rejected}
+        assert rejected_tokens == {"not", "a", "valid", "domain!!!"}
+        assert result.duplicates[0].duplicate_of == "example.com"
+        assert result.duplicates[0].input_original == "example.com"
+
+    def test_domain_slash_com_rejected(self):
+        result = parse_raw_input("domain/.com")
+        assert len(result.accepted) == 0
+        assert len(result.rejected) == 1
+        assert len(result.duplicates) == 0
+        err = result.rejected[0].error
+        assert err.code == "invalid_input"
+        assert err.severity == "error"
+        assert err.category == "input_validation"
+
+    @pytest.mark.parametrize("token", [
+        "bad_domain_!!!",
+        "example..com",
+        "http://",
+        ".com",
+        "domain/.com",
+        "not",
+        "a",
+        "valid",
+        "localhost",
+    ])
+    def test_additional_rejected_tokens(self, token):
+        result = parse_raw_input(token)
+        assert len(result.accepted) == 0
+        assert len(result.rejected) == 1
+        assert result.rejected[0].error.code == "invalid_input"
+
+    @pytest.mark.parametrize("token", [
+        "example.com",
+        "sub.example.com",
+        "https://example.com/path",
+        "example.com/path",
+    ])
+    def test_additional_accepted_tokens(self, token):
+        result = parse_raw_input(token)
+        assert len(result.accepted) == 1
+        assert len(result.rejected) == 0
+
+    def test_url_and_bare_domain_duplicate_behavior(self):
+        """URL path and bare domain normalize separately unless rules equate them."""
+        result = parse_raw_input(
+            "example.com\nhttps://example.com/path\nexample.com"
+        )
+        assert len(result.accepted) == 2
+        assert len(result.duplicates) == 1
+        norms = {item.input_normalized for item in result.accepted}
+        assert "example.com" in norms
+        assert "https://example.com/path" in norms
+
+
 # ── parse-preview endpoint ─────────────────────────────────────────────────────
 
 class TestParsePreviewEndpoint:
@@ -317,6 +424,34 @@ class TestParsePreviewEndpoint:
         assert data["accepted_count"] == 1
         assert data["rejected_count"] == 1
         assert data["rejected"][0]["error"]["code"] == "unsupported_scheme"
+
+    def test_parse_preview_mdi24_required_regression(self, client):
+        r = client.post("/api/mdi/jobs/parse-preview", json={
+            "raw_input": "not a valid domain!!!\nexample.com\nexample.com",
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["accepted_count"] == 1
+        assert data["rejected_count"] == 4
+        assert data["duplicate_count"] == 1
+        assert data["external_calls_made"] is False
+        assert data["quota_consumed"] is False
+        assert data["items"][0]["input_normalized"] == "example.com"
+        rejected_tokens = {item["input_original"] for item in data["rejected"]}
+        assert rejected_tokens == {"not", "a", "valid", "domain!!!"}
+
+    def test_parse_preview_mdi24_domain_slash_com(self, client):
+        r = client.post("/api/mdi/jobs/parse-preview", json={
+            "raw_input": "domain/.com",
+        })
+        data = r.json()
+        assert data["accepted_count"] == 0
+        assert data["rejected_count"] == 1
+        assert data["duplicate_count"] == 0
+        err = data["rejected"][0]["error"]
+        assert err["code"] == "invalid_input"
+        assert err["severity"] == "error"
+        assert err["category"] == "input_validation"
 
     def test_parse_preview_empty(self, client):
         r = client.post("/api/mdi/jobs/parse-preview", json={"raw_input": ""})

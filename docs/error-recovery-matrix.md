@@ -242,7 +242,7 @@ Future validation reference. **Do not run live VT tests without quota approval.*
 
 | Scenario | Input/setup | Expected row state | Expected drawer/table display | Dashboard/export | Quota | Test type |
 |---|---|---|---|---|---|---|
-| Invalid paste input | `not a valid domain!!!` + valid line | Valid accepted; invalid rejected at parse | Rejected: `input_original`, `invalid_input`, ERROR badge | Parse only; no job | 0 | UI parse-preview |
+| Invalid paste input | `not a valid domain!!!` + `example.com` (×2) | 1 accepted (`example.com`); 4 rejected (`not`, `a`, `valid`, `domain!!!`); 1 duplicate | Rejected: `input_original`, `invalid_input`, ERROR badge | Parse only; no job | 0 | UI parse-preview |
 | Duplicate-only input | `example.com` twice | 1 accepted, 1 duplicate | Duplicate shows `example.com` not `[object Object]` | Parse only | 0 | UI parse-preview |
 | Missing upload column | XLSX without domain column | Upload rejected | `missing_domain_column` message | Upload preview | 0 | UI upload-preview |
 | VT timeout | Mock/simulated timeout | `error` bucket if blocking | ERROR notice; `timeout` code | `error_code_counts` if job completes | 0 mock / 0–1 live | Backend mock |
