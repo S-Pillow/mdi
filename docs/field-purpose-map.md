@@ -19,6 +19,14 @@ Purpose categories:
 - **dashboard**     — metadata-only; shown in job history without item-level data
 - **future**        — defined for schema stability; not yet populated
 
+UI control / feature status (MDI-32):
+- **active** — operator-facing and functional today
+- **read-only** — shown for transparency; not editable
+- **disabled future** — visible disabled control; backend/data not ready
+- **deferred** — backlog; may not appear in UI yet
+- **rejected / out of scope** — explicitly not in MVP
+- **internal-only** — backend/tests; not operator UI
+
 ---
 
 ## Item-level fields (`MdiResultItem`)
@@ -50,7 +58,7 @@ Purpose categories:
 | `created_at` | `Optional[datetime]` | display, filtering, reporting | Domain registration date (UTC). Basis for `age_bucket`. |
 | `age_bucket` | `AgeBucket` | display, filtering | `very_new`, `new`, `established`, `mature`, `unknown`. Derived from `created_at`. |
 | `epp_status` | `List[str]` | display, reporting | Full EPP status list (e.g. `clientTransferProhibited`). |
-| `nameservers` | `List[str]` | display, future | Nameservers from RDAP/WHOIS. Not used in triage logic yet. |
+| `nameservers` | `List[str]` | display, reporting | Nameservers from RDAP/WHOIS enrichment. Distinct from upload `assigned_nameservers`. Not used in triage logic yet. |
 
 ### VirusTotal
 
@@ -170,7 +178,7 @@ are identical to `MdiInputItem`.
 | `created_at` | `str \| null` | display, filtering | Raw create-date string from the uploaded cell. Not parsed to datetime here to preserve original value. |
 | `registrar` | `str \| null` | display, reporting | Registrar name from upload; never looked up externally. |
 | `epp_status` | `List[str]` | display, reporting | Individual EPP status tokens extracted from the status column. |
-| `assigned_nameservers` | `List[str]` | display, future | Nameservers from upload; lowercase and FQDN-dot-stripped. |
+| `assigned_nameservers` | `List[str]` | display, reporting | Nameserver values from the upload row. Lowercase, FQDN-dot-stripped. Distinct from RDAP/WHOIS `nameservers` on enriched results. |
 | `source_row` | `int \| null` | audit | 1-based row number in the source file. |
 | `source_sheet` | `str \| null` | audit | Worksheet name for XLSX uploads. |
 
@@ -212,7 +220,7 @@ are identical to `MdiInputItem`.
 | `created_at` | `str \| null` | display | Which raw column header was matched as the create-date column. |
 | `epp_status` | `str \| null` | display | Which raw column header was matched as the EPP/domain-status column. |
 | `registrar` | `str \| null` | display | Which raw column header was matched as the registrar column. |
-| `nameservers` | `str \| null` | display | Which raw column header was matched as the nameservers column. |
+| `nameservers` | `str \| null` | display | Which raw column header was matched as the nameservers column (typically **Assigned Nameservers**). Values land in `assigned_nameservers` on each item. |
 
 ### Enum additions — MDI-05
 
@@ -347,8 +355,8 @@ This endpoint performs no external calls, creates no jobs, and mutates no runtim
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
-| `eligible_vt_count` | `int` | display | Items eligible for VT checks. Equals `accepted_count` for paste input (hold status is NOT_CHECKED). |
-| `held_skipped_count` | `int` | display | Items confirmed-held that contribute 0 VT calls. Always `0` for paste input. Reserved for future upload-items path. |
+| `eligible_vt_count` | `int` | display | Items eligible for VT checks. Paste: equals accepted count when hold is NOT_CHECKED. Upload: excludes confirmed-held items. |
+| `held_skipped_count` | `int` | display | Items confirmed-held that contribute 0 VT calls. Always `0` for paste input. Populated for upload mode (MDI-30A). |
 
 ### Input-type breakdown fields
 
@@ -495,9 +503,11 @@ The PRD/backlog specifies 7 days as the stale threshold. All code now matches.
 
 | State variable | Type | Default | Purpose |
 |---|---|---|---|
-| `useDomainReports` | `bool` | `false` | Controls `use_domain_reports` in estimate/submit payloads. `true` = domain-report mode (1 call/domain); `false` = URL-report mode (up to 3 calls/domain, better coverage). |
+| `useDomainReports` | `bool` | `false` | Controls `use_domain_reports` in estimate/submit payloads. |
 | `staleThresholdDays` | `int` | `7` | Controls `stale_threshold_days` in estimate/submit payloads. Range 1–90 days. |
-| `settingsLocked` | `bool` (derived) | `false` | `true` when a job is queued/running or `restoredFromSession` is true. Disables settings controls. Unlocks when user dismisses the job or starts a new run. |
+| `autoRescanStale` | `bool` | `false` | Controls `auto_rescan_stale` in estimate/submit payloads. **OFF by default.** |
+| `maxAutoRescans` | `int` | `3` | Controls `max_auto_rescans` in estimate/submit payloads. |
+| `settingsLocked` | `bool` (derived) | `false` | `true` when a job is queued/running or `restoredFromSession` is true. Disables Run Options and Advanced Settings. Unlocks on dismiss/clear or new submit. |
 
 ### `settingsPayload` — single source of truth
 
@@ -509,6 +519,8 @@ const settingsPayload = {
   max_items: 500,           // hardcoded — not user-configurable in MDI-09
   use_domain_reports: useDomainReports,
   stale_threshold_days: staleThresholdDays,
+  auto_rescan_stale: autoRescanStale,
+  max_auto_rescans: maxAutoRescans,
 }
 ```
 
@@ -538,7 +550,7 @@ Both feed `settingsPayload` for estimate/submit. Values are saved with the job a
 
 | Topic | Status | Note |
 |---|---|---|
-| Exports | Handled elsewhere | Bulk actions, row menu, drawer — MDI-16; no Settings config |
+| Exports | Active (elsewhere) | Bulk actions, row More Actions menu, detail drawer — implemented (MDI-16); no Settings config |
 | Live-check scope | Deferred | Fixed to flagged items today; future backlog |
 
 **Removed misleading placeholders (MDI-30B):** “Export options (MDI-16) coming soon” and vague
@@ -552,14 +564,13 @@ Both feed `settingsPayload` for estimate/submit. Values are saved with the job a
 - Max items: 500 (hardcoded in payload)
 - Default scheme: HTTP (hardcoded in payload)
 
-### Saved job settings display (MDI-09)
+### Saved job settings display (MDI-09, UI as of MDI-30B)
 
-`JobSection` shows a one-line summary from `JobStatusResponse` fields when job is done/error:
-
-> "This job used: URL report mode · Stale after 7 days (recovered)"
-
-Fields used: `job.use_domain_reports`, `job.stale_threshold_days`, `restoredFromSession`.
-These reflect the settings saved to the job at creation time — not current UI state.
+When a job is active or recovered, the triage workspace shows a read-only
+**"Job ran with:"** summary (domain reports, auto-rescan, max auto-rescans,
+stale threshold) from `JobStatusResponse` fields. Job ID and progress appear in
+the job status bar. These reflect settings **saved at submit time** — not current
+editable Run Options / Advanced Settings.
 
 ### `settingsLocked` behavior
 
@@ -1049,10 +1060,10 @@ client-side on the already-received `job.results` array.
 ### Settings placement
 
 The standalone bottom `SettingsSection` card and the `DashboardSection`
-placeholder are removed. Settings are now accessible via a **Settings gear
-button** in the `<nav>` bar (right-aligned).
+placeholder are removed. Configuration is split between **Run Options** (sidebar)
+and **Advanced Settings** (nav gear menu, labeled **Advanced** in the UI).
 
-- `settingsOpen: boolean` state in `App` controls the panel.
+- `settingsOpen: boolean` state in `App` controls the Advanced Settings panel.
 - The gear button sets `aria-expanded` and `aria-controls` (pointing to the
   panel element ID) for accessibility.
 - The `CollapsibleSettingsPanel` renders inline below the nav (via CSS
@@ -1063,12 +1074,12 @@ button** in the `<nav>` bar (right-aligned).
 - `settingsLocked` behavior is preserved: controls are greyed out while a job
   is active or a recovered job is shown.
 
-### Header / QuotaWidget
+### Header / nav widgets
 
-The nav bar now includes three zones:
-1. Left: back link + brand name + subtitle
-2. Center: `QuotaNavWidget` — compact inline quota display (used/limit + bar)
-3. Right: Settings gear button
+The nav bar includes:
+1. Left: back link + breadcrumb
+2. Center-right: `QuotaNavWidget` — compact inline quota display (used/limit + bar)
+3. Right: **Dashboard** button (`DashboardPanel`) and **Advanced** gear button (`CollapsibleSettingsPanel`)
 
 `QuotaNavWidget` renders the shared VT quota as `used/limit` with a thin bar.
 All four refresh triggers from MDI-12A are preserved (mount, pre-estimate,
@@ -1148,7 +1159,7 @@ shows a message with a "clear filter" button.
 
 Polished operations-console table replacing the flat debug table. Columns:
 
-1. Checkbox (visual/preparatory only — selection tracked but no action connected)
+1. Checkbox — connected to bulk **Export Selected** and **Rescan Selected**
 2. `#` (position)
 3. Domain / URL (monospace, truncated, tooltip)
 4. Triage Bucket (colored badge + collapsible triage reasons `<details>`)
@@ -1195,7 +1206,7 @@ Shared by the results-row More Actions menu and detail drawer section 8.
 | Stale threshold | Advanced Settings (gear) | Active | `stale_threshold_days` | None | Job options saved at submit | Default 7 |
 | Auto-rescan stale flagged | Advanced Settings (gear) | Active (default OFF) | `auto_rescan_stale` | Additional VT on initial job | Job counters/history | Use cautiously |
 | Max auto-rescans | Advanced Settings (gear) | Active | `max_auto_rescans` | Caps auto-rescan | — | Disabled when auto-rescan off |
-| Exports reference | Advanced Settings (gear) | Read-only info | — | None | — | Points to bulk/row/drawer — MDI-16 |
+| Exports reference | Advanced Settings (gear) | Read-only info | — | None | — | Points to active bulk/row/drawer exports (MDI-16) |
 | Live-check reference | Advanced Settings (gear) | Read-only deferred | — | None | — | Future backlog |
 
 **Removed:** vague “Coming soon” export/URL activity placeholders.
@@ -1347,16 +1358,23 @@ not clean/fresh/error. Domain-report bare domains use MDI-28 domain reanalysis p
 One attempt per row per job. Runs only during initial `process_job` — not on
 recovery or manual actions. IP inputs rejected before job creation (MDI-27).
 
-### Disabled / deferred UI actions
+### Disabled / deferred / rejected UI actions
 
-| Feature | Status |
-|---|---|
-| **Open in VirusTotal** | **Disabled** — UI stub; not active in production |
-| **Watchlist** | **Not implemented** |
-| **Create Block Rule** | **Not implemented** |
-| Export XLSX/PDF/ZIP | Future |
-| Auto-rescan on recovered jobs | Future |
-| Auto-rescan after manual refresh | Future |
+| Feature | Classification | Status |
+|---|---|---|
+| **Open in VirusTotal** | deferred | **Disabled control** in row menu and drawer — `vt_report_url` not populated yet |
+| **Watchlist** | rejected / out of scope | Not implemented |
+| **Create Block Rule** | rejected / out of scope | Not implemented |
+| **Salesforce / ticketing** | rejected / out of scope | Not shown |
+| **Monitoring / enforcement** | rejected / out of scope | Not shown |
+| Export XLSX/PDF/ZIP | deferred | Not implemented |
+| Custom live-check scope toggle | deferred | Fixed flagged-only rule today (read-only in Run Options) |
+| Extra export scopes (clean-only, stale-only) | deferred | CSV/JSON scopes above are active |
+| Post-results UI layout cleanup (MDI-38) | deferred | Duplicate progress strip, filter rows, estimate layout |
+| Row click-target refinement | deferred | Eye icon vs full-row click |
+| Dashboard quota trend chart | deferred | Nav quota widget shows current counter |
+| Auto-rescan on recovered jobs | deferred / by design | Initial job submission only |
+| Auto-rescan after manual refresh/scan | deferred / by design | Not chained to row actions |
 
-Detail drawer, CSV/JSON export, and dashboard are implemented — see
-[Operator Guide](operator-guide.md).
+Detail drawer, CSV/JSON export, dashboard, upload workflow, and row More Actions
+menu are **active** — see [Operator Guide](operator-guide.md).

@@ -135,6 +135,28 @@ cp -r /var/www/html/tools/mdi /var/www/html/tools/mdi.bak-$(date +%Y%m%d-%H%M%S)
 rsync -a --delete dist/ /var/www/html/tools/mdi/
 ```
 
+**No backend restart required** for frontend-only deploys. Do not reload nginx
+unless the nginx config itself changed (static file swap does not require reload).
+
+### Frontend vs backend version (MDI-32)
+
+| Artifact | What it reflects | How to verify |
+|---|---|---|
+| **Backend** | Last backend deploy marker | `GET /api/mdi/version` → `build_info.commit` from `/opt/mdi/backend/build_info.json` |
+| **Frontend** | Last static bundle deploy | `index.html` under `/var/www/html/tools/mdi/` → `assets/index-*.js` and `index-*.css` hashes |
+
+After a **frontend-only** deploy, backend `build_info` may **intentionally lag**
+the Git `main` commit (e.g. frontend at MDI-30B while backend remains MDI-30A).
+This is normal when no backend files changed.
+
+**Merge approval and deployment approval are separate:** merging to `main` does
+not deploy anything. Operators must explicitly build/rsync frontend and/or rsync
+backend + restart service per runbook.
+
+**Smoke check for frontend-only deploy:** confirm `/tools/mdi/` loads, new bundle
+hashes are served, and read-only UI copy checks pass. Do not submit jobs during
+deploy smoke unless a ticket explicitly requires quota-consuming acceptance.
+
 ## nginx
 
 Two location blocks in the forgeforward.app nginx config:

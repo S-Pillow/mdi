@@ -255,6 +255,10 @@ rsync -a --delete dist/ /var/www/html/tools/mdi/
 
 No `mdi-backend` restart unless backend also changed.
 
+**Version audit:** frontend-only deploys change `/tools/mdi/assets/index-*.js` hashes
+only. `GET /api/mdi/version` reflects the **last backend** deploy and may lag
+frontend Git commits — check both when reconciling production state.
+
 Verify: `curl -sS -o /dev/null -w "%{http_code}\n" https://forgeforward.app/tools/mdi/`
 
 ---

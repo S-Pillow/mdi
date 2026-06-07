@@ -21,7 +21,7 @@ domains and URLs submitted by operators. For each accepted item, MDI may:
 - Support manual VT report refresh and new-scan requests
 - Optionally auto-rescan stale flagged items (URL scans and domain reanalysis) during initial job processing
 - Export CSV summaries or JSON evidence
-- Show an operational dashboard (metadata-only aggregates)
+- Show an operational dashboard (metadata-only aggregates; nav **Dashboard** button)
 
 MDI helps operators **prioritize investigation**. It does not take enforcement
 action on your behalf.
@@ -54,8 +54,8 @@ API at `/api/mdi/`).
 ### Recovered latest job
 
 On page load, MDI calls `GET /api/mdi/jobs/latest`. If a prior completed job
-was persisted to disk, the UI restores it and shows a **"↩ Restored from last
-session"** notice with the previous results.
+was persisted to disk, the UI restores it and shows a **"↩ Restored"** notice
+with a dismiss control (✕) beside the job status bar.
 
 **Expectations:**
 
@@ -488,14 +488,35 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ---
 
-## 16. Disabled / deferred features
+## 16. Disabled / deferred / rejected features
+
+### Active but limited
 
 | Feature | Status |
 |---|---|
-| **Open in VirusTotal** | **Disabled** — row model has no `vt_report_url` yet; menu shows explicit disabled control |
-| **Watchlist** | **Not implemented** |
-| **Create Block Rule** | **Not implemented** |
-| **Enforcement actions** | **None** — MDI does not block or quarantine |
+| **Open in VirusTotal** | **Disabled** — explicit menu control; `vt_report_url` not populated in row data yet |
+
+### Deferred / future backlog
+
+| Feature | Status |
+|---|---|
+| **Open in VirusTotal link population** | Deferred — menu exists; needs VT report URL in row model |
+| **Custom live-check scope controls** | Deferred — fixed to eligible flagged items today |
+| **Extra export scopes** (clean-only, stale-only, etc.) | Deferred — may be reviewed in a future ticket |
+| **Post-results UI layout cleanup** (MDI-38) | Deferred — duplicate progress/filters, compact estimate layout |
+| **Row click-target refinement** | Deferred — eye icon vs row click behavior |
+| **Dashboard quota trend surfacing** | Deferred — dashboard is metadata aggregates; nav quota widget shows current counter |
+
+### Rejected / out of scope (MVP)
+
+| Feature | Status |
+|---|---|
+| **Watchlist** | **Not implemented** — rejected for MVP unless explicitly approved later |
+| **Create Block Rule** | **Not implemented** — rejected for MVP |
+| **Salesforce / ticketing integration** | **Not implemented** |
+| **Automated serverHold/clientHold enforcement** | **Not implemented** — MDI surfaces hold status; does not act on registries |
+| **Enforcement actions** | **None** — MDI does not block, quarantine, or modify infrastructure |
+| **Persistent monitoring** | **Not implemented** |
 
 ---
 
@@ -526,8 +547,8 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 - Dashboard triage percentages unavailable for older pre-MDI-17 history lines
 - Large exports are generated in memory
 - Auto-rescan only during initial job processing
-- Domain-report mode does not support Request New Scan
-- Open in VirusTotal, Watchlist, and Create Block Rule are disabled/unimplemented
+- Request New Scan on bare domains uses domain reanalysis in domain-report mode (higher cost than refresh)
+- Open in VirusTotal link population, watchlist, and Create Block Rule are disabled/unimplemented
 - Mid-job backend restart loses in-flight work; previous completed job may restore
 
 ---
