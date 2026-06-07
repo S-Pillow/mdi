@@ -162,6 +162,22 @@ data; the operator is the only consumer of this recovery. The file is:
 Step 4 failure is logged and swallowed — the in-memory job remains valid for the
 current session even if disk persistence fails.
 
+### MDI-15 refresh/rescan actions
+
+Manual refresh/scan updates the **existing job in-place** (same `job_id`).
+After each action batch completes:
+
+1. Result rows updated in memory
+2. `mdi_latest_job.json` overwritten with full updated job snapshot
+3. One **aggregate-only** record appended to `vt_usage_history.jsonl` with
+   `operation: "refresh"` or `operation: "force_scan"`
+
+Action batches do not create a new job. Saved `use_domain_reports` and
+`stale_threshold_days` from the original job are preserved.
+
+**Test isolation (MDI-14A + MDI-15):** All backend tests redirect runtime paths
+via `backend/tests/conftest.py` autouse fixture — live files are never touched.
+
 ### MDI-08 recovery flow
 
 On `mdi-backend` restart the in-memory store is empty.  The frontend calls

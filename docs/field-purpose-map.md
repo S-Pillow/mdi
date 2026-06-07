@@ -1091,14 +1091,29 @@ even when rows are selected. Selection is preparatory for MDI-16 export/rescan.
 
 ### Bulk controls (`BulkControls`)
 
-Five disabled-but-visible buttons above the table:
-- Bulk actions dropdown
-- Export Flagged (MDI-16)
-- Export All (MDI-16)
-- Rescan Selected (future)
-- Rescan Stale (future)
+Five buttons above the table:
+- Bulk actions dropdown (disabled stub)
+- Export Flagged (MDI-16, disabled)
+- Export All (MDI-16, disabled)
+- **Rescan Selected** (MDI-15 — enabled when job complete, rows selected, scannable)
+- **Rescan Stale** (MDI-15 — enabled when eligible stale rows exist)
 
-All have `disabled` attribute and `aria-disabled="true"`.
+Rescan actions show a confirmation modal with quota estimate before submitting.
+
+### MDI-15 job action fields
+
+| Field | Level | Purpose |
+|---|---|---|
+| `action_in_progress` | job | True while refresh/scan batch running |
+| `last_action_type` | job | `refresh` or `scan` |
+| `last_action_at` | job | Unix timestamp of last action completion |
+| `vt_refresh_count` | job | Cumulative manual refreshes |
+| `vt_scan_requested_count` | job | Cumulative scan requests |
+| `vt_scan_failed_count` | job | Cumulative scan failures |
+
+Usage history action aggregates: `refresh_count`, `scan_requested_count`,
+`scan_completed_count`, `scan_failed_count`, `rescan_selected_count`,
+`rescan_stale_count`, `operation` (`refresh` | `force_scan`).
 
 ### Disabled row action stubs
 

@@ -402,6 +402,112 @@ async def _fetch_domain_report(
     ), calls
 
 
+# ── Refresh (GET-only) helpers ─────────────────────────────────────────────────
+
+async def _get_existing_url_report(
+    url_target: str,
+    headers: Dict[str, str],
+) -> Tuple[Optional[Dict[str, Any]], Optional[MdiError], int]:
+    """GET URL report only — no 404 submit. Used by refresh_report."""
+    url_id = _vt_url_id(url_target)
+    calls = 0
+    await _VT_LIMITER.acquire()
+    try:
+        resp = await _vt_request("GET", f"{VT_BASE_URL}/urls/{url_id}", headers=headers)
+        calls += 1
+    except httpx.TimeoutException:
+        return None, _vt_error("vt_timeout", "VT request timed out.", retriable=True), calls
+    except Exception as exc:
+        return None, _vt_error("vt_connection", f"Connection error: {exc}", retriable=True), calls
+
+    if resp.status_code == 200:
+        return resp.json(), None, calls
+    if resp.status_code == 404:
+        return None, _vt_error(
+            "vt_not_found",
+            "No existing VT URL report found to refresh.",
+            retriable=False,
+        ), calls
+    if resp.status_code == 401:
+        return None, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
+    if resp.status_code == 429:
+        return None, _vt_error("vt_429", "VT rate limit reached.", retriable=True), calls
+    return None, _vt_error(
+        "vt_server_error",
+        f"VT returned HTTP {resp.status_code}.",
+    ), calls
+
+
+# ── Scan (POST + bounded poll) helpers ─────────────────────────────────────────
+
+MAX_SCAN_POLL_ATTEMPTS = 3  # GET polls after POST (2–4 total quota units per item)
+
+_DOMAIN_REPORT_SCAN_MSG = (
+    "New scan is not supported in domain-report mode; "
+    "use Refresh Report or rerun with URL report mode."
+)
+
+
+async def _submit_url_for_scan(
+    url_target: str,
+    headers: Dict[str, str],
+) -> Tuple[Optional[MdiError], int]:
+    """POST URL to VT for new analysis. Returns (error, calls_made)."""
+    calls = 0
+    await _VT_LIMITER.acquire()
+    try:
+        resp = await _vt_request("POST", f"{VT_BASE_URL}/urls", headers=headers, data={"url": url_target})
+        calls += 1
+    except httpx.TimeoutException:
+        return _vt_error("vt_timeout", "VT submit timed out.", retriable=True), calls
+    except Exception as exc:
+        return _vt_error("vt_connection", f"Submit connection error: {exc}", retriable=True), calls
+
+    if resp.status_code == 429:
+        return _vt_error("vt_429", "VT rate limit hit during URL submit.", retriable=True), calls
+    if resp.status_code >= 400:
+        return _vt_error(
+            "vt_submit_error",
+            f"VT URL submit returned HTTP {resp.status_code}.",
+        ), calls
+    return None, calls
+
+
+async def _poll_url_report_after_scan(
+    url_target: str,
+    headers: Dict[str, str],
+) -> Tuple[Optional[Dict[str, Any]], Optional[MdiError], int]:
+    """Bounded GET polls after scan submit. Returns (report, error, calls_made)."""
+    url_id = _vt_url_id(url_target)
+    calls = 0
+    last_status = 0
+
+    for _ in range(MAX_SCAN_POLL_ATTEMPTS):
+        await _VT_LIMITER.acquire()
+        try:
+            resp = await _vt_request("GET", f"{VT_BASE_URL}/urls/{url_id}", headers=headers)
+            calls += 1
+            last_status = resp.status_code
+        except httpx.TimeoutException:
+            return None, _vt_error("vt_timeout", "VT poll timed out.", retriable=True), calls
+        except Exception as exc:
+            return None, _vt_error("vt_connection", f"Poll connection error: {exc}", retriable=True), calls
+
+        if resp.status_code == 200:
+            return resp.json(), None, calls
+        if resp.status_code == 401:
+            return None, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
+        if resp.status_code == 429:
+            return None, _vt_error("vt_429", "VT rate limit reached during poll.", retriable=True), calls
+
+    return None, _vt_error(
+        "vt_scan_pending",
+        f"VT scan submitted but report not ready after {MAX_SCAN_POLL_ATTEMPTS} polls "
+        f"(last HTTP {last_status}). Retry later.",
+        retriable=True,
+    ), calls
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 async def fetch_report(
@@ -446,3 +552,95 @@ async def fetch_report(
     result = parse_vt_response(report, vt_mode, stale_threshold_days)
     result.calls_made = calls
     return result
+
+
+async def refresh_report(
+    input_normalized: str,
+    input_type: InputType,
+    *,
+    use_domain_reports: bool = False,
+    stale_threshold_days: int = DEFAULT_STALE_THRESHOLD_DAYS,
+) -> VtLookupResult:
+    """
+    Refresh an existing VT report (GET only — no submit).
+
+    Consumes 1 quota unit on success. Does not escalate to scan on 404.
+    """
+    api_key = os.environ.get("VT_API_KEY", "")
+    if not api_key:
+        return VtLookupResult(
+            error=_vt_error("no_api_key", "VT_API_KEY is not configured.", retriable=False),
+            calls_made=0,
+        )
+
+    headers = _vt_headers(api_key)
+    vt_target, vt_mode = _build_vt_target(input_normalized, input_type, use_domain_reports)
+
+    if vt_mode == VtModeUsed.DOMAIN_REPORT:
+        report, error, calls = await _fetch_domain_report(vt_target, headers)
+    else:
+        report, error, calls = await _get_existing_url_report(vt_target, headers)
+
+    if error:
+        return VtLookupResult(vt_mode_used=vt_mode, error=error, calls_made=calls)
+
+    result = parse_vt_response(report, vt_mode, stale_threshold_days)
+    result.calls_made = calls
+    return result
+
+
+async def request_new_scan(
+    input_normalized: str,
+    input_type: InputType,
+    *,
+    use_domain_reports: bool = False,
+    stale_threshold_days: int = DEFAULT_STALE_THRESHOLD_DAYS,
+) -> VtLookupResult:
+    """
+    Request a new VT URL analysis (POST + bounded poll GET).
+
+    Domain-report mode is not supported in MDI-15 — returns structured skip error
+    with zero quota consumed.
+    """
+    api_key = os.environ.get("VT_API_KEY", "")
+    if not api_key:
+        return VtLookupResult(
+            error=_vt_error("no_api_key", "VT_API_KEY is not configured.", retriable=False),
+            calls_made=0,
+        )
+
+    vt_target, vt_mode = _build_vt_target(input_normalized, input_type, use_domain_reports)
+
+    if vt_mode == VtModeUsed.DOMAIN_REPORT:
+        return VtLookupResult(
+            vt_mode_used=vt_mode,
+            error=_vt_error("scan_not_supported", _DOMAIN_REPORT_SCAN_MSG, retriable=False),
+            calls_made=0,
+        )
+
+    headers = _vt_headers(api_key)
+    calls = 0
+
+    submit_err, submit_calls = await _submit_url_for_scan(vt_target, headers)
+    calls += submit_calls
+    if submit_err:
+        return VtLookupResult(vt_mode_used=vt_mode, error=submit_err, calls_made=calls)
+
+    report, poll_err, poll_calls = await _poll_url_report_after_scan(vt_target, headers)
+    calls += poll_calls
+    if poll_err:
+        return VtLookupResult(vt_mode_used=vt_mode, error=poll_err, calls_made=calls)
+
+    result = parse_vt_response(report, vt_mode, stale_threshold_days)
+    result.calls_made = calls
+    return result
+
+
+def scan_supported_for_item(
+    input_type: InputType,
+    use_domain_reports: bool,
+) -> bool:
+    """Return True when request_new_scan is supported for this item."""
+    if input_type == InputType.URL:
+        return True
+    return not use_domain_reports

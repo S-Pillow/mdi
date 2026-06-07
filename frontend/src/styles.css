@@ -694,6 +694,94 @@ body {
   cursor: not-allowed;
 }
 
+/* MDI-15 action controls */
+.btn-action-active {
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  opacity: 1;
+}
+.action-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 11, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.action-modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.action-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+.action-modal-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+.action-modal-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.action-modal-stats div {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+.action-modal-stats strong {
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+.action-modal-skips {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+.action-modal-warn {
+  font-size: 11px;
+  color: var(--risk-critical);
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.action-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.action-status-msg {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel-2);
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.action-status-msg.running {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: var(--accent-blue);
+}
+
 /* Disabled stub buttons */
 .btn-stub {
   display: inline-flex;

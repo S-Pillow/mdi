@@ -22,9 +22,12 @@ MDI-07 endpoints:
 MDI-08 endpoints:
   GET  /api/mdi/jobs/latest         — recover latest completed job; reads mdi_latest_job.json if memory empty
 
+MDI-15 endpoints:
+  POST /api/mdi/jobs/{job_id}/refresh  — manual VT report refresh (GET only)
+  POST /api/mdi/jobs/{job_id}/scan     — manual VT new-scan request (POST + poll)
+
 Future endpoints (not yet implemented):
   GET  /api/mdi/jobs/{job_id}/export
-  POST /api/mdi/jobs/{job_id}/rescan
 """
 
 from __future__ import annotations
@@ -47,6 +50,9 @@ from models import (
     EvidenceStatus,
     Freshness,
     InputType,
+    JobActionAcceptedResponse,
+    JobActionEstimateResponse,
+    JobActionRequest,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -59,6 +65,7 @@ from models import (
     ParsePreviewRequest,
     ParsePreviewResponse,
     RecommendedAction,
+    RefreshScanScope,
     RejectedItemResponse,
     TriageBucket,
     TriageConfidence,
@@ -72,7 +79,8 @@ from services.job_store import (
     InMemoryJob, create_job, get_job,
     get_latest_completed_job_sync, register_recovered_job,
 )
-from services import job_persistence, job_processor
+from services import job_actions, job_persistence, job_processor
+from services.job_store import InMemoryJob
 from services.quota_writer import read_remaining_quota
 from services.estimate import estimate_job
 
@@ -430,6 +438,138 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
     )
 
 
+# ── Job status builder ─────────────────────────────────────────────────────────
+
+def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
+    queued = sum(
+        1 for r in job.results.values()
+        if r.processing_status == MdiProcessingStatus.PENDING
+    )
+    results_ordered = [
+        job.results[k] for k in job.item_order if k in job.results
+    ]
+    return JobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        submitted_at=job.submitted_at,
+        completed_at=job.completed_at,
+        total=job.total,
+        processed=job.processed,
+        held_skipped=job.held_skipped,
+        rejected_count=job.rejected_count,
+        queued=queued,
+        estimated_requests=job.estimated_requests,
+        lookups_used=job.lookups_used,
+        quota_blocked_count=job.quota_blocked_count,
+        error_message=job.error_message,
+        use_domain_reports=job.use_domain_reports,
+        stale_threshold_days=job.stale_threshold_days,
+        results=results_ordered,
+        rdap_enriched_count=job.rdap_enriched_count,
+        rdap_failed_count=job.rdap_failed_count,
+        whois_fallback_count=job.whois_fallback_count,
+        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
+        live_check_count=job.live_check_count,
+        live_check_skipped_count=job.live_check_skipped_count,
+        live_check_error_count=job.live_check_error_count,
+        action_in_progress=job.action_in_progress,
+        last_action_type=job.last_action_type,
+        last_action_at=job.last_action_at,
+        vt_refresh_count=job.vt_refresh_count,
+        vt_scan_requested_count=job.vt_scan_requested_count,
+        vt_scan_failed_count=job.vt_scan_failed_count,
+    )
+
+
+async def _handle_job_action(
+    job_id: str,
+    action: str,
+    req: JobActionRequest,
+) -> JobActionEstimateResponse | JobActionAcceptedResponse:
+    """Shared handler for refresh and scan endpoints."""
+    job = await job_actions.resolve_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    block_reason = job_actions.validate_job_for_action(job)
+    if block_reason:
+        raise HTTPException(status_code=409, detail=block_reason)
+
+    if req.scope == RefreshScanScope.SELECTED and not req.positions:
+        raise HTTPException(
+            status_code=422,
+            detail="positions is required when scope is 'selected'.",
+        )
+
+    estimate = job_actions.estimate_action(job, action, req)
+    if req.estimate_only:
+        return estimate
+
+    if action == "scan" and not req.confirm:
+        raise HTTPException(
+            status_code=422,
+            detail="confirm=true is required to start a scan action.",
+        )
+
+    if estimate.eligible_count == 0:
+        raise HTTPException(status_code=422, detail=estimate.message)
+
+    if estimate.will_exceed_quota:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "quota_blocked",
+                "message": estimate.message,
+                "estimated_quota_max": estimate.estimated_quota_max,
+                "quota_remaining": estimate.quota_remaining,
+            },
+        )
+
+    if action == "refresh":
+        job_actions.start_refresh_action(job_id, req)
+    else:
+        job_actions.start_scan_action(job_id, req)
+
+    return JobActionAcceptedResponse(
+        job_id=job_id,
+        action=action,
+        status="accepted",
+        items_queued=estimate.eligible_count,
+        items_skipped=estimate.skipped_count,
+        estimated_quota_min=estimate.estimated_quota_min,
+        estimated_quota_max=estimate.estimated_quota_max,
+        quota_remaining=estimate.quota_remaining,
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/refresh",
+    tags=["Jobs"],
+    response_model=JobActionAcceptedResponse | JobActionEstimateResponse,
+)
+async def refresh_job(job_id: str, req: JobActionRequest):
+    """
+    Refresh existing VT reports for selected or stale rows (GET only).
+
+    Updates the existing job in-place. No new job_id. Uses saved job options.
+    """
+    return await _handle_job_action(job_id, "refresh", req)
+
+
+@router.post(
+    "/jobs/{job_id}/scan",
+    tags=["Jobs"],
+    response_model=JobActionAcceptedResponse | JobActionEstimateResponse,
+)
+async def scan_job(job_id: str, req: JobActionRequest):
+    """
+    Request new VT scans for selected or stale rows (POST + bounded poll).
+
+    Domain-report mode items are skipped. Requires confirm=true.
+    """
+    return await _handle_job_action(job_id, "scan", req)
+
+
 # ── Latest job recovery ────────────────────────────────────────────────────────
 
 @router.get("/jobs/latest", tags=["Jobs"], response_model=JobStatusResponse)
@@ -468,39 +608,7 @@ async def latest_job() -> JobStatusResponse:
             detail="No recovered job found. Submit a new job to begin.",
         )
 
-    queued = sum(
-        1 for r in job.results.values()
-        if r.processing_status == MdiProcessingStatus.PENDING
-    )
-    results_ordered = [
-        job.results[k] for k in job.item_order if k in job.results
-    ]
-
-    return JobStatusResponse(
-        job_id=job.job_id,
-        status=job.status,
-        submitted_at=job.submitted_at,
-        completed_at=job.completed_at,
-        total=job.total,
-        processed=job.processed,
-        held_skipped=job.held_skipped,
-        rejected_count=job.rejected_count,
-        queued=queued,
-        estimated_requests=job.estimated_requests,
-        lookups_used=job.lookups_used,
-        quota_blocked_count=job.quota_blocked_count,
-        error_message=job.error_message,
-        use_domain_reports=job.use_domain_reports,
-        stale_threshold_days=job.stale_threshold_days,
-        results=results_ordered,
-        rdap_enriched_count=job.rdap_enriched_count,
-        rdap_failed_count=job.rdap_failed_count,
-        whois_fallback_count=job.whois_fallback_count,
-        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
-        live_check_count=job.live_check_count,
-        live_check_skipped_count=job.live_check_skipped_count,
-        live_check_error_count=job.live_check_error_count,
-    )
+    return _build_job_status_response(job)
 
 
 # ── Job status ─────────────────────────────────────────────────────────────────
@@ -513,45 +621,11 @@ async def job_status(job_id: str) -> JobStatusResponse:
     Jobs are stored in-memory only. After service restart, all jobs are lost
     (MDI-06 known limitation; job recovery is out of scope).
     """
-    job = await get_job(job_id)
+    job = await job_actions.resolve_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
 
-    queued = sum(
-        1 for r in job.results.values()
-        if r.processing_status == MdiProcessingStatus.PENDING
-    )
-    results_ordered = [
-        job.results[k]
-        for k in job.item_order
-        if k in job.results
-    ]
-
-    return JobStatusResponse(
-        job_id=job.job_id,
-        status=job.status,
-        submitted_at=job.submitted_at,
-        completed_at=job.completed_at,
-        total=job.total,
-        processed=job.processed,
-        held_skipped=job.held_skipped,
-        rejected_count=job.rejected_count,
-        queued=queued,
-        estimated_requests=job.estimated_requests,
-        lookups_used=job.lookups_used,
-        quota_blocked_count=job.quota_blocked_count,
-        error_message=job.error_message,
-        use_domain_reports=job.use_domain_reports,
-        stale_threshold_days=job.stale_threshold_days,
-        results=results_ordered,
-        rdap_enriched_count=job.rdap_enriched_count,
-        rdap_failed_count=job.rdap_failed_count,
-        whois_fallback_count=job.whois_fallback_count,
-        hold_detected_by_enrichment_count=job.hold_detected_by_enrichment_count,
-        live_check_count=job.live_check_count,
-        live_check_skipped_count=job.live_check_skipped_count,
-        live_check_error_count=job.live_check_error_count,
-    )
+    return _build_job_status_response(job)
 
 
 # ── Schema summary ─────────────────────────────────────────────────────────────
