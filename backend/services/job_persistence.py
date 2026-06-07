@@ -96,6 +96,13 @@ def serialize_job(job: "job_store.InMemoryJob") -> Dict[str, Any]:  # type: igno
         "live_check_count": job.live_check_count,
         "live_check_skipped_count": job.live_check_skipped_count,
         "live_check_error_count": job.live_check_error_count,
+        # MDI-15 action state
+        "action_in_progress": job.action_in_progress,
+        "last_action_type": job.last_action_type,
+        "last_action_at": job.last_action_at,
+        "vt_refresh_count": job.vt_refresh_count,
+        "vt_scan_requested_count": job.vt_scan_requested_count,
+        "vt_scan_failed_count": job.vt_scan_failed_count,
     }
 
 
@@ -140,6 +147,13 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
         live_check_count=int(data.get("live_check_count", 0)),
         live_check_skipped_count=int(data.get("live_check_skipped_count", 0)),
         live_check_error_count=int(data.get("live_check_error_count", 0)),
+        # MDI-15 action state — default for jobs persisted before MDI-15
+        action_in_progress=bool(data.get("action_in_progress", False)),
+        last_action_type=data.get("last_action_type"),
+        last_action_at=data.get("last_action_at"),
+        vt_refresh_count=int(data.get("vt_refresh_count", 0)),
+        vt_scan_requested_count=int(data.get("vt_scan_requested_count", 0)),
+        vt_scan_failed_count=int(data.get("vt_scan_failed_count", 0)),
     )
 
 

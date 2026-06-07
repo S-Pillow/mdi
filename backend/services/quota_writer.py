@@ -190,6 +190,14 @@ def build_usage_history_record(
     live_check_count: int = 0,
     live_check_skipped_count: int = 0,
     live_check_error_count: int = 0,
+    operation: str = "report_lookup",
+    skipped_count: int = 0,
+    refresh_count: int = 0,
+    scan_requested_count: int = 0,
+    scan_completed_count: int = 0,
+    scan_failed_count: int = 0,
+    rescan_selected_count: int = 0,
+    rescan_stale_count: int = 0,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
@@ -203,7 +211,7 @@ def build_usage_history_record(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tool_name": "mdi",
         "job_id": job_id,
-        "operation": "report_lookup",
+        "operation": operation,
         "items_attempted": items_attempted,
         "items_completed": items_completed,
         "quota_units_consumed": quota_units_consumed,
@@ -222,4 +230,12 @@ def build_usage_history_record(
         "live_check_count": live_check_count,
         "live_check_skipped_count": live_check_skipped_count,
         "live_check_error_count": live_check_error_count,
+        # MDI-15 action aggregates (metadata-only)
+        "skipped_count": skipped_count,
+        "refresh_count": refresh_count,
+        "scan_requested_count": scan_requested_count,
+        "scan_completed_count": scan_completed_count,
+        "scan_failed_count": scan_failed_count,
+        "rescan_selected_count": rescan_selected_count,
+        "rescan_stale_count": rescan_stale_count,
     }

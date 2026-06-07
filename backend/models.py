@@ -704,6 +704,62 @@ class UploadPreviewResponse(BaseModel):
     )
 
 
+# ─── Job action API models (MDI-15) ───────────────────────────────────────────
+
+
+class RefreshScanScope(str, Enum):
+    """Scope for refresh/rescan actions on an existing job."""
+    SELECTED = "selected"
+    STALE = "stale"
+
+
+class JobActionRequest(BaseModel):
+    """Request body for POST /api/mdi/jobs/{job_id}/refresh and /scan."""
+    scope: RefreshScanScope = Field(
+        ...,
+        description="[workflow] selected rows by position, or all stale eligible rows.",
+    )
+    positions: Optional[List[int]] = Field(
+        None,
+        description="[workflow] 1-based row positions; required when scope=selected.",
+    )
+    confirm: bool = Field(
+        True,
+        description="[workflow] Operator confirmed quota impact (scan actions).",
+    )
+    estimate_only: bool = Field(
+        False,
+        description="[workflow] Return quota estimate only; do not start action.",
+    )
+
+
+class JobActionEstimateResponse(BaseModel):
+    """Quota estimate for a refresh or scan action batch."""
+    job_id: str
+    action: str
+    scope: str
+    eligible_count: int
+    skipped_count: int
+    skipped_reasons_summary: Dict[str, int] = Field(default_factory=dict)
+    estimated_quota_min: int
+    estimated_quota_max: int
+    quota_remaining: int
+    will_exceed_quota: bool
+    message: str
+
+
+class JobActionAcceptedResponse(BaseModel):
+    """Response when a refresh/scan action is accepted and running in background."""
+    job_id: str
+    action: str
+    status: str = "accepted"
+    items_queued: int
+    items_skipped: int
+    estimated_quota_min: int
+    estimated_quota_max: int
+    quota_remaining: int
+
+
 # ─── Job-submit API models ────────────────────────────────────────────────────
 
 
@@ -784,6 +840,25 @@ class JobStatusResponse(BaseModel):
     )
     live_check_error_count: int = Field(
         0, description="[display] Items where the live check returned a structured error."
+    )
+    # ── MDI-15 job action state ──────────────────────────────────────────────────
+    action_in_progress: bool = Field(
+        False, description="[display, workflow] True while refresh/scan action is running."
+    )
+    last_action_type: Optional[str] = Field(
+        None, description="[audit] Last action: refresh or scan."
+    )
+    last_action_at: Optional[float] = Field(
+        None, description="[audit] Unix timestamp of last refresh/scan completion."
+    )
+    vt_refresh_count: int = Field(
+        0, description="[display] Cumulative manual refresh operations on this job."
+    )
+    vt_scan_requested_count: int = Field(
+        0, description="[display] Cumulative manual scan requests on this job."
+    )
+    vt_scan_failed_count: int = Field(
+        0, description="[display] Cumulative scan failures on this job."
     )
 
 

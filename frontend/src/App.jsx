@@ -94,6 +94,27 @@ const RECENT_AGE_SET   = new Set(['very_new', 'new'])
 const STALE_FRESH_SET  = new Set(['stale', 'very_stale'])
 const FLAGGED_BUCKET_SET = new Set(['malicious', 'suspicious'])
 
+function isRowHeld(r) {
+  return r.processing_status === 'hold_skipped' || r.domain_hold?.has_hold === true
+}
+function isRowStale(r) {
+  return STALE_FRESH_SET.has(r.freshness)
+}
+function canScanRow(r, job) {
+  if (isRowHeld(r) || !r.input_normalized) return false
+  if (r.input_type === 'url') return true
+  return !job?.use_domain_reports
+}
+function canRefreshRow(r) {
+  return !isRowHeld(r) && !!r.input_normalized
+}
+function countStaleScannable(results, job) {
+  return (results || []).filter(r => isRowStale(r) && canScanRow(r, job)).length
+}
+function countSelectedScannable(results, selectedIds, job) {
+  return (results || []).filter(r => selectedIds.has(r.position) && canScanRow(r, job)).length
+}
+
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
 function isLive(r)          { return LIVE_ACTIVE_SET.has(r?.live_status) }
 function isNoLive(r)        { return LIVE_NO_SET.has(r?.live_status) }
@@ -946,9 +967,73 @@ function FilterBar({ results, activeFilter, onFilterChange }) {
   )
 }
 
+// ── Action confirmation modal ─────────────────────────────────────────────────
+
+function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confirming }) {
+  if (!open || !estimate) return null
+  const isScan = action === 'scan'
+  const blocked = estimate.will_exceed_quota
+  const skipSummary = estimate.skipped_reasons_summary
+    ? Object.entries(estimate.skipped_reasons_summary).map(([k, v]) => `${k}: ${v}`).join(', ')
+    : null
+
+  return (
+    <div className="action-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="action-modal-title">
+      <div className="action-modal">
+        <h3 id="action-modal-title" className="action-modal-title">
+          {isScan ? 'Request New Scan' : 'Refresh VT Report'}
+        </h3>
+        <p className="action-modal-msg">{estimate.message}</p>
+        <div className="action-modal-stats">
+          <div><span>Eligible</span><strong>{estimate.eligible_count}</strong></div>
+          <div><span>Skipped</span><strong>{estimate.skipped_count}</strong></div>
+          <div><span>Quota est.</span><strong>{estimate.estimated_quota_min}–{estimate.estimated_quota_max}</strong></div>
+          <div><span>Remaining</span><strong>{estimate.quota_remaining}</strong></div>
+        </div>
+        {skipSummary && (
+          <p className="action-modal-skips">Skipped: {skipSummary}</p>
+        )}
+        {blocked && (
+          <p className="action-modal-warn">⛔ Insufficient quota for worst-case estimate. Action blocked.</p>
+        )}
+        <div className="action-modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={confirming}>Cancel</button>
+          {isScan ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onConfirm}
+              disabled={confirming || blocked || estimate.eligible_count === 0}
+            >
+              {confirming ? 'Starting…' : 'Confirm scan'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onConfirm}
+              disabled={confirming || blocked || estimate.eligible_count === 0}
+            >
+              {confirming ? 'Starting…' : 'Confirm refresh'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Bulk controls ─────────────────────────────────────────────────────────────
 
-function BulkControls({ selectedCount }) {
+function BulkControls({
+  selectedCount,
+  canRescanSelected,
+  canRescanStale,
+  staleCount,
+  actionInProgress,
+  onRescanSelected,
+  onRescanStale,
+}) {
   return (
     <div className="bulk-controls">
       <span className="bulk-label">Bulk actions:</span>
@@ -961,11 +1046,21 @@ function BulkControls({ selectedCount }) {
       <button className="btn-stub" disabled aria-disabled="true" title="Export available in MDI-16">
         <IconUpload /> Export All
       </button>
-      <button className="btn-stub" disabled aria-disabled="true" title="Rescan not yet available">
+      <button
+        className={canRescanSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canRescanSelected || actionInProgress}
+        title={canRescanSelected ? 'Request new VT scan for selected rows' : 'Select scannable rows first'}
+        onClick={onRescanSelected}
+      >
         <IconRefresh /> Rescan Selected
       </button>
-      <button className="btn-stub" disabled aria-disabled="true" title="Rescan not yet available">
-        <IconRefresh /> Rescan Stale
+      <button
+        className={canRescanStale && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canRescanStale || actionInProgress}
+        title={canRescanStale ? `Request new VT scan for ${staleCount} stale row(s)` : 'No eligible stale rows'}
+        onClick={onRescanStale}
+      >
+        <IconRefresh /> Rescan Stale{staleCount > 0 ? ` (${staleCount})` : ''}
       </button>
     </div>
   )
@@ -1108,7 +1203,12 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll, selec
 
 // ── Triage workspace (replaces JobSection) ────────────────────────────────────
 
-function TriageWorkspace({ job, jobError, jobId, restoredFromSession, onDismissRestore, selectedItem, onSelectItem }) {
+function TriageWorkspace({
+  job, jobError, jobId, restoredFromSession, onDismissRestore,
+  selectedItem, onSelectItem,
+  actionInProgress, actionMessage,
+  onRescanSelected, onRescanStale,
+}) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(new Set())
 
@@ -1164,9 +1264,16 @@ function TriageWorkspace({ job, jobError, jobId, restoredFromSession, onDismissR
   const lce  = job?.live_check_error_count ?? 0
   const rdap = job?.rdap_enriched_count ?? 0
   const showCounters = lcc > 0 || lcsk > 0 || lce > 0 || rdap > 0
+  const staleScannable = countStaleScannable(allResults, job)
+  const selectedScannable = countSelectedScannable(allResults, selectedIds, job)
+  const canRescanSelected = isComplete && !actionInProgress && selectedScannable > 0
+  const canRescanStale = isComplete && !actionInProgress && staleScannable > 0
 
   return (
     <>
+      {actionMessage && (
+        <div className={`action-status-msg${actionInProgress ? ' running' : ''}`}>{actionMessage}</div>
+      )}
       {/* Job status bar */}
       <div className="job-status-bar">
         <span className="job-status-badge" style={{ color: statusColor, borderColor: statusColor + '55' }}>
@@ -1231,7 +1338,15 @@ function TriageWorkspace({ job, jobError, jobId, restoredFromSession, onDismissR
 
       {/* Bulk controls */}
       {allResults.length > 0 && (
-        <BulkControls selectedCount={selectedIds.size} />
+        <BulkControls
+          selectedCount={selectedIds.size}
+          canRescanSelected={canRescanSelected}
+          canRescanStale={canRescanStale}
+          staleCount={staleScannable}
+          actionInProgress={actionInProgress}
+          onRescanSelected={() => onRescanSelected && onRescanSelected([...selectedIds])}
+          onRescanStale={() => onRescanStale && onRescanStale()}
+        />
       )}
 
       {/* Table meta */}
@@ -1287,7 +1402,14 @@ function TriageWorkspace({ job, jobError, jobId, restoredFromSession, onDismissR
 
 // ── Detail drawer (right panel) ───────────────────────────────────────────────
 
-function DetailDrawer({ selectedItem: r, onClose }) {
+function DetailDrawer({
+  selectedItem: r,
+  onClose,
+  job,
+  actionInProgress,
+  onRefreshRow,
+  onScanRow,
+}) {
   if (!r) {
     return (
       <div className="detail-drawer">
@@ -1492,13 +1614,32 @@ function DetailDrawer({ selectedItem: r, onClose }) {
           </div>
         )}
 
-        {/* 8. ACTIONS — roadmap-approved stubs only, all disabled */}
+        {/* 8. ACTIONS */}
         <div className="detail-section">
           <div className="detail-section-label">8. Actions</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <button className="btn-stub" disabled title="Export evidence — available in MDI-16">↑ Export evidence (JSON) — MDI-16</button>
             <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VirusTotal</button>
-            <button className="btn-stub" disabled title="Request new scan — future rescan ticket">↺ Request new scan</button>
+            <button
+              className={canRefreshRow(r) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+              disabled={!canRefreshRow(r) || actionInProgress || !job}
+              title={canRefreshRow(r) ? 'Refresh existing VT report (1 quota unit)' : 'Row not eligible for refresh'}
+              onClick={() => onRefreshRow && onRefreshRow(r)}
+            >
+              ↻ Refresh report
+            </button>
+            <button
+              className={canScanRow(r, job) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+              disabled={!canScanRow(r, job) || actionInProgress || !job}
+              title={
+                !canScanRow(r, job) && job?.use_domain_reports && r.input_type === 'domain'
+                  ? 'New scan not supported in domain-report mode'
+                  : canScanRow(r, job) ? 'Request new VT scan' : 'Row not eligible for scan'
+              }
+              onClick={() => onScanRow && onScanRow(r)}
+            >
+              ↺ Request new scan
+            </button>
           </div>
         </div>
       </div>
@@ -1579,10 +1720,17 @@ export default function App() {
   const [restoredFromSession, setRestoredFromSession] = useState(false)
   const pollRef = useRef(null)
 
+  const [actionInProgress, setActionInProgress] = useState(false)
+  const [actionMessage, setActionMessage]     = useState(null)
+  const [actionModal, setActionModal]         = useState(null)
+  const [actionConfirming, setActionConfirming] = useState(false)
+
   const canRunJob = !!(preview && preview.accepted_count > 0)
   const settingsLocked = !!(
     restoredFromSession ||
-    (job && (job.status === 'queued' || job.status === 'running'))
+    (job && (job.status === 'queued' || job.status === 'running')) ||
+    actionInProgress ||
+    job?.action_in_progress
   )
   const settingsPayload = {
     default_scheme: 'http', max_items: MAX_ITEMS,
@@ -1674,12 +1822,99 @@ export default function App() {
       if (!resp.ok) return
       const data = await resp.json()
       setJob(data)
-      if (data.status === 'done' || data.status === 'error') {
+      if (selectedItem) {
+        const updated = (data.results || []).find(r => r.position === selectedItem.position)
+        if (updated) setSelectedItem(updated)
+      }
+      const actionDone = !data.action_in_progress
+      if (actionDone) setActionInProgress(false)
+      if ((data.status === 'done' || data.status === 'error') && actionDone) {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
         refreshQuota()
+        if (actionMessage && actionMessage.includes('…')) {
+          setActionMessage('VT action completed. Results updated.')
+        }
       }
     } catch (_) { /* ignore poll errors */ }
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedItem, actionMessage])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchActionEstimate(action, scope, positions) {
+    const resp = await fetch(`${API_BASE}/api/mdi/jobs/${jobId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, positions, estimate_only: true, confirm: false }),
+    })
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}))
+      const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    }
+    return resp.json()
+  }
+
+  async function startAction(action, scope, positions) {
+    const resp = await fetch(`${API_BASE}/api/mdi/jobs/${jobId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope,
+        positions,
+        estimate_only: false,
+        confirm: action === 'scan',
+      }),
+    })
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}))
+      const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    }
+    return resp.json()
+  }
+
+  async function openActionModal(action, scope, positions) {
+    if (!jobId) return
+    setActionMessage(null)
+    try {
+      const estimate = await fetchActionEstimate(action, scope, positions)
+      setActionModal({ action, scope, positions, estimate })
+    } catch (err) {
+      setActionMessage(`Action estimate failed: ${err.message}`)
+    }
+  }
+
+  async function confirmActionModal() {
+    if (!actionModal) return
+    setActionConfirming(true)
+    try {
+      await startAction(actionModal.action, actionModal.scope, actionModal.positions)
+      setActionInProgress(true)
+      setActionMessage(`${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`)
+      setActionModal(null)
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(() => pollJob(jobId), 2000)
+      await pollJob(jobId)
+    } catch (err) {
+      setActionMessage(`Action failed: ${err.message}`)
+    } finally {
+      setActionConfirming(false)
+    }
+  }
+
+  function handleRescanSelected(positions) {
+    openActionModal('scan', 'selected', positions)
+  }
+
+  function handleRescanStale() {
+    openActionModal('scan', 'stale', null)
+  }
+
+  function handleDrawerRefresh(row) {
+    openActionModal('refresh', 'selected', [row.position])
+  }
+
+  function handleDrawerScan(row) {
+    openActionModal('scan', 'selected', [row.position])
+  }
 
   async function handleRunJob() {
     if (!rawInput.trim() || submitting) return
@@ -1866,8 +2101,21 @@ export default function App() {
               }}
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
+              actionInProgress={actionInProgress || !!job?.action_in_progress}
+              actionMessage={actionMessage}
+              onRescanSelected={handleRescanSelected}
+              onRescanStale={handleRescanStale}
             />
           )}
+
+          <ActionConfirmModal
+            open={!!actionModal}
+            estimate={actionModal?.estimate}
+            action={actionModal?.action}
+            onConfirm={confirmActionModal}
+            onCancel={() => setActionModal(null)}
+            confirming={actionConfirming}
+          />
 
           {/* Footer in scroll area */}
           <footer className="footer" style={{ marginTop: 'auto', borderRadius: 'var(--radius)' }}>
@@ -1877,7 +2125,14 @@ export default function App() {
 
         {/* RIGHT COLUMN: detail drawer */}
         <div className="console-right">
-          <DetailDrawer selectedItem={selectedItem} onClose={() => setSelectedItem(null)} />
+          <DetailDrawer
+            selectedItem={selectedItem}
+            onClose={() => setSelectedItem(null)}
+            job={job}
+            actionInProgress={actionInProgress || !!job?.action_in_progress}
+            onRefreshRow={handleDrawerRefresh}
+            onScanRow={handleDrawerScan}
+          />
         </div>
       </div>
     </div>

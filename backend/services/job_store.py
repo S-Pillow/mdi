@@ -56,6 +56,13 @@ class InMemoryJob:
     live_check_count: int = 0           # items that received a live check
     live_check_skipped_count: int = 0   # items skipped (clean, held, error, no VT data)
     live_check_error_count: int = 0     # items where live check returned an error
+    # ── MDI-15 job action state ────────────────────────────────────────────────
+    action_in_progress: bool = False
+    last_action_type: Optional[str] = None
+    last_action_at: Optional[float] = None
+    vt_refresh_count: int = 0
+    vt_scan_requested_count: int = 0
+    vt_scan_failed_count: int = 0
 
 
 # ── Store ──────────────────────────────────────────────────────────────────────
