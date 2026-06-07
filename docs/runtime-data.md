@@ -3,6 +3,63 @@
 This document lists every runtime file that MDI reads or writes during
 operation.  Runtime files are **never committed to source control**.
 
+**Related docs:** [Operator Guide](operator-guide.md) · [Production Runbook](runbooks/mdi-production-runbook.md)
+
+---
+
+## Production operator reference (MDI-18B / MDI-19)
+
+### Permission matrix (current)
+
+| Path | Owner:Group | Mode | Shared? |
+|---|---|---|---|
+| `/var/lib/dns-tool/` | root:dns-tool | 2770 | Yes |
+| `vt_usage.json` | root:dns-tool | 660 | Yes — MDI + VT Bulk |
+| `vt_usage_history.jsonl` | root:dns-tool | 660 | Yes — metadata append |
+| `vt_daily_history.json` | root:dns-tool | 660 | Yes |
+| `vt_usage.lock` | root:dns-tool | 660 | Yes — flock coordination |
+| `mdi_latest_job.json` | mdi:mdi | 600 | **No** — MDI only |
+| `vt_latest_job.json` | www-data:www-data | 600 | **No** — VT Bulk only |
+| `/etc/dns-tool/secrets.env` | root:dns-tool | 640 | Secrets (never print) |
+
+### Shared vs private
+
+| Category | Files |
+|---|---|
+| **Shared** | `vt_usage.json`, `vt_usage_history.jsonl`, `vt_daily_history.json`, `vt_usage.lock` |
+| **MDI private** | `mdi_latest_job.json` |
+| **VT Bulk private** | `vt_latest_job.json` (MDI must never read/write) |
+
+### Metadata-only inspection
+
+Operators and admins may use `stat` and `ls -l` on runtime paths. **Do not**
+`cat`, `tail`, `jq`, or paste file contents into tickets, chat, or docs.
+
+### Never print (contents)
+
+| File | Reason |
+|---|---|
+| `/etc/dns-tool/secrets.env` | API keys and credentials |
+| `mdi_latest_job.json` | Full job snapshot with operator-submitted domains/URLs |
+| `vt_latest_job.json` | VT Bulk job data (MDI does not access) |
+| `vt_usage_history.jsonl` | Append-only history (metadata-only per line, but still sensitive operational data) |
+
+### Operations that do not mutate runtime
+
+| Operation | Runtime impact |
+|---|---|
+| `GET /api/mdi/dashboard` | Read-only |
+| `POST /api/mdi/jobs/estimate` | Read-only (`vt_usage.json` read) |
+| `POST /api/mdi/jobs/{id}/export` | No writes; in-memory download only |
+| Safe GET smoke tests | No writes |
+
+### Usage history privacy
+
+Records in `vt_usage_history.jsonl` are **aggregate metadata only** on new MDI
+completions: counts, durations, triage bucket totals, operation type. They do
+**not** contain raw domains, URLs, or per-item VT engine results. See
+[Field Purpose Map](field-purpose-map.md) for field-level detail.
+
 ---
 
 ## Files in `/var/lib/dns-tool/`
@@ -32,10 +89,10 @@ Both services must deploy locking together. Partial rollout leaves the lost-upda
 |---|---|
 | **Full path** | `/var/lib/dns-tool/vt_usage.json` |
 | **Format** | JSON: `{"date_utc": "YYYY-MM-DD", "daily_lookups_used": N}` |
-| **Owner** | `www-data` (written by dns-tool-backend uvicorn process) |
-| **Permissions** | `644` (world-readable; safe for mdi-backend to read) |
+| **Owner** | `root:dns-tool` |
+| **Permissions** | `660` (group `dns-tool`; MDI and VT Bulk read/write) |
 | **MDI reads** | Yes — `vt_quota.read_usage_state()` and `GET /api/mdi/usage` |
-| **MDI writes** | Not yet. Will write in quota-increment ticket (after MDI-03). |
+| **MDI writes** | Yes — `quota_writer.increment_quota()` under flock (MDI-06+) |
 | **Contains item data** | No — counts only |
 | **Source-control** | Excluded by `.gitignore` (`/var/lib/dns-tool/`) |
 | **Cleanup rule** | Resets automatically at UTC midnight (date rollover); never manually delete |
@@ -47,10 +104,10 @@ Both services must deploy locking together. Partial rollout leaves the lost-upda
 |---|---|
 | **Full path** | `/var/lib/dns-tool/vt_usage_history.jsonl` |
 | **Format** | JSONL: one JSON object per line, one record per completed job |
-| **Owner** | `www-data` |
-| **Permissions** | `640` |
-| **MDI reads** | Future — when usage-history export is implemented |
-| **MDI writes** | Future — MDI will append one record per completed job with `tool_name: "mdi"` |
+| **Owner** | `root:dns-tool` |
+| **Permissions** | `660` |
+| **MDI reads** | Yes — `GET /api/mdi/dashboard` (metadata aggregates) |
+| **MDI writes** | Yes — append metadata-only record per completed job (`tool_name: "mdi"`) |
 | **Contains item data** | No — metadata-only counts; no domain names or URLs |
 | **Source-control** | Excluded by `.gitignore` |
 | **Cleanup rule** | Append-only; never truncate manually. A future maintenance ticket may archive old records. |
@@ -67,10 +124,10 @@ until a future column-addition ticket updates that exporter.
 |---|---|
 | **Full path** | `/var/lib/dns-tool/vt_daily_history.json` |
 | **Format** | JSON: `{"YYYY-MM-DD": N, ...}` — up to 90 day entries |
-| **Owner** | `www-data` |
-| **Permissions** | `644` |
-| **MDI reads** | Future — when dashboard usage chart is implemented |
-| **MDI writes** | Future — will update alongside `vt_usage.json` during quota increment |
+| **Owner** | `root:dns-tool` |
+| **Permissions** | `660` |
+| **MDI reads** | Yes — dashboard quota trend (optional) |
+| **MDI writes** | Yes — `quota_writer.update_daily_history()` on job completion |
 | **Contains item data** | No — daily totals only |
 | **Source-control** | Excluded by `.gitignore` |
 | **Cleanup rule** | Pruned automatically to last 90 days on each write |
@@ -97,18 +154,6 @@ until a future column-addition ticket updates that exporter.
 ---
 
 ## Planned future files in `/var/lib/dns-tool/`
-
-### `mdi_latest_job.json` — MDI job recovery snapshot *(future)*
-
-| Field | Value |
-|---|---|
-| **Full path** | `/var/lib/dns-tool/mdi_latest_job.json` |
-| **Format** | JSON: full MDI job snapshot |
-| **MDI reads** | Yes — job recovery endpoint |
-| **MDI writes** | Yes — after job completion, atomic write |
-| **Contains item data** | Yes — normalised item keys and per-check results |
-| **Source-control** | Excluded by `.gitignore` (`/var/lib/dns-tool/`) |
-| **Created in** | Future job-persistence ticket |
 
 ### `mdi_daily_history.json` — MDI rolling daily history *(future)*
 
@@ -147,8 +192,8 @@ MDI-08 introduces disk persistence for the latest completed MDI job.
 | **Format** | JSON: full MDI job snapshot (see below) |
 | **MDI reads** | Yes — `job_persistence.read_latest_job()` → `GET /api/mdi/jobs/latest` |
 | **MDI writes** | Yes — `job_persistence.write_latest_job()` after job completion. Atomic: `tmp → os.replace()` |
-| **Permissions** | `0o600` applied via `os.chmod()` after write |
-| **Owner** | root (since `mdi-backend` runs as root — deferred ops hardening) |
+| **Permissions** | `600` (`mdi:mdi` after write via `os.chmod()`) |
+| **Owner** | `mdi:mdi` (MDI-18B — service runs as user `mdi`) |
 | **Contains item data** | **Yes** — normalized domains/URLs and per-item VT results |
 | **Data sensitivity** | Operational threat-intel data, not PII. Private to MDI operator. |
 | **Retention** | Overwritten by each subsequent completed/error job. No TTL. |
@@ -350,9 +395,8 @@ MDI-06 introduces actual runtime file **writes** for the first time.
 
 - `quota_writer.increment_quota()` uses `asyncio.Lock` for in-process serialization.
 - Write is atomic: content written to `{file}.tmp` then renamed with `os.replace()`.
-- **Accepted MVP risk:** both `mdi-backend` and `dns-tool-backend` may write `vt_usage.json`
-  simultaneously in separate processes. The race window is a single `os.replace()` call.
-  This is documented and carried forward to a future atomic-locking ticket.
+- **MDI-19:** cross-process writes use `fcntl.flock` on `vt_usage.lock` (5s timeout).
+  Both MDI and VT Bulk must deploy locking together. See [Production Runbook](runbooks/mdi-production-runbook.md).
 
 ### Usage history contract
 
