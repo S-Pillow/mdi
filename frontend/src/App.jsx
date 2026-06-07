@@ -109,8 +109,17 @@ function isRowStale(r) {
 }
 function canScanRow(r, job) {
   if (isRowHeld(r) || !r.input_normalized) return false
-  if (r.input_type === 'url') return true
-  return !job?.use_domain_reports
+  return r.input_type === 'url' || r.input_type === 'domain'
+}
+function scanRowTitle(r, job, actionInProgress) {
+  if (!r || !job) return 'Select a row first'
+  if (actionInProgress) return 'A refresh/scan action is already in progress'
+  if (isRowHeld(r)) return 'Row is on hold — scan not available'
+  if (!r.input_normalized) return 'Row not eligible for scan'
+  if (!canScanRow(r, job)) return 'Row not eligible for scan'
+  if (r.input_type === 'domain') return 'Requests VT domain reanalysis.'
+  if (r.input_type === 'url') return 'Submits URL for VT scan.'
+  return 'Row not eligible for scan'
 }
 function canRefreshRow(r) {
   return !isRowHeld(r) && !!r.input_normalized
@@ -1483,6 +1492,13 @@ function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confi
         {skipSummary && (
           <p className="action-modal-skips">Skipped: {skipSummary}</p>
         )}
+        {isScan && (estimate.url_scan_eligible_count > 0 || estimate.domain_rescan_eligible_count > 0) && (
+          <p className="action-modal-skips">
+            {estimate.url_scan_eligible_count > 0 && `${estimate.url_scan_eligible_count} URL scan(s)`}
+            {estimate.url_scan_eligible_count > 0 && estimate.domain_rescan_eligible_count > 0 && '; '}
+            {estimate.domain_rescan_eligible_count > 0 && `${estimate.domain_rescan_eligible_count} domain rescan(s)`}
+          </p>
+        )}
         {blocked && (
           <p className="action-modal-warn">⛔ Insufficient quota for worst-case estimate. Action blocked.</p>
         )}
@@ -2165,11 +2181,7 @@ function DetailDrawer({
             <button
               className={canScanRow(r, job) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
               disabled={!canScanRow(r, job) || actionInProgress || !job}
-              title={
-                !canScanRow(r, job) && job?.use_domain_reports && r.input_type === 'domain'
-                  ? 'New scan not supported in domain-report mode'
-                  : canScanRow(r, job) ? 'Request new VT scan' : 'Row not eligible for scan'
-              }
+              title={scanRowTitle(r, job, actionInProgress)}
               onClick={() => onScanRow && onScanRow(r)}
             >
               ↺ Request new scan

@@ -107,8 +107,9 @@ Before running, MDI validates input offline:
 **Domain-report mode** (`use_domain_reports`) queries VT domain reports instead
 of URL reports. Use when your input is primarily registered domains.
 
-**Limitation:** Domain-report mode does **not** support **Request New Scan**
-(see §10). Refresh Report remains available.
+**Request New Scan** in domain-report mode uses VT **domain reanalysis**
+(`POST /domains/{domain}/analyse`). **Refresh Report** re-fetches the existing
+domain report only (lower cost). See §10–§11.
 
 ---
 
@@ -323,17 +324,22 @@ create a new job.
 
 ## 11. Request New Scan
 
-**Request New Scan** asks VT to scan the item again, then polls for results.
+**Request New Scan** asks VT to reanalyse the item, then polls for results.
 
 | Aspect | Detail |
 |---|---|
-| **Typical cost** | **2–4 VT quota units per item** (submit + poll overhead) |
-| **URL mode** | Supported for URL-type items |
-| **Domain-report mode** | **Not supported** — scan button disabled when domain reports enabled |
+| **Typical cost** | **2–4 VT quota units** per URL-scan row; **2–5** per domain-rescan row |
+| **URL rows** | Submits URL for VT scan (existing URL workflow) |
+| **Bare domain rows (domain-report mode)** | Requests VT **domain reanalysis** |
+| **Bare domain rows (URL-report mode)** | Uses URL scan on `http://{domain}/` |
 | **When not to use** | Near quota limit, held domains, or when refresh is sufficient |
+| **Pending** | May return `vt_scan_pending` — prior VT evidence is preserved |
 
 Use sparingly on high-priority items. Prefer **Refresh Report** when an
 existing report may still be useful.
+
+**Auto-rescan** does not yet use domain rescan — stale flagged bare domains in
+domain-report mode are skipped during job processing (deferred to a follow-up).
 
 ---
 

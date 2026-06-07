@@ -231,6 +231,16 @@ literals (IPv4/IPv6), CIDR notation, IP ranges, and IP-hostname URLs are
 rejected with `ip_address_not_supported` (`input_validation`, source
 `input_parser`); numeric domain labels (`123.example.com`) remain valid.
 
+### Manual scan/rescan routing (MDI-28)
+
+| Row type | `use_domain_reports` | Request New Scan path | Typical quota |
+|---|---|---|---|
+| `url` | any | URL scan (`POST /urls` + poll) | 2–4 |
+| `domain` | `false` | URL scan on `http://{domain}/` | 2–4 |
+| `domain` | `true` | Domain rescan (`POST /domains/{domain}/analyse` + analysis poll + domain GET) | 2–5 |
+
+Refresh Report always uses GET-only (1 unit). Auto-rescan domain rescan is deferred.
+
 The VT API lookup target is derived in `vt_service._build_vt_target()`, NOT in the parser:
 
 | `input_type` | `use_domain_reports` | VT target | `vt_mode_used` |

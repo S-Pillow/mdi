@@ -562,3 +562,89 @@ def test_parse_vt_response_engine_detections_default_empty():
     vr = VtLookupResult()
     assert vr.engine_detections == []
     assert isinstance(vr.engine_detections, list)
+
+
+# ── MDI-28 domain rescan ───────────────────────────────────────────────────────
+
+def test_scan_supported_for_item_domain_report_mode():
+    assert vt_svc.scan_supported_for_item(InputType.DOMAIN, use_domain_reports=True) is True
+    assert vt_svc.scan_supported_for_item(InputType.DOMAIN, use_domain_reports=False) is True
+    assert vt_svc.scan_supported_for_item(InputType.URL, use_domain_reports=True) is True
+
+
+def test_request_new_scan_domain_rescan_success():
+    scan_ts = int(time.time()) - 3600
+    domain_body = _vt_url_report(malicious=2, suspicious=1, last_analysis_date=scan_ts)
+    calls_log = []
+
+    async def _vt_side(method, url, **kwargs):
+        calls_log.append((method, url))
+        if method == "POST" and "/domains/" in url and url.endswith("/analyse"):
+            return _mock_resp(200, {"data": {"id": "analysis-abc", "type": "analysis"}})
+        if method == "GET" and "/analyses/" in url:
+            return _mock_resp(200, {"data": {"attributes": {"status": "completed"}}})
+        if method == "GET" and "/domains/" in url:
+            return _mock_resp(200, domain_body)
+        return _mock_resp(404)
+
+    with _patch_limiter(), \
+         patch("services.vt_service._vt_request", new=AsyncMock(side_effect=_vt_side)), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        result = _run(vt_svc.request_new_scan(
+            "himovies.to", InputType.DOMAIN, use_domain_reports=True,
+        ))
+
+    assert result.error is None
+    assert result.vt_malicious == 2
+    assert result.vt_mode_used == VtModeUsed.DOMAIN_REPORT
+    assert result.calls_made == 3
+    assert any(m == "POST" and "/analyse" in u for m, u in calls_log)
+    assert any("/analyses/" in u for m, u in calls_log)
+    assert any(m == "GET" and "/domains/himovies.to" in u for m, u in calls_log)
+
+
+def test_request_new_scan_domain_rescan_pending():
+    async def _vt_side(method, url, **kwargs):
+        if method == "POST" and "/analyse" in url:
+            return _mock_resp(200, {"data": {"id": "analysis-pend"}})
+        if method == "GET" and "/analyses/" in url:
+            return _mock_resp(200, {"data": {"attributes": {"status": "queued"}}})
+        return _mock_resp(404)
+
+    with _patch_limiter(), \
+         patch("services.vt_service._vt_request", new=AsyncMock(side_effect=_vt_side)), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        result = _run(vt_svc.request_new_scan(
+            "pending.to", InputType.DOMAIN, use_domain_reports=True,
+        ))
+
+    assert result.error is not None
+    assert result.error.code == "vt_scan_pending"
+    assert result.calls_made == 4  # POST + 3 analysis polls
+
+
+def test_request_new_scan_url_path_unchanged():
+    """URL scan still uses POST /urls and polls /urls/{id}."""
+    scan_ts = int(time.time()) - 3600
+    success_body = _vt_url_report(malicious=1, last_analysis_date=scan_ts)
+    calls_log = []
+
+    async def _vt_side(method, url, **kwargs):
+        calls_log.append((method, url))
+        if method == "POST" and url.endswith("/urls"):
+            return _mock_resp(200, {"data": {"id": "url-id"}})
+        if method == "GET" and "/urls/" in url:
+            return _mock_resp(200, success_body)
+        return _mock_resp(404)
+
+    with _patch_limiter(), \
+         patch("services.vt_service._vt_request", new=AsyncMock(side_effect=_vt_side)), \
+         patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
+        result = _run(vt_svc.request_new_scan(
+            "https://evil.example/path", InputType.URL, use_domain_reports=False,
+        ))
+
+    assert result.error is None
+    assert result.vt_malicious == 1
+    assert any(m == "POST" and u.endswith("/urls") for m, u in calls_log)
+    assert not any("/analyse" in u for m, u in calls_log)

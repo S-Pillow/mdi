@@ -453,12 +453,13 @@ async def _get_existing_url_report(
 
 # ── Scan (POST + bounded poll) helpers ─────────────────────────────────────────
 
-MAX_SCAN_POLL_ATTEMPTS = 3  # GET polls after POST (2–4 total quota units per item)
+MAX_SCAN_POLL_ATTEMPTS = 3  # GET polls after POST (2–4 URL scan; 2–5 domain rescan)
 
-_DOMAIN_REPORT_SCAN_MSG = (
-    "New scan is not supported in domain-report mode; "
-    "use Refresh Report or rerun with URL report mode."
-)
+# Conservative per-item scan quota estimates (manual actions).
+URL_SCAN_QUOTA_MIN = 2
+URL_SCAN_QUOTA_MAX = 4
+DOMAIN_RESCAN_QUOTA_MIN = 2
+DOMAIN_RESCAN_QUOTA_MAX = 5  # POST analyse + polls + final domain GET
 
 
 async def _submit_url_for_scan(
@@ -519,6 +520,135 @@ async def _poll_url_report_after_scan(
         f"(last HTTP {last_status}). Retry later.",
         retriable=True,
     ), calls
+
+
+async def _submit_domain_for_rescan(
+    domain: str,
+    headers: Dict[str, str],
+) -> Tuple[Optional[str], Optional[MdiError], int]:
+    """POST domain for VT reanalysis. Returns (analysis_id, error, calls_made)."""
+    calls = 0
+    await _VT_LIMITER.acquire()
+    try:
+        resp = await _vt_request(
+            "POST",
+            f"{VT_BASE_URL}/domains/{domain}/analyse",
+            headers=headers,
+        )
+        calls += 1
+    except httpx.TimeoutException:
+        return None, _vt_error("vt_timeout", "VT domain rescan submit timed out.", retriable=True), calls
+    except Exception as exc:
+        return None, _vt_error("vt_connection", f"Domain rescan submit error: {exc}", retriable=True), calls
+
+    if resp.status_code == 429:
+        return None, _vt_error("vt_429", "VT rate limit hit during domain rescan.", retriable=True), calls
+    if resp.status_code == 401:
+        return None, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
+    if resp.status_code >= 400:
+        return None, _vt_error(
+            "vt_submit_error",
+            f"VT domain rescan returned HTTP {resp.status_code}.",
+        ), calls
+
+    body = resp.json() if resp.content else {}
+    analysis_id = (body.get("data") or {}).get("id")
+    if not analysis_id:
+        return None, _vt_error(
+            "vt_submit_error",
+            "VT domain rescan response missing analysis id.",
+        ), calls
+    return analysis_id, None, calls
+
+
+async def _poll_analysis_after_rescan(
+    analysis_id: str,
+    headers: Dict[str, str],
+) -> Tuple[bool, Optional[MdiError], int]:
+    """Bounded polls on GET /analyses/{id}. Returns (completed, error, calls_made)."""
+    calls = 0
+    last_status = ""
+
+    for _ in range(MAX_SCAN_POLL_ATTEMPTS):
+        await _VT_LIMITER.acquire()
+        try:
+            resp = await _vt_request(
+                "GET",
+                f"{VT_BASE_URL}/analyses/{analysis_id}",
+                headers=headers,
+            )
+            calls += 1
+        except httpx.TimeoutException:
+            return False, _vt_error("vt_timeout", "VT analysis poll timed out.", retriable=True), calls
+        except Exception as exc:
+            return False, _vt_error("vt_connection", f"Analysis poll error: {exc}", retriable=True), calls
+
+        if resp.status_code == 401:
+            return False, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
+        if resp.status_code == 429:
+            return False, _vt_error("vt_429", "VT rate limit reached during analysis poll.", retriable=True), calls
+        if resp.status_code != 200:
+            continue
+
+        attrs = (resp.json().get("data") or {}).get("attributes") or {}
+        last_status = str(attrs.get("status") or "")
+        if last_status == "completed":
+            return True, None, calls
+
+    return False, _vt_error(
+        "vt_scan_pending",
+        f"VT domain rescan submitted but analysis not complete after {MAX_SCAN_POLL_ATTEMPTS} polls "
+        f"(last status: {last_status or 'unknown'}). Retry later.",
+        retriable=True,
+    ), calls
+
+
+async def _request_domain_rescan(
+    domain: str,
+    headers: Dict[str, str],
+    *,
+    stale_threshold_days: int = DEFAULT_STALE_THRESHOLD_DAYS,
+) -> VtLookupResult:
+    """POST domain analyse, poll analysis, then GET updated domain report."""
+    calls = 0
+
+    analysis_id, submit_err, submit_calls = await _submit_domain_for_rescan(domain, headers)
+    calls += submit_calls
+    if submit_err:
+        return VtLookupResult(
+            vt_mode_used=VtModeUsed.DOMAIN_REPORT,
+            error=submit_err,
+            calls_made=calls,
+        )
+
+    completed, poll_err, poll_calls = await _poll_analysis_after_rescan(analysis_id, headers)
+    calls += poll_calls
+    if not completed:
+        return VtLookupResult(
+            vt_mode_used=VtModeUsed.DOMAIN_REPORT,
+            error=poll_err,
+            calls_made=calls,
+        )
+
+    report, fetch_err, fetch_calls = await _fetch_domain_report(domain, headers)
+    calls += fetch_calls
+    if fetch_err:
+        return VtLookupResult(
+            vt_mode_used=VtModeUsed.DOMAIN_REPORT,
+            error=fetch_err,
+            calls_made=calls,
+        )
+
+    result = parse_vt_response(report, VtModeUsed.DOMAIN_REPORT, stale_threshold_days)
+    result.calls_made = calls
+    return result
+
+
+def scan_quota_estimate_for_mode(vt_mode: VtModeUsed) -> Tuple[int, int]:
+    """Return conservative (min, max) VT quota units for a manual scan/rescan."""
+    if vt_mode == VtModeUsed.DOMAIN_REPORT:
+        return DOMAIN_RESCAN_QUOTA_MIN, DOMAIN_RESCAN_QUOTA_MAX
+    return URL_SCAN_QUOTA_MIN, URL_SCAN_QUOTA_MAX
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -610,10 +740,11 @@ async def request_new_scan(
     stale_threshold_days: int = DEFAULT_STALE_THRESHOLD_DAYS,
 ) -> VtLookupResult:
     """
-    Request a new VT URL analysis (POST + bounded poll GET).
+    Request a new VT analysis for an MDI item.
 
-    Domain-report mode is not supported in MDI-15 — returns structured skip error
-    with zero quota consumed.
+    Routes by VT mode:
+      - domain_report → POST /domains/{domain}/analyse + analysis poll + domain GET
+      - url_report    → POST /urls + bounded URL report poll (unchanged)
     """
     api_key = os.environ.get("VT_API_KEY", "")
     if not api_key:
@@ -623,17 +754,16 @@ async def request_new_scan(
         )
 
     vt_target, vt_mode = _build_vt_target(input_normalized, input_type, use_domain_reports)
+    headers = _vt_headers(api_key)
 
     if vt_mode == VtModeUsed.DOMAIN_REPORT:
-        return VtLookupResult(
-            vt_mode_used=vt_mode,
-            error=_vt_error("scan_not_supported", _DOMAIN_REPORT_SCAN_MSG, retriable=False),
-            calls_made=0,
+        return await _request_domain_rescan(
+            vt_target,
+            headers,
+            stale_threshold_days=stale_threshold_days,
         )
 
-    headers = _vt_headers(api_key)
     calls = 0
-
     submit_err, submit_calls = await _submit_url_for_scan(vt_target, headers)
     calls += submit_calls
     if submit_err:
@@ -653,7 +783,6 @@ def scan_supported_for_item(
     input_type: InputType,
     use_domain_reports: bool,
 ) -> bool:
-    """Return True when request_new_scan is supported for this item."""
-    if input_type == InputType.URL:
-        return True
-    return not use_domain_reports
+    """Return True when manual request_new_scan is supported for this item."""
+    del use_domain_reports  # domain-report bare domains support domain rescan (MDI-28)
+    return input_type in (InputType.URL, InputType.DOMAIN)

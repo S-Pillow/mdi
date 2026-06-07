@@ -122,7 +122,7 @@ Columns: **Category · Example codes · Severity · Meaning · User-visible resu
 | `vt_lookup` | `auth_error` | error | VT auth failure / `no_api_key` | Job or row failure | **Admin fix** secrets/config | No (analyst) | 0 | Not analyst retry |
 | `vt_lookup` | `server_error` | error | VT 5xx | Row error | Retry later | Yes | 1 | |
 | `vt_lookup` | `vt_scan_pending` | warning | Scan submitted; report not ready | Amber warning in drawer/table | Wait; Refresh later | Yes | 2–4 | Not immediate failure |
-| `scan` | `vt_scan_not_supported` | skip | Domain-report mode or ineligible | SKIP indicator; muted styling | Use URL mode or Refresh only | No scan | 0 | `scan_not_supported` alias |
+| `scan` | `vt_scan_not_supported` | skip | Truly unsupported item type | SKIP indicator; muted styling | Use Refresh only | No scan | 0 | Rare after MDI-28; `scan_not_supported` alias |
 
 ### Quota
 
@@ -209,7 +209,8 @@ MDI sets `recommended_action` per row. Use it with severity — not instead of i
 
 - **Retry Lookup** usually means submit a new job (or re-include the item) later — not click Refresh on the same recovered session for a parse-time error.
 - **Refresh Report** re-fetches an existing VT report; prefer over Request New Scan when evidence may still be useful.
-- **Request New Scan** is **not supported** for bare domains when **domain-report mode** is enabled.
+- **Request New Scan** for bare domains in **domain-report mode** uses VT domain reanalysis (MDI-28).
+- **Auto-rescan** still skips domain-report bare domains (deferred).
 - **`quota_lock_timeout`** means lock contention — retry later; it is **not** daily quota exhaustion (`quota_blocked`).
 - **`auth_error` / `no_api_key`** require configuration/admin fix, not repeated analyst retries.
 - **Export errors** should not trigger new VT lookups — adjust export scope only.
@@ -253,7 +254,7 @@ Future validation reference. **Do not run live VT tests without quota approval.*
 | VT success + WHOIS fail | RDAP/WHOIS fail, VT OK | Follows VT triage (not ERROR solely for WHOIS) | WARNING `whois_failed` in drawer | `whois_failed` `(warning)` hint | VT only | Integration |
 | VT success + live-check fail | Flagged item; live error | Follows VT; live warning | WARNING live_check code; amber indicator | `live_check_error_count` | VT only | Integration |
 | Held domain skip | Upload/domain with hold | `held` bucket; `skipped_hold` evidence | SKIP/info; no VT ratio | `held_count` | 0 | UI/integration |
-| Domain-report scan unsupported | Domain row; domain-report mode on | Scan button disabled | `vt_scan_not_supported` if attempted | N/A | 0 | UI |
+| Domain rescan pending | Domain row; domain-report mode; analysis slow | Row keeps prior VT; warning | `vt_scan_pending` | Retry later | 2–5 | Backend mock |
 | Scan pending | Scan submitted; report not ready | May stay pending/warning | WARNING `vt_scan_pending` | N/A | 2–4 prior | Integration |
 | Export no flagged rows | Export Flagged on clean job | N/A | `Export failed: [no_flagged_rows] …` | No file | 0 | UI export POST |
 | Corrupt latest snapshot | Truncate `mdi_latest_job.json` in test env | No restore | Empty job state | N/A | 0 | Admin test env only |
