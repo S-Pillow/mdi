@@ -129,6 +129,253 @@ function isExportFlagged(r) {
   return (r?.vt_hits ?? 0) > 0 || (r?.vt_suspicious ?? 0) > 0
 }
 
+// ── MDI error display helpers (MDI-22B) ───────────────────────────────────────
+
+const ERROR_SEVERITIES = new Set(['error', 'warning', 'skip', 'info'])
+
+const CODE_SKIP = new Set([
+  'quota_exhausted', 'quota_blocked', 'scan_not_supported', 'vt_scan_not_supported',
+  'no_flagged_rows', 'no_rows',
+])
+
+function inferClientSeverity(code, source) {
+  if (!code) return 'error'
+  if (code === 'quota_lock_timeout' || code === 'no_api_key' || code === 'auth_error') return 'error'
+  if (code.startsWith('vt_') || (code.startsWith('vt') && code !== 'vt_scan_not_supported' && code !== 'vt_scan_pending')) {
+    return 'error'
+  }
+  if (CODE_SKIP.has(code)) return 'skip'
+  if (code === 'whois_failed' || code === 'enrichment_error') return 'warning'
+  if (code.startsWith('live_check_') || ['dns_failed', 'redirect_blocked', 'blocked', 'tls_error'].includes(code)) {
+    return 'warning'
+  }
+  if (code.startsWith('auto_rescan_')) {
+    if (code.includes('quota_blocked') || code.includes('lock')) return 'warning'
+    return 'info'
+  }
+  if (code === 'vt_scan_pending') return 'warning'
+  return 'error'
+}
+
+function inferClientCategory(code, source) {
+  if (source && source !== 'unknown') {
+    if (source === 'input_parser') return 'input_validation'
+    if (source === 'upload_parser') return 'upload_parse'
+    if (source === 'domain_enrichment') return 'rdap_whois'
+    if (source === 'live_check') return 'live_check'
+    if (source === 'vt_service' || source === 'vt') return 'vt_lookup'
+    if (source === 'auto_rescan') return 'auto_rescan'
+    if (source === 'export_service') return 'export'
+  }
+  if (!code) return 'unknown'
+  if (code.startsWith('invalid_') || code === 'parse_error' || code === 'unsupported_scheme') return 'input_validation'
+  if (code.startsWith('live_check_')) return 'live_check'
+  if (code.startsWith('auto_rescan_')) return 'auto_rescan'
+  if (code.startsWith('vt_') || ['timeout', 'rate_limited', 'connection_error', 'server_error', 'not_found'].includes(code)) {
+    return 'vt_lookup'
+  }
+  if (['quota_exhausted', 'quota_blocked', 'quota_lock_timeout'].includes(code)) return 'quota'
+  return 'unknown'
+}
+
+function normalizeMdiError(error) {
+  if (error == null) return null
+  if (typeof error === 'string') {
+    return {
+      code: 'unknown',
+      message: error,
+      source: 'unknown',
+      retriable: false,
+      category: 'unknown',
+      severity: 'error',
+      blocks_triage: true,
+    }
+  }
+  const code = error.code || 'unknown'
+  const category = error.category || inferClientCategory(code, error.source)
+  const severity = error.severity && ERROR_SEVERITIES.has(error.severity)
+    ? error.severity
+    : inferClientSeverity(code, error.source)
+  const blocks_triage = error.blocks_triage != null
+    ? Boolean(error.blocks_triage)
+    : severity === 'error'
+  return {
+    code,
+    message: error.message || String(code),
+    source: error.source || 'unknown',
+    retriable: Boolean(error.retriable),
+    category,
+    severity,
+    blocks_triage,
+  }
+}
+
+function getErrorSeverity(error) {
+  return normalizeMdiError(error)?.severity ?? 'error'
+}
+
+function errorSeverityLabel(severity) {
+  return { error: 'ERROR', warning: 'WARNING', skip: 'SKIPPED', info: 'INFO' }[severity] ?? 'ERROR'
+}
+
+function getErrorSeverityClass(severity) {
+  return {
+    error: 'error-notice-row--error',
+    warning: 'error-notice-row--warning',
+    skip: 'error-notice-row--skip',
+    info: 'error-notice-row--info',
+  }[severity] ?? 'error-notice-row--error'
+}
+
+function severityBadgeClass(severity) {
+  return {
+    error: 'badge-error',
+    warning: 'badge-warning',
+    skip: 'badge-skip',
+    info: 'badge-info',
+  }[severity] ?? 'badge-error'
+}
+
+function formatMdiError(error, options = {}) {
+  const n = normalizeMdiError(error)
+  if (!n) return ''
+  const { short = true, includeMeta = false } = options
+  const label = errorSeverityLabel(n.severity).toLowerCase()
+  if (short) {
+    return `[${label}] ${n.code}: ${n.message}`
+  }
+  const lines = [`${n.code}: ${n.message}`]
+  if (includeMeta) {
+    const meta = []
+    if (n.source && n.source !== 'unknown') meta.push(`source: ${n.source}`)
+    if (n.category && n.category !== 'unknown') meta.push(`category: ${n.category}`)
+    meta.push(`retriable: ${n.retriable ? 'yes' : 'no'}`)
+    if (meta.length) lines.push(meta.join(' · '))
+  }
+  return lines.join('\n')
+}
+
+function formatMdiErrorList(errors) {
+  if (!errors?.length) return ''
+  return errors.map(e => formatMdiError(e, { short: true })).filter(Boolean).join('; ')
+}
+
+function formatApiErrorDetail(detail, prefix) {
+  if (detail == null || detail === '') {
+    return prefix || ''
+  }
+  if (typeof detail === 'string') {
+    return prefix ? `${prefix}: ${detail}` : detail
+  }
+  const code = detail.code
+  const msg = detail.message || detail.error
+  if (code && msg) {
+    const text = `[${code}] ${msg}`
+    return prefix ? `${prefix}: ${text}` : text
+  }
+  if (msg) return prefix ? `${prefix}: ${msg}` : msg
+  if (code) return prefix ? `${prefix}: [${code}]` : `[${code}]`
+  try {
+    const fallback = JSON.stringify(detail)
+    return prefix ? `${prefix}: ${fallback}` : fallback
+  } catch {
+    return prefix ? `${prefix}: Request failed` : 'Request failed'
+  }
+}
+
+function hasBlockingErrors(errors) {
+  return (errors || []).some(e => normalizeMdiError(e)?.blocks_triage)
+}
+
+function hasWarningsOnly(errors) {
+  const list = (errors || []).map(normalizeMdiError).filter(Boolean)
+  if (!list.length) return false
+  return list.every(e => e.severity === 'warning')
+}
+
+function hasSkipsOnly(errors) {
+  const list = (errors || []).map(normalizeMdiError).filter(Boolean)
+  if (!list.length) return false
+  return list.every(e => e.severity === 'skip' || e.severity === 'info')
+}
+
+function dashboardSeverityHint(code) {
+  return inferClientSeverity(code)
+}
+
+function formatDuplicateDisplay(d) {
+  if (d == null) return '—'
+  if (typeof d === 'object') {
+    return d.input_original ?? d.duplicate_of ?? d.input_normalized ?? '—'
+  }
+  return String(d)
+}
+
+function ErrorNoticeList({ errors }) {
+  if (!errors?.length) return null
+  return (
+    <div className="error-notice-list">
+      {errors.map((e, i) => {
+        const n = normalizeMdiError(e)
+        if (!n) return null
+        const meta = []
+        if (n.source && n.source !== 'unknown') meta.push(n.source)
+        if (n.category && n.category !== 'unknown') meta.push(n.category)
+        meta.push(`retriable: ${n.retriable ? 'yes' : 'no'}`)
+        return (
+          <div key={i} className={`error-notice-row ${getErrorSeverityClass(n.severity)}`}>
+            <span className={`badge ${severityBadgeClass(n.severity)}`}>{errorSeverityLabel(n.severity)}</span>
+            <code className="error-code">{n.code}</code>
+            <span className="error-message">{n.message}</span>
+            {meta.length > 0 && <span className="error-meta">{meta.join(' · ')}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RejectedItemRow({ item }) {
+  const original = item.input_original ?? item.original ?? '—'
+  const err = normalizeMdiError(
+    item.error ?? (item.reason ? { code: 'invalid_input', message: item.reason, source: 'input_parser' } : null)
+  )
+  const rowClass = err ? getErrorSeverityClass(err.severity) : 'error-notice-row--error'
+  return (
+    <div className={`error-notice-row ${rowClass}`}>
+      <code className="error-code">{original}</code>
+      {err && (
+        <>
+          <span className={`badge ${severityBadgeClass(err.severity)}`}>{errorSeverityLabel(err.severity)}</span>
+          <code className="error-code">{err.code}</code>
+          <span className="error-message">{err.message}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function EvidenceErrorIndicator({ errors, evidenceStatus }) {
+  if (!errors?.length) return null
+  const title = formatMdiErrorList(errors)
+  const blocking = hasBlockingErrors(errors)
+  const warningsOnly = hasWarningsOnly(errors)
+  const skipsOnly = hasSkipsOnly(errors)
+  if (skipsOnly && !blocking && !warningsOnly) {
+    if (evidenceStatus === 'skipped_hold' || evidenceStatus === 'none') {
+      return <span className="evidence-err-icon evidence-err-icon--skip" title={title}>SKIP</span>
+    }
+    return <span className="evidence-err-icon evidence-err-icon--skip" title={title}>⊘</span>
+  }
+  if (blocking) {
+    return <span className="evidence-err-icon evidence-err-icon--error" title={title}>⚠</span>
+  }
+  if (warningsOnly) {
+    return <span className="evidence-err-icon evidence-err-icon--warning" title={title}>⚠</span>
+  }
+  return <span className="evidence-err-icon evidence-err-icon--warning" title={title}>⚠</span>
+}
+
 async function downloadJobExport(jobId, { format, scope, positions }) {
   const resp = await fetch(`${API_BASE}/api/mdi/jobs/${jobId}/export`, {
     method: 'POST',
@@ -137,8 +384,7 @@ async function downloadJobExport(jobId, { format, scope, positions }) {
   })
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}))
-    const msg = data?.detail || `HTTP ${resp.status}`
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    throw new Error(formatApiErrorDetail(data?.detail, 'Export failed') || `Export failed: HTTP ${resp.status}`)
   }
   const blob = await resp.blob()
   const cd = resp.headers.get('Content-Disposition') || ''
@@ -490,7 +736,10 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
                     <table className="dashboard-table">
                       <tbody>
                         {errRows.map(([k, v]) => (
-                          <tr key={k}><td>{k}</td><td>{v}</td></tr>
+                          <tr key={k}>
+                            <td>{k} <span className="error-meta">({dashboardSeverityHint(k)})</span></td>
+                            <td>{v}</td>
+                          </tr>
                         ))}
                       </tbody>
                     </table>
@@ -662,15 +911,15 @@ function ValidationSummary({ validating, preview, previewError, onRefresh }) {
         </span>
       </div>
       {showRejected && preview.rejected?.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)', maxHeight: 90, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
-          {preview.rejected.map((r, i) => (
-            <div key={i}><code style={{ color: 'var(--risk-critical)', fontFamily: 'Menlo,Consolas,monospace' }}>{r.original}</code> — {r.reason}</div>
-          ))}
+        <div className="error-notice-list" style={{ maxHeight: 90, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
+          {preview.rejected.map((r, i) => <RejectedItemRow key={i} item={r} />)}
         </div>
       )}
       {showDupes && preview.duplicates?.length > 0 && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 60, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
-          {preview.duplicates.map((d, i) => <div key={i}><code style={{ fontFamily: 'Menlo,Consolas,monospace' }}>{d}</code></div>)}
+          {preview.duplicates.map((d, i) => (
+            <div key={i}><code className="error-code">{formatDuplicateDisplay(d)}</code></div>
+          ))}
         </div>
       )}
     </div>
@@ -1003,6 +1252,18 @@ function UploadPreviewResultsSection({ preview, error }) {
             </button>
           )}
         </div>
+        {showRejected && preview.rejected?.length > 0 && (
+          <div className="error-notice-list" style={{ maxHeight: 120, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
+            {preview.rejected.map((r, i) => <RejectedItemRow key={i} item={r} />)}
+          </div>
+        )}
+        {showDupes && preview.duplicates?.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', maxHeight: 80, overflowY: 'auto', background: 'var(--bg-input)', border: '1px solid var(--border-soft)', borderRadius: 4, padding: '6px 10px' }}>
+            {preview.duplicates.map((d, i) => (
+              <div key={i}><code className="error-code">{formatDuplicateDisplay(d)}</code></div>
+            ))}
+          </div>
+        )}
         {showHeld && preview.held_items?.length > 0 && (
           <div>
             <p style={{ fontSize: 11, color: '#818cf8', marginBottom: 6 }}>Hold-skipped domains (not submitted to VT):</p>
@@ -1422,7 +1683,7 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll, selec
                   {r.evidence_status ? (
                     <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>
                   ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
-                  {hasErrors && <span style={{ color: 'var(--warn)', marginLeft: 4, fontSize: 10 }} title={r.errors.join('; ')}>⚠</span>}
+                  {hasErrors && <EvidenceErrorIndicator errors={r.errors} evidenceStatus={r.evidence_status} />}
                 </td>
                 <td onClick={e => e.stopPropagation()}>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -1866,19 +2127,17 @@ function DetailDrawer({
           </div>
         )}
 
-        {/* 6. EVIDENCE */}
-        {r.evidence_status && (
+        {/* 7. EVIDENCE */}
+        {(r.evidence_status || r.errors?.length > 0) && (
           <div className="detail-section">
             <div className="detail-section-label">7. Evidence</div>
-            <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>
+            {r.evidence_status && (
+              <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>
+            )}
             {r.freshness && (
               <span className={`badge ${freshnessBadgeClass(r.freshness)}`} style={{ marginLeft: 6 }}>{r.freshness.replace(/_/g, ' ')}</span>
             )}
-            {r.errors?.length > 0 && (
-              <div style={{ marginTop: 8, fontSize: 10, color: 'var(--status-warning)' }}>
-                {r.errors.map((e, i) => <div key={i}>⚠ {e}</div>)}
-              </div>
-            )}
+            <ErrorNoticeList errors={r.errors} />
           </div>
         )}
 
@@ -2054,7 +2313,14 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
       })
-      if (!resp.ok) { const t = await resp.text(); setEstimateError(`HTTP ${resp.status}: ${t}`); return }
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => 'Request failed')
+        let parsed
+        try { parsed = JSON.parse(text) } catch { /* plain text */ }
+        const detail = parsed?.detail ?? text
+        setEstimateError(formatApiErrorDetail(detail, `HTTP ${resp.status}`))
+        return
+      }
       setEstimateResult(await resp.json())
     } catch (err) { setEstimateError(err.message || 'Network error') }
     finally { setEstimating(false) }
@@ -2150,8 +2416,7 @@ export default function App() {
     })
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}))
-      const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
-      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      throw new Error(formatApiErrorDetail(data?.detail, 'Action estimate failed') || `Action estimate failed: HTTP ${resp.status}`)
     }
     return resp.json()
   }
@@ -2169,8 +2434,7 @@ export default function App() {
     })
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}))
-      const msg = data?.detail?.message || data?.detail || `HTTP ${resp.status}`
-      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+      throw new Error(formatApiErrorDetail(data?.detail, 'Action failed') || `Action failed: HTTP ${resp.status}`)
     }
     return resp.json()
   }
@@ -2270,7 +2534,7 @@ export default function App() {
       })
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}))
-        setJobError(data?.detail?.message || data?.detail || `HTTP ${resp.status}`)
+        setJobError(formatApiErrorDetail(data?.detail, `HTTP ${resp.status}`))
         return
       }
       const data = await resp.json()
