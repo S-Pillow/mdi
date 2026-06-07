@@ -64,7 +64,16 @@ completions: counts, durations, triage bucket totals, operation type. They do
 **not** contain raw domains, URLs, or per-item VT engine results. See
 [Field Purpose Map](field-purpose-map.md) for field-level detail.
 
+### Quota lock validation (MDI-21 / MDI-21A)
+
+Controlled **sequential and light concurrent** quota-consuming production
+validation passed after the VT Bulk stale-cache hotfix (MDI-21A). Shared files
+must remain group `dns-tool` and mode `660`; owner may be the last writer
+(`root`, `mdi`, or `www-data`). This was **not** a stress or load test. See
+[Production Runbook — Quota lock validation status](runbooks/mdi-production-runbook.md#quota-lock-validation-status-mdi-21).
+
 ---
+
 
 ## Files in `/var/lib/dns-tool/`
 
@@ -86,6 +95,8 @@ VirusTotal Bulk Check tool (`dns-tool-backend`) and MDI (`mdi-backend`).
 | **Critical rule** | Do **not** hold this lock during external VT HTTP calls |
 
 Both services must deploy locking together. Partial rollout leaves the lost-update race.
+
+Production validation: MDI-21 rerun passed after MDI-21A (see runbook). Not a load test.
 
 ### `vt_usage.json` — Shared daily VT quota counter
 

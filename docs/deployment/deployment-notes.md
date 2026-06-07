@@ -71,6 +71,7 @@ Both **MDI** (`mdi-backend`, user `mdi`) and **VT Bulk Check**
 - **Never hold the lock during external VirusTotal HTTP calls.**
 - Lock timeout: 5 seconds; failures return `quota_lock_timeout` without mutating quota files.
 - **Deploy both services in the same maintenance window** — partial rollout restores the lost-update race.
+- MDI-21 controlled validation passed after MDI-21A VT Bulk hotfix (see [runbook](../runbooks/mdi-production-runbook.md#quota-lock-validation-status-mdi-21)).
 - See [Production Runbook §10](../runbooks/mdi-production-runbook.md#10-coordinated-mdi--vt-bulk-deployment) for coordinated deploy steps.
 - `vt_daily_history.json` schema differs between tools (known; out of scope for MDI-19).
 

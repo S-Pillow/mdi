@@ -395,9 +395,14 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ## 17. Known limitations
 
-- Estimate is advisory; locked pre-VT checks reduce but do not eliminate quota races
-- Concurrent MDI + VT Bulk quota use is flock-protected for accounting; live
-  concurrent load was not acceptance-tested
+- Estimate is advisory; locked pre-VT checks reduce race risk but are not a full
+  reservation system
+- Shared quota locking passed **controlled production validation (MDI-21)** after
+  the VT Bulk hotfix (MDI-21A): sequential MDI + VT Bulk jobs, light concurrent
+  jobs, usage-endpoint agreement, history reconciliation, no `quota_lock_timeout`,
+  no permission errors, no lost updates. This was **not** a stress or load test.
+- The initial MDI-21 run failed (VT Bulk stale cache); a one-unit historical
+  undercount on the shared counter was documented and not manually corrected
 - Dashboard triage percentages unavailable for older pre-MDI-17 history lines
 - Large exports are generated in memory
 - Auto-rescan only during initial job processing
