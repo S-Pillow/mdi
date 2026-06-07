@@ -5,18 +5,20 @@ Strategy:
   - Endpoint tests (submit / status) use FastAPI TestClient — test initial state.
   - Processing tests call job_processor.process_job() directly via asyncio.run()
     with mocked VT (_vt_request) and temp file paths (tmp_path).
-  - Live /var/lib/dns-tool/vt_usage.json is never modified.
-  - Live /var/lib/dns-tool/mdi_latest_job.json is never created or modified.
+  - No live /var/lib/dns-tool/ files are modified.
   - No real VT API calls are made.
   - No real RDAP or WHOIS calls are made (MDI-11 enrichment is mocked).
 
-MDI-08A isolation fix (two paths):
-  1. Direct process_job() calls: all now pass job_file=tmp_path / "mdi_latest_job.json".
+MDI-08A / MDI-14A isolation (two paths):
+  1. Direct process_job() calls: all pass explicit file= kwargs (job_file, usage_file,
+     history_file, daily_file) pointing to tmp_path.
   2. Background tasks from POST /api/mdi/jobs/submit TestClient tests: cannot
-     inject job_file= through the endpoint, so an autouse fixture redirects
-     MDI_LATEST_JOB_FILE to tmp_path for every test in this module.
-  Prior to this fix, both paths defaulted to /var/lib/dns-tool/mdi_latest_job.json
-  and wrote test artifacts to the live recovery file during every test run.
+     receive file kwargs through the endpoint, so the autouse fixture redirects
+     MDI_LATEST_JOB_FILE, VT_USAGE_FILE, VT_USAGE_HISTORY_FILE, and
+     VT_DAILY_HISTORY_FILE env vars to tmp_path for every test in this module.
+  Prior to MDI-08A only MDI_LATEST_JOB_FILE was redirected; VT_USAGE_HISTORY_FILE
+  and its siblings were added in MDI-14A after discovering the history file grew
+  ~51 lines per full test run due to background tasks writing zero-quota records.
 
 MDI-11 enrichment guard (autouse):
   The redirect_job_persistence fixture also patches enrich_domain to return a
@@ -86,17 +88,23 @@ def _make_noop_enrichment(registered_domain: str = "example.com") -> EnrichmentR
 @pytest.fixture(autouse=True)
 def redirect_job_persistence(tmp_path, monkeypatch):
     """
-    Redirect ALL job persistence writes to tmp_path for every test in this module.
+    Redirect ALL runtime file writes to tmp_path for every test in this module.
 
     This covers two write paths:
-      1. Direct process_job() calls — each also passes explicit job_file=tmp_path/...
+      1. Direct process_job() calls — each also passes explicit file= kwargs.
       2. Background tasks spawned by POST /api/mdi/jobs/submit via TestClient —
-         those tasks cannot receive job_file= injection through the endpoint, so
-         they pick up MDI_LATEST_JOB_FILE from the environment instead.
+         those tasks cannot receive file kwargs through the endpoint, so they
+         resolve all paths from environment variables instead.
 
-    Without this fixture, background tasks default to _default_job_file() =
-    /var/lib/dns-tool/mdi_latest_job.json, writing test artifacts to the live
-    recovery file.  monkeypatch automatically restores the env var after each test.
+    Five env vars are redirected so that no background task can reach any live
+    file under /var/lib/dns-tool/:
+
+      MDI_LATEST_JOB_FILE      -> used by job_persistence._default_job_file()
+      VT_USAGE_FILE            -> used by quota_writer._default_usage_file()
+      VT_USAGE_HISTORY_FILE    -> used by quota_writer._default_history_file()
+      VT_DAILY_HISTORY_FILE    -> used by quota_writer._default_daily_file()
+
+    monkeypatch automatically restores each env var after the test completes.
 
     MDI-11 enrichment guard: also patches enrich_domain to return a no-op result
     so existing tests never make live RDAP or WHOIS calls.  Tests that need real
@@ -106,7 +114,10 @@ def redirect_job_persistence(tmp_path, monkeypatch):
     NOT_CHECKED so all existing tests are unaffected by the new live-check pass.
     Tests that need specific live-check behavior override this mock explicitly.
     """
-    monkeypatch.setenv("MDI_LATEST_JOB_FILE", str(tmp_path / "mdi_latest_job.json"))
+    monkeypatch.setenv("MDI_LATEST_JOB_FILE",   str(tmp_path / "mdi_latest_job.json"))
+    monkeypatch.setenv("VT_USAGE_FILE",         str(tmp_path / "vt_usage.json"))
+    monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(tmp_path / "vt_usage_history.jsonl"))
+    monkeypatch.setenv("VT_DAILY_HISTORY_FILE", str(tmp_path / "vt_daily_history.json"))
     # Patch enrich_domain at the module level used by job_processor
     with (
         patch.object(
@@ -1776,3 +1787,79 @@ def test_mdi12a_latest_job_endpoint_returns_live_counters(tmp_path):
     assert "live_check_error_count" in data
     # This job ran a live check on a flagged domain
     assert data["live_check_count"] >= 1
+
+
+# ── MDI-14A: runtime file isolation regression ─────────────────────────────────
+
+_LIVE_USAGE_FILE   = Path("/var/lib/dns-tool/vt_usage.json")
+_LIVE_HISTORY_FILE = Path("/var/lib/dns-tool/vt_usage_history.jsonl")
+_LIVE_DAILY_FILE   = Path("/var/lib/dns-tool/vt_daily_history.json")
+_LIVE_JOB_FILE     = Path("/var/lib/dns-tool/mdi_latest_job.json")
+
+
+def _file_meta(path: Path) -> dict:
+    """Return mtime_ns and size for a path, or sentinel values if absent."""
+    try:
+        st = path.stat()
+        return {"mtime_ns": st.st_mtime_ns, "size": st.st_size}
+    except FileNotFoundError:
+        return {"mtime_ns": None, "size": None}
+
+
+def _line_count(path: Path) -> int | None:
+    """Return line count for a text file, or None if absent."""
+    try:
+        return sum(1 for _ in path.open())
+    except FileNotFoundError:
+        return None
+
+
+def test_mdi14a_testclient_submit_does_not_modify_live_runtime_files():
+    """
+    MDI-14A regression: a TestClient job submission must not modify any live
+    /var/lib/dns-tool/ runtime file, even after the background task completes.
+
+    Previously the redirect_job_persistence fixture only redirected
+    MDI_LATEST_JOB_FILE.  TestClient background tasks called
+    quota_writer._default_history_file() which fell through to the live path
+    because VT_USAGE_HISTORY_FILE was not set.  This caused ~51 extra lines per
+    full test run.
+
+    The fixture now redirects all four env vars (VT_USAGE_FILE,
+    VT_USAGE_HISTORY_FILE, VT_DAILY_HISTORY_FILE, MDI_LATEST_JOB_FILE) so that
+    no background task can reach /var/lib/dns-tool/.
+    """
+    before_usage   = _file_meta(_LIVE_USAGE_FILE)
+    before_history = {"mtime_ns": None, "size": None,
+                      "lines": _line_count(_LIVE_HISTORY_FILE)}
+    before_daily   = _file_meta(_LIVE_DAILY_FILE)
+    before_job     = _file_meta(_LIVE_JOB_FILE)
+
+    # Submit a job through the API — this is the path that previously leaked.
+    # No VT_API_KEY in env (autouse fixture does not set it), so the background
+    # task completes with calls_made=0 but still writes a usage-history record
+    # unless the fixture correctly redirects the history file path.
+    resp = client.post(
+        "/api/mdi/jobs/submit",
+        json={"raw_input": "isolationcheck.example.com"},
+    )
+    assert resp.status_code == 200
+
+    # Give the TestClient background task time to run (it is synchronous inside
+    # TestClient, but assert after the call to be safe).
+    import time as _time
+    _time.sleep(0.1)
+
+    after_usage   = _file_meta(_LIVE_USAGE_FILE)
+    after_history = {"mtime_ns": None, "size": None,
+                     "lines": _line_count(_LIVE_HISTORY_FILE)}
+    after_daily   = _file_meta(_LIVE_DAILY_FILE)
+    after_job     = _file_meta(_LIVE_JOB_FILE)
+
+    assert after_usage   == before_usage,   "vt_usage.json was modified by a test"
+    assert after_daily   == before_daily,   "vt_daily_history.json was modified by a test"
+    assert after_job     == before_job,     "mdi_latest_job.json was modified by a test"
+    assert after_history["lines"] == before_history["lines"], (
+        f"vt_usage_history.jsonl grew from {before_history['lines']} "
+        f"to {after_history['lines']} lines — background task leaked to live file"
+    )
