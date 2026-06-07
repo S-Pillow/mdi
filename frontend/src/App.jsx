@@ -1875,9 +1875,11 @@ function TriageWorkspace({
             <span style={{ fontSize: 11, color: 'var(--risk-clean)', display: 'flex', alignItems: 'center', gap: 5 }}>
               ↩ Restored
               <button
+                type="button"
+                className="restored-dismiss-btn"
                 onClick={onDismissRestore}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 11, padding: '0 2px' }}
                 title="Dismiss restored job"
+                aria-label="Dismiss restored job"
               >✕</button>
             </span>
           )}
