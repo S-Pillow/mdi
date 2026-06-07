@@ -2,7 +2,7 @@
 
 **Audience:** MDI operators and analysts  
 **Production URL:** `https://forgeforward.app/tools/mdi/`  
-**Related docs:** [Production Runbook](runbooks/mdi-production-runbook.md) · [Runtime Data](runtime-data.md) · [Field Purpose Map](field-purpose-map.md)
+**Related docs:** [Production Runbook](runbooks/mdi-production-runbook.md) · [Runtime Data](runtime-data.md) · [Field Purpose Map](field-purpose-map.md) · [Error Recovery Matrix](error-recovery-matrix.md)
 
 ---
 
@@ -222,7 +222,42 @@ first).
 
 ---
 
-## 8. Detail drawer
+## 8. Error and recovery guide
+
+MDI stores per-item problems in structured `errors[]` objects (code, message,
+severity, category). The UI shows severity badges — **ERROR**, **WARNING**,
+**SKIPPED**, **INFO** — not raw JSON.
+
+### Severity at a glance
+
+| Severity | Meaning | What to do |
+|---|---|---|
+| **error** | Blocking failure; primary evidence incomplete | Retry later, Refresh/Scan if eligible, or contact admin |
+| **warning** | Partial evidence (WHOIS, live check, scan pending) | Review context; VT triage may still be valid |
+| **skip** | Intentional non-processing (hold, quota, unsupported scan) | Not a failure — usually no action |
+| **info** | Operational notice (auto-rescan ineligible) | Read and continue |
+
+**Skips are not failures.** Warnings do **not** automatically force an ERROR
+triage bucket when VT succeeded.
+
+### When to retry, refresh, or scan
+
+| Situation | Preferred action |
+|---|---|
+| Parse-time rejection (`invalid_input`) | Fix input; wait for auto-validation — do **not** Run MDI Check until accepted |
+| VT failure / quota block on row (`retry_lookup`) | New job later when quota allows |
+| Stale VT report (`refresh_report`) | **Refresh Report** (~1 quota unit) |
+| Very stale / pending scan (`request_new_scan`) | **Request New Scan** (~2–4 units); URL-mode only |
+| `quota_lock_timeout` | Wait and retry — lock contention, **not** daily quota exhaustion |
+| `auth_error` / `no_api_key` | **Contact admin** — configuration fix, not analyst retry |
+| Export failed (`no_flagged_rows`, etc.) | Adjust export scope — **no new lookups** |
+
+Full code-level matrix, recovery behavior, and test scenarios:
+**[Error Recovery Matrix](error-recovery-matrix.md)**
+
+---
+
+## 9. Detail drawer
 
 Open a row to inspect full evidence. Sections include:
 
@@ -232,7 +267,7 @@ Open a row to inspect full evidence. Sections include:
 - **Domain Age Context** — created date, age bucket, registrar (from RDAP/WHOIS)
 - **Live Activity Context** — live status and check timestamp (when run)
 - **Triage Reasons** — plain-language explanation strings
-- **Evidence** — structured fields available for export
+- **Evidence** — evidence status, freshness, and structured `errors[]` with severity badges
 
 ### Disabled actions in drawer
 
@@ -248,7 +283,7 @@ Do not expect these features until a future ticket enables them.
 
 ---
 
-## 9. Manual Refresh Report
+## 10. Manual Refresh Report
 
 **Refresh VT Report** re-fetches the existing VT report for eligible rows.
 
@@ -270,7 +305,7 @@ create a new job.
 
 ---
 
-## 10. Request New Scan
+## 11. Request New Scan
 
 **Request New Scan** asks VT to scan the item again, then polls for results.
 
@@ -286,7 +321,7 @@ existing report may still be useful.
 
 ---
 
-## 11. Auto-rescan stale flagged items
+## 12. Auto-rescan stale flagged items
 
 | Setting | Default |
 |---|---|
@@ -309,7 +344,7 @@ reviewing estimate totals and shared quota with VT Bulk Check operators.
 
 ---
 
-## 12. Exports
+## 13. Exports
 
 Exports are **browser downloads** generated in memory by the backend. They
 **do not consume VT quota** and **do not write server-side export files**.
@@ -333,7 +368,7 @@ slow or fail in the browser. Export in smaller scopes if needed.
 
 ---
 
-## 13. Dashboard
+## 14. Dashboard
 
 The operational dashboard (`GET /api/mdi/dashboard`) is **metadata-only**.
 
@@ -353,7 +388,7 @@ The operational dashboard (`GET /api/mdi/dashboard`) is **metadata-only**.
 
 ---
 
-## 14. Quota awareness
+## 15. Quota awareness
 
 | Rule | Detail |
 |---|---|
@@ -368,7 +403,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ---
 
-## 15. Disabled / deferred features
+## 16. Disabled / deferred features
 
 | Feature | Status |
 |---|---|
@@ -379,7 +414,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ---
 
-## 16. Safe operating rules
+## 17. Safe operating rules
 
 - **Always estimate** before running a job
 - **Do not enable auto-rescan casually** — it consumes extra VT quota
@@ -393,7 +428,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ---
 
-## 17. Known limitations
+## 18. Known limitations
 
 - Estimate is advisory; locked pre-VT checks reduce race risk but are not a full
   reservation system
@@ -412,7 +447,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 ---
 
-## 18. Quick operator checklist
+## 19. Quick operator checklist
 
 1. ☐ Open `/tools/mdi/`
 2. ☐ Paste or upload input

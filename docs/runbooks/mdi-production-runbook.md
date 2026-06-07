@@ -1,7 +1,7 @@
 # MDI Production Runbook
 
 **Audience:** Administrators and operators maintaining MDI in production  
-**Related docs:** [Operator Guide](../operator-guide.md) · [Deployment Notes](../deployment/deployment-notes.md) · [Runtime Data](../runtime-data.md)
+**Related docs:** [Operator Guide](../operator-guide.md) · [Deployment Notes](../deployment/deployment-notes.md) · [Runtime Data](../runtime-data.md) · [Error Recovery Matrix](../error-recovery-matrix.md)
 
 ---
 
@@ -354,6 +354,22 @@ sudo journalctl -u dns-tool-backend.service -f
 ---
 
 ## 14. Troubleshooting
+
+### Structured error recovery quick reference
+
+See **[Error Recovery Matrix](../error-recovery-matrix.md)** for the full
+code-level table and test matrix. Quick admin/operator cues:
+
+| Code / topic | Severity | Action |
+|---|---|---|
+| `quota_lock_timeout` | error | Lock contention — retry later; check both backends and `vt_usage.lock`; **not** daily quota exhaustion |
+| `quota_blocked` | skip | Daily quota exhausted — wait for UTC midnight; do not hand-edit `vt_usage.json` |
+| `auth_error` / `no_api_key` | error | **Admin** — verify `/etc/dns-tool/secrets.env` and service group membership; not analyst retry loops |
+| `whois_failed` / live-check warnings | warning | Partial evidence — VT triage may still stand; do not treat as incident |
+| `vt_scan_not_supported` | skip | Domain-report mode or ineligible row — Refresh only |
+| Export `no_flagged_rows` / `no_rows` | skip | Adjust export scope — **no new VT lookups** |
+| Persistence / recovery | n/a | Missing/corrupt `mdi_latest_job.json` → 404, no crash; operator runs new job |
+| Dashboard old history | n/a | Pre-MDI-17 lines may lack triage %; `data_quality.notes` explains gaps — metadata only |
 
 ### MDI 502/503
 

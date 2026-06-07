@@ -5,9 +5,10 @@ primary purpose.  A field may serve more than one purpose; the primary
 purpose determines where it must be present (display, export, etc.).
 
 **Operator context:** For how fields appear in the UI, exports, and dashboard,
-see [Operator Guide](operator-guide.md) (§7–§8 results table and detail drawer,
-§12 exports, §13 dashboard). This document is a technical field reference, not
-a runbook.
+see [Operator Guide](operator-guide.md) (§7–§9 results table, errors, and detail
+drawer, §13 exports, §14 dashboard). For recovery actions and test scenarios, see
+[Error Recovery Matrix](error-recovery-matrix.md). This document is a technical
+field reference, not a runbook.
 
 Purpose categories:
 - **display**       — rendered in the results table or detail drawer
@@ -81,29 +82,36 @@ Purpose categories:
 | `recommended_action` | `RecommendedAction` | display, workflow | `investigate`, `takedown`, `monitor`, `clear`, `skip`, `manual_review`, `none`. Operator guidance only. |
 | `evidence_status` | `EvidenceStatus` | display, audit | `complete`, `partial`, `none`. Whether all expected checks ran. |
 
-### Errors
+### Errors (`MdiError` — MDI-22 / MDI-22B)
+
+Structured per-item errors. Recovery actions and test scenarios:
+[Error Recovery Matrix](error-recovery-matrix.md).
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
-| `errors` | `List[MdiError]` | display, audit | Structured per-item errors. See MDI-22 taxonomy below. |
-| `errors[].code` | `str` | audit | Machine-readable error code (legacy `vt_*` codes remain valid). |
-| `errors[].message` | `str` | display | Human-readable message shown in detail drawer. |
-| `errors[].source` | `str` | audit | Which service/step produced the entry: `vt_service`, `domain_enrichment`, etc. |
-| `errors[].retriable` | `bool` | workflow | Whether a retry may succeed. |
-| `errors[].category` | `str` | audit | Subsystem: `vt_lookup`, `rdap_whois`, `live_check`, `quota`, `export`, etc. |
-| `errors[].severity` | `str` | workflow | `error` \| `warning` \| `skip` \| `info` — see definitions below. |
-| `errors[].blocks_triage` | `bool` | workflow | When true (or inferred from severity=error), forces ERROR triage bucket. |
+| `errors` | `List[MdiError]` | display, audit | List of structured errors for the row. |
+| `errors[].code` | `str` | display, audit | Machine-readable code (`timeout`, `whois_failed`, `quota_blocked`, …). Legacy `vt_*` aliases remain valid on stored objects; dashboard may normalize for counts. |
+| `errors[].message` | `str` | display | Human-readable text in drawer, table tooltips, and export messages. |
+| `errors[].source` | `str` | audit | Producer: `input_parser`, `vt_service`, `domain_enrichment`, `live_check`, `auto_rescan`, `export_service`, `job_persistence`, etc. |
+| `errors[].retriable` | `bool` | workflow | Hint that retry/refresh/scan may succeed; operator still follows `recommended_action`. |
+| `errors[].category` | `str` | audit, workflow | Subsystem: `input_validation`, `upload_parse`, `vt_lookup`, `quota`, `quota_lock`, `rdap_whois`, `live_check`, `refresh`, `scan`, `auto_rescan`, `export`, `recovery`, `persistence`, `unknown`. |
+| `errors[].severity` | `str` | display, workflow | `error` \| `warning` \| `skip` \| `info` — drives UI styling and operator urgency. |
+| `errors[].blocks_triage` | `bool` | workflow | When `true`, can force `triage_bucket=error` if VT did not provide usable evidence. When `false`, error is recorded but does not override successful VT triage. |
 
 ### Error severity (MDI-22)
 
 | Severity | Meaning | Triage impact |
 |---|---|---|
-| `error` | Blocking failure; primary evidence incomplete | Can force `triage_bucket=error` when VT did not succeed |
-| `warning` | Non-fatal partial evidence (e.g. RDAP/WHOIS or live-check failed) | Does **not** override successful VT triage |
-| `skip` | Intentional skip (hold, quota exhaustion, unsupported scan) | Not a failure; may still recommend `retry_lookup` when no VT ran |
-| `info` | Operational notice (e.g. auto-rescan ineligible) | Informational only |
+| `error` | Blocking failure; primary evidence incomplete | **Can** force `triage_bucket=error` when `blocks_triage=true` (or inferred) and VT did not succeed |
+| `warning` | Non-fatal partial evidence (e.g. RDAP/WHOIS or live-check failed) | Does **not** force ERROR; does **not** override successful VT triage |
+| `skip` | Intentional skip (hold, quota exhaustion, unsupported scan) | **Not a failure**; may still recommend `retry_lookup` when no VT ran |
+| `info` | Operational notice (e.g. auto-rescan ineligible) | Informational only; no triage impact |
 
-**Important:** Warnings and skips must not be displayed or triaged as failures. Only `severity=error` (or `blocks_triage=true`) forces the ERROR bucket when combined with failed processing / no usable VT evidence.
+**Important:** Warnings and skips must not be displayed or triaged as failures.
+`blocks_triage` (or `severity=error` when `blocks_triage` is unset) controls
+whether an error can force the ERROR bucket — not merely the presence of any
+`errors[]` entry. A row with VT success plus `whois_failed` (warning) keeps its
+VT-derived triage bucket.
 
 ### Frontend display severity (MDI-22B)
 

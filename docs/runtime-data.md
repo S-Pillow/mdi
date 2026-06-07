@@ -3,7 +3,7 @@
 This document lists every runtime file that MDI reads or writes during
 operation.  Runtime files are **never committed to source control**.
 
-**Related docs:** [Operator Guide](operator-guide.md) · [Production Runbook](runbooks/mdi-production-runbook.md)
+**Related docs:** [Operator Guide](operator-guide.md) · [Production Runbook](runbooks/mdi-production-runbook.md) · [Error Recovery Matrix](error-recovery-matrix.md)
 
 ---
 
@@ -290,7 +290,15 @@ On `mdi-backend` restart the in-memory store is empty.  The frontend calls
 5. Frontend shows results with "↩ Restored from last session" notice.
 
 If `mdi_latest_job.json` is missing or corrupt: endpoint returns 404, frontend
-shows nothing on mount (silent).
+shows nothing on mount (silent). This is a **recovery miss**, not runtime
+corruption — quota files and history are unaffected. See
+[Error Recovery Matrix — Recovery behavior](error-recovery-matrix.md#f-recovery-behavior-matrix).
+
+**Persistence write failure:** If step 4 (`_write_persistence`) fails, the
+in-memory job remains valid for the current session but will not restore after
+restart. Failure is logged and swallowed; operators may see a completed job until
+refresh, then no restore. Admin checks disk space and `mdi` ownership on
+`/var/lib/dns-tool/`.
 
 ### MDI-08 known limitation
 
