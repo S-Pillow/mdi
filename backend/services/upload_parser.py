@@ -7,16 +7,17 @@ assigned nameservers when present.
 
 Pipeline:
   1. Detect file format from extension (csv / xlsx).
-  2. Read header row and map columns to canonical field names.
-  3. For each data row:
+  2. Read all rows and locate the header row (may not be row 1).
+  3. Map columns to canonical field names.
+  4. For each data row:
      a. Extract domain value; skip row if missing.
      b. Normalize domain/URL through the existing input_parser rules.
      c. Deduplicate by normalized value.
      d. Extract optional metadata columns.
-     e. Run offline hold detection against EPP status.
+     e. Run offline hold detection against EPP / Domain State columns.
      f. Derive age_bucket from create date.
      g. Set preview triage fields for held rows.
-  4. Return UploadParseResult (accepted, rejected, duplicates, columns_detected).
+  5. Return UploadParseResult (accepted, rejected, duplicates, columns_detected).
 
 No network calls. No DNS resolution. No external APIs.
 Uploaded file bytes are never persisted beyond this function call.
@@ -54,6 +55,14 @@ from services.input_parser import MAX_TOKEN_LENGTH, map_parse_value_error, norma
 
 # ── Column detection ──────────────────────────────────────────────────────────
 
+MAX_HEADER_SCAN_ROWS = 25
+
+# Human-readable list for missing_domain_column errors.
+DOMAIN_HEADER_HINT = (
+    "DNS Form, Domain, Domain Name, Hostname, Host, URL, Target, Indicator"
+)
+
+
 def _canon_col(s: str) -> str:
     """Normalize a column header to a comparison key."""
     return re.sub(r'[^a-z0-9]', '', s.strip().lower())
@@ -74,6 +83,9 @@ _COLUMN_MAP: Dict[str, frozenset] = {
         "eppstatus", "domainstatus", "status", "domainstatuses",
         "eppstatuses", "registrystatus", "registrarstatus",
     }),
+    "domain_state": frozenset({
+        "domainstate",
+    }),
     "registrar":   frozenset({
         "registrar", "registrarname", "registrarid",
         "sponsoringregistrar",
@@ -84,7 +96,7 @@ _COLUMN_MAP: Dict[str, frozenset] = {
     }),
 }
 
-OPTIONAL_COLUMNS = {"created_at", "epp_status", "registrar", "nameservers"}
+OPTIONAL_COLUMNS = {"created_at", "epp_status", "domain_state", "registrar", "nameservers"}
 
 
 def _detect_columns(headers: List[str]) -> Tuple[ColumnsDetected, Dict[str, int], List[str]]:
@@ -114,6 +126,7 @@ def _detect_columns(headers: List[str]) -> Tuple[ColumnsDetected, Dict[str, int]
             domain=detected_headers.get("domain"),
             created_at=detected_headers.get("created_at"),
             epp_status=detected_headers.get("epp_status"),
+            domain_state=detected_headers.get("domain_state"),
             registrar=detected_headers.get("registrar"),
             nameservers=detected_headers.get("nameservers"),
         ),
@@ -148,6 +161,49 @@ class UploadParseResult:
     duplicates: List[DuplicateItemResponse] = field(default_factory=list)
     columns_detected: ColumnsDetected = field(default_factory=ColumnsDetected)
     missing_optional_columns: List[str] = field(default_factory=list)
+    header_row: Optional[int] = None          # 1-based row number of detected header
+    source_sheet: Optional[str] = None        # active worksheet name for XLSX
+
+
+# ── Row / header helpers ──────────────────────────────────────────────────────
+
+def _normalize_row(row) -> List[str]:
+    return [str(c) if c is not None else "" for c in row]
+
+
+def _is_comment_or_blank_row(row: List[str]) -> bool:
+    if not row:
+        return True
+    if all(not str(c).strip() for c in row):
+        return True
+    first = str(row[0]).strip()
+    return first.startswith("#")
+
+
+def _find_header_row(all_rows: List[List[str]]) -> Optional[int]:
+    """Return 0-based index of the best header row, or None if not found."""
+    best_idx: Optional[int] = None
+    best_score = -1
+    scan_limit = min(len(all_rows), MAX_HEADER_SCAN_ROWS)
+    for idx in range(scan_limit):
+        row = _normalize_row(all_rows[idx])
+        if _is_comment_or_blank_row(row):
+            continue
+        _, col_index, _ = _detect_columns(row)
+        if "domain" not in col_index:
+            continue
+        score = len(col_index)
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx
+
+
+def _combine_status_fields(raw_epp: Optional[str], raw_domain_state: Optional[str]) -> Optional[str]:
+    parts = [p.strip() for p in (raw_epp, raw_domain_state) if p and p.strip()]
+    if not parts:
+        return None
+    return " ".join(parts)
 
 
 # ── Row processing ────────────────────────────────────────────────────────────
@@ -160,6 +216,8 @@ def _process_row(
     seen_normalized: dict,
     result: UploadParseResult,
     max_items: int,
+    *,
+    source_sheet: Optional[str] = None,
 ) -> None:
     """Process a single data row in-place."""
 
@@ -170,10 +228,11 @@ def _process_row(
         val = row[idx]
         return val.strip() if val and val.strip() else None
 
-    # ── Require domain column ────────────────────────────────────────────────
+    if _is_comment_or_blank_row(row):
+        return
+
     raw_domain = _get("domain")
     if not raw_domain:
-        # Row may be entirely empty — skip silently; or partial — reject with error
         if any(cell.strip() for cell in row):
             result.rejected.append(RejectedItemResponse(
                 input_original=str(row),
@@ -182,7 +241,6 @@ def _process_row(
             ))
         return
 
-    # ── Normalize via input_parser ───────────────────────────────────────────
     if len(result.accepted) >= max_items:
         result.rejected.append(RejectedItemResponse(
             input_original=raw_domain,
@@ -205,7 +263,6 @@ def _process_row(
         ))
         return
 
-    # ── Deduplication ────────────────────────────────────────────────────────
     if normalized in seen_normalized:
         result.duplicates.append(DuplicateItemResponse(
             input_original=raw_domain,
@@ -214,34 +271,29 @@ def _process_row(
         ))
         return
 
-    # ── Extract optional metadata ────────────────────────────────────────────
-    raw_created  = _get("created_at")
-    raw_epp      = _get("epp_status")
+    raw_created = _get("created_at")
+    raw_status = _combine_status_fields(_get("epp_status"), _get("domain_state"))
     raw_registrar = _get("registrar")
-    raw_ns       = _get("nameservers")
+    raw_ns = _get("nameservers")
 
     epp_list: List[str] = []
-    if raw_epp:
-        # Re-use hold detection token splitter for consistent splitting
+    if raw_status:
         from services.hold_detection import _split_status_tokens
-        epp_list = _split_status_tokens(raw_epp)
+        epp_list = _split_status_tokens(raw_status)
 
     ns_list = _split_nameservers(raw_ns) if raw_ns else []
 
-    # ── Hold detection ───────────────────────────────────────────────────────
     domain_hold = detect_hold(
-        raw_epp,
-        source=DomainStatusSource.UPLOADED_FILE,
+        raw_status,
+        source=DomainStatusSource.UPLOADED_FILE if raw_status else DomainStatusSource.NOT_CHECKED,
     )
 
-    # ── Age bucket ───────────────────────────────────────────────────────────
     age_bucket = AgeBucket.UNKNOWN
     if raw_created:
         parsed_date = parse_date_string(raw_created)
         if parsed_date:
             age_bucket = compute_age_bucket(parsed_date)
 
-    # ── Preview triage fields for held items ─────────────────────────────────
     if domain_hold.has_hold:
         triage_bucket      = TriageBucket.HELD
         recommended_action = RecommendedAction.ACTION_ALREADY_TAKEN
@@ -257,7 +309,6 @@ def _process_row(
         vt_mode_used       = VtModeUsed.NOT_CHECKED
         live_status        = LiveStatus.NOT_CHECKED
 
-    # ── Accept ───────────────────────────────────────────────────────────────
     seen_normalized[normalized] = len(result.accepted) + 1
     item = UploadedInputItem(
         input_original=raw_domain,
@@ -269,7 +320,7 @@ def _process_row(
         epp_status=epp_list,
         assigned_nameservers=ns_list,
         domain_hold=domain_hold,
-        domain_status_source=DomainStatusSource.UPLOADED_FILE,
+        domain_status_source=DomainStatusSource.UPLOADED_FILE if raw_status else DomainStatusSource.NOT_CHECKED,
         age_bucket=age_bucket,
         triage_bucket=triage_bucket,
         recommended_action=recommended_action,
@@ -277,31 +328,21 @@ def _process_row(
         evidence_status=evidence_status,
         vt_mode_used=vt_mode_used,
         live_status=live_status,
+        source_row=row_number,
+        source_sheet=source_sheet,
     )
     result.accepted.append(item)
 
 
 # ── Format-specific readers ───────────────────────────────────────────────────
 
-def _iter_rows_csv(file_bytes: bytes) -> Tuple[List[str], List[List[str]]]:
-    """
-    Parse CSV bytes, return (headers, data_rows).
-    Uses Python stdlib csv — no external dependency.
-    """
+def _read_all_rows_csv(file_bytes: bytes) -> List[List[str]]:
     text = file_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.reader(io.StringIO(text))
-    rows = list(reader)
-    if not rows:
-        return [], []
-    headers = rows[0]
-    return headers, rows[1:]
+    return [_normalize_row(row) for row in reader]
 
 
-def _iter_rows_xlsx(file_bytes: bytes) -> Tuple[List[str], List[List[str]]]:
-    """
-    Parse XLSX bytes, return (headers, data_rows).
-    Uses openpyxl — added to requirements.txt.
-    """
+def _read_all_rows_xlsx(file_bytes: bytes) -> Tuple[List[List[str]], str]:
     import openpyxl
     wb = openpyxl.load_workbook(
         io.BytesIO(file_bytes),
@@ -309,20 +350,10 @@ def _iter_rows_xlsx(file_bytes: bytes) -> Tuple[List[str], List[List[str]]]:
         data_only=True,
     )
     ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
-
-    header_row = next(rows_iter, None)
-    if header_row is None:
-        return [], []
-
-    headers = [str(cell) if cell is not None else "" for cell in header_row]
-
-    data_rows: List[List[str]] = []
-    for row in rows_iter:
-        data_rows.append([str(cell) if cell is not None else "" for cell in row])
-
+    sheet_name = ws.title
+    rows = [_normalize_row(row) for row in ws.iter_rows(values_only=True)]
     wb.close()
-    return headers, data_rows
+    return rows, sheet_name
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -365,10 +396,11 @@ def parse_upload(
         return result
 
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    source_sheet: Optional[str] = None
 
     if ext == "csv":
         try:
-            headers, data_rows = _iter_rows_csv(file_bytes)
+            all_rows = _read_all_rows_csv(file_bytes)
         except Exception as exc:
             result.rejected.append(RejectedItemResponse(
                 input_original=filename,
@@ -376,9 +408,9 @@ def parse_upload(
                 error=_make_error("parse_error", f"CSV parse failed: {exc}"),
             ))
             return result
-    elif ext in {"xlsx", "xlsm", "xls"}:
+    elif ext in {"xlsx", "xlsm"}:
         try:
-            headers, data_rows = _iter_rows_xlsx(file_bytes)
+            all_rows, source_sheet = _read_all_rows_xlsx(file_bytes)
         except Exception as exc:
             result.rejected.append(RejectedItemResponse(
                 input_original=filename,
@@ -386,6 +418,16 @@ def parse_upload(
                 error=_make_error("parse_error", f"XLSX parse failed: {exc}"),
             ))
             return result
+    elif ext == "xls":
+        result.rejected.append(RejectedItemResponse(
+            input_original=filename,
+            position=0,
+            error=_make_error(
+                "unsupported_format",
+                "Legacy Excel .xls is not supported. Save the file as .xlsx or export as CSV.",
+            ),
+        ))
+        return result
     else:
         result.rejected.append(RejectedItemResponse(
             input_original=filename,
@@ -397,13 +439,30 @@ def parse_upload(
         ))
         return result
 
-    if not headers:
+    result.source_sheet = source_sheet
+
+    if not all_rows:
         result.rejected.append(RejectedItemResponse(
             input_original=filename,
             position=0,
-            error=_make_error("empty_file", "File has no header row."),
+            error=_make_error("empty_file", "File has no rows."),
         ))
         return result
+
+    header_idx = _find_header_row(all_rows)
+    if header_idx is None:
+        result.rejected.append(RejectedItemResponse(
+            input_original=filename,
+            position=0,
+            error=_make_error(
+                "missing_domain_column",
+                f"No domain column found. Expected a header row containing one of: {DOMAIN_HEADER_HINT}.",
+            ),
+        ))
+        return result
+
+    headers = _normalize_row(all_rows[header_idx])
+    result.header_row = header_idx + 1
 
     columns_detected, col_index, missing_optional = _detect_columns(headers)
     result.columns_detected = columns_detected
@@ -415,22 +474,25 @@ def parse_upload(
             position=0,
             error=_make_error(
                 "missing_domain_column",
-                "No domain column found. Expected one of: Domain, DNS Form, domain, dns_form.",
+                f"No domain column found. Expected a header row containing one of: {DOMAIN_HEADER_HINT}.",
             ),
         ))
         return result
 
     seen_normalized: dict = {}
+    data_rows = all_rows[header_idx + 1:]
 
-    for row_idx, row in enumerate(data_rows, start=2):   # row 1 = header
+    for data_idx, row in enumerate(data_rows):
+        row_number = header_idx + data_idx + 2   # 1-based file row number
         _process_row(
-            row=[str(c) for c in row],
-            row_number=row_idx,
+            row=row,
+            row_number=row_number,
             col_index=col_index,
             default_scheme=default_scheme,
             seen_normalized=seen_normalized,
             result=result,
             max_items=max_items,
+            source_sheet=source_sheet,
         )
 
     return result

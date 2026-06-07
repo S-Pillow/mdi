@@ -653,6 +653,14 @@ class UploadedInputItem(BaseModel):
     position: int = Field(
         ..., description="[display] 1-based row index in the file (after deduplication)."
     )
+    source_row: Optional[int] = Field(
+        None,
+        description="[audit] 1-based row number in the source file (before deduplication).",
+    )
+    source_sheet: Optional[str] = Field(
+        None,
+        description="[audit] Worksheet name for XLSX uploads.",
+    )
 
     # Upload-extracted fields (populated when column present)
     created_at: Optional[str] = Field(
@@ -730,6 +738,9 @@ class ColumnsDetected(BaseModel):
     epp_status: Optional[str] = Field(
         None, description="[display] Header matched as the EPP/domain-status column."
     )
+    domain_state: Optional[str] = Field(
+        None, description="[display] Header matched as the Domain State column."
+    )
     registrar: Optional[str] = Field(
         None, description="[display] Header matched as the registrar column."
     )
@@ -771,6 +782,14 @@ class UploadPreviewResponse(BaseModel):
     missing_optional_columns: List[str] = Field(
         default_factory=list,
         description="[display] Optional canonical fields with no matching column in the file."
+    )
+    header_row: Optional[int] = Field(
+        None,
+        description="[display] 1-based row number where the header row was detected.",
+    )
+    source_sheet: Optional[str] = Field(
+        None,
+        description="[display] Active worksheet name for XLSX uploads.",
     )
     external_calls_made: bool = Field(
         False,
@@ -923,7 +942,16 @@ class JobSubmitRequest(BaseModel):
     """Request body for POST /api/mdi/jobs/submit."""
     raw_input: Optional[str] = Field(
         None,
-        description="[audit] Raw pasted text. Mutually exclusive with 'items'."
+        description="[audit] Raw pasted text. Mutually exclusive with items (paste mode).",
+    )
+    items: Optional[List[UploadedInputItem]] = Field(
+        None,
+        description="[workflow] Upload-validated items from upload-preview (upload mode).",
+    )
+    input_mode: str = Field(
+        "paste",
+        description="[audit] paste or upload — indicates which input path was used.",
+        pattern=r"^(paste|upload)$",
     )
     default_scheme: str = Field(
         "http",
@@ -932,7 +960,7 @@ class JobSubmitRequest(BaseModel):
     )
     max_items: int = Field(
         500, ge=1, le=500,
-        description="[workflow] Max items accepted from raw_input.",
+        description="[workflow] Max items accepted from raw_input or items.",
     )
     use_domain_reports: bool = Field(
         False,
@@ -950,6 +978,18 @@ class JobSubmitRequest(BaseModel):
         3, ge=0, le=25,
         description="[workflow] Max auto-rescans per job when auto_rescan_stale is enabled.",
     )
+
+    @model_validator(mode="after")
+    def _validate_input_source(self) -> "JobSubmitRequest":
+        if self.items:
+            if self.raw_input and self.raw_input.strip():
+                raise ValueError("Provide raw_input or items, not both.")
+            object.__setattr__(self, "input_mode", "upload")
+        elif self.raw_input is not None:
+            object.__setattr__(self, "input_mode", "paste")
+        else:
+            raise ValueError("Provide raw_input (paste mode) or items (upload mode).")
+        return self
 
 
 class JobSubmitResponse(BaseModel):
@@ -1035,6 +1075,10 @@ class JobStatusResponse(BaseModel):
     max_auto_rescans: int = Field(
         3, description="[display] Saved job option: max auto-rescans per job."
     )
+    input_mode: str = Field(
+        "paste",
+        description="[display] Input path used at submit: paste or upload.",
+    )
     auto_rescan_attempted_count: int = Field(
         0, description="[display] Auto-rescan VT scan attempts during initial processing."
     )
@@ -1057,9 +1101,18 @@ class JobStatusResponse(BaseModel):
 
 class EstimateRequest(BaseModel):
     """Request body for POST /api/mdi/jobs/estimate."""
-    raw_input: str = Field(
-        ...,
-        description="[audit] Raw pasted text containing domains and/or URLs.",
+    raw_input: Optional[str] = Field(
+        None,
+        description="[audit] Raw pasted text (paste mode). Mutually exclusive with items.",
+    )
+    items: Optional[List[UploadedInputItem]] = Field(
+        None,
+        description="[workflow] Upload-validated items from upload-preview (upload mode).",
+    )
+    input_mode: str = Field(
+        "paste",
+        description="[audit] paste or upload.",
+        pattern=r"^(paste|upload)$",
     )
     default_scheme: str = Field(
         "http",
@@ -1093,6 +1146,18 @@ class EstimateRequest(BaseModel):
         3, ge=0, le=25,
         description="[workflow] Max auto-rescans per job for estimate upper bound.",
     )
+
+    @model_validator(mode="after")
+    def _validate_input_source(self) -> "EstimateRequest":
+        if self.items:
+            if self.raw_input and self.raw_input.strip():
+                raise ValueError("Provide raw_input or items, not both.")
+            object.__setattr__(self, "input_mode", "upload")
+        elif self.raw_input is not None:
+            object.__setattr__(self, "input_mode", "paste")
+        else:
+            raise ValueError("Provide raw_input (paste mode) or items (upload mode).")
+        return self
 
 
 class EstimateResponse(BaseModel):

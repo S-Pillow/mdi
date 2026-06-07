@@ -171,6 +171,14 @@ are identical to `MdiInputItem`.
 | `registrar` | `str \| null` | display, reporting | Registrar name from upload; never looked up externally. |
 | `epp_status` | `List[str]` | display, reporting | Individual EPP status tokens extracted from the status column. |
 | `assigned_nameservers` | `List[str]` | display, future | Nameservers from upload; lowercase and FQDN-dot-stripped. |
+| `source_row` | `int \| null` | audit | 1-based row number in the source file. |
+| `source_sheet` | `str \| null` | audit | Worksheet name for XLSX uploads. |
+
+### Upload job workflow (MDI-30A)
+
+- `POST /api/mdi/jobs/upload-preview` — quota-free parse; returns `columns_detected`, `missing_optional_columns`, `header_row`, `source_sheet`.
+- `POST /api/mdi/jobs/estimate` with `items` + `input_mode=upload` — excludes held upload domains from VT estimate.
+- `POST /api/mdi/jobs/submit` with `items` + `input_mode=upload` — preserves upload metadata into `MdiResultItem`; held domains skip VT/live checks.
 
 ### Hold detection fields (offline)
 
@@ -316,7 +324,7 @@ Job persistence and recovery are out of scope for MDI-06.
 
 | Model | Fields | Purpose |
 |---|---|---|
-| `JobSubmitRequest` | `raw_input`, `default_scheme`, `max_items`, `use_domain_reports`, `stale_threshold_days` | POST /api/mdi/jobs/submit request body |
+| `JobSubmitRequest` | `raw_input` **or** `items` (upload mode), `input_mode`, `default_scheme`, `max_items`, `use_domain_reports`, `stale_threshold_days`, `auto_rescan_stale`, `max_auto_rescans` | POST /api/mdi/jobs/submit request body |
 | `JobSubmitResponse` | `job_id`, `status`, `total`, `queued_count`, `held_skipped_count`, `rejected_count`, `estimated_requests`, `quota_remaining_before` | Immediate response after job creation |
 | `JobStatusResponse` | `job_id`, `status`, `processed`, `total`, `results`, … | GET /api/mdi/jobs/{job_id} response |
 
