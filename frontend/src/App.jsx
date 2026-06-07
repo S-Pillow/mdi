@@ -1078,9 +1078,18 @@ function InputTabsPanel({
 
         {activeTab === 'upload' && (
           <>
-            <p className="upload-tab-hint">
-              Upload a CSV or XLSX file with a "Domain / DNS Form" column.
-            </p>
+            <div className="upload-guidance">
+              <p className="upload-tab-hint">
+                Upload a CSV or XLSX file (legacy .xls not supported). MDI detects the header row automatically,
+                including files with leading comment rows. Validate first — no quota consumed.
+              </p>
+              <p className="upload-tab-hint" style={{ marginTop: 6 }}>
+                <strong>Domain column</strong> (required): DNS Form, Domain, Domain Name, Hostname, Host, URL, Target, Indicator
+              </p>
+              <p className="upload-tab-hint" style={{ marginTop: 4 }}>
+                <strong>Optional metadata</strong>: Create Date, EPP Status, Domain State, Registrar Name, Assigned Nameservers
+              </p>
+            </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <label className="btn btn-ghost" style={{ cursor: 'pointer', fontSize: 11, padding: '5px 12px' }}>
                 Choose file
@@ -1095,6 +1104,29 @@ function InputTabsPanel({
                 <IconUpload /> {uploadPreviewing ? 'Validating…' : 'Validate Upload'}
               </button>
             </div>
+
+            <div className="input-row" style={{ marginTop: 10 }}>
+              <button
+                className="btn btn-ghost"
+                onClick={onEstimate}
+                disabled={estimating || !canRunJob}
+                title={!canRunJob ? 'Validate upload and wait for accepted items' : undefined}
+              >
+                <IconCalculator /> {estimating ? 'Estimating…' : 'Estimate Quota & Runtime'}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={onRunJob}
+                disabled={submitting || !canRunJob}
+              >
+                <IconSearch /> {submitting ? 'Submitting…' : 'Run MDI Check'}
+              </button>
+            </div>
+            {!canRunJob && !uploadPreviewing && selectedFile && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Validate upload to review accepted items before estimating or running.
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1243,6 +1275,15 @@ function UploadPreviewResultsSection({ preview, error }) {
   const [showDupes, setShowDupes] = useState(false)
   const [showHeld, setShowHeld] = useState(true)
 
+  const colLabels = {
+    domain: 'Domain',
+    created_at: 'Create Date',
+    epp_status: 'EPP Status',
+    domain_state: 'Domain State',
+    registrar: 'Registrar',
+    nameservers: 'Nameservers',
+  }
+
   if (error) {
     return (
       <div className="card">
@@ -1275,6 +1316,29 @@ function UploadPreviewResultsSection({ preview, error }) {
             </div>
           ))}
         </div>
+        {(preview.header_row || preview.source_sheet || preview.columns_detected) && (
+          <div className="upload-columns-detected" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {preview.header_row && (
+              <div>Header row detected: <strong>row {preview.header_row}</strong>
+                {preview.source_sheet ? ` · sheet "${preview.source_sheet}"` : ''}
+              </div>
+            )}
+            {preview.columns_detected && (
+              <div style={{ marginTop: 4 }}>
+                Columns matched:{' '}
+                {Object.entries(preview.columns_detected)
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => `${colLabels[k] || k}: "${v}"`)
+                  .join(' · ') || '—'}
+              </div>
+            )}
+            {preview.missing_optional_columns?.length > 0 && (
+              <div style={{ marginTop: 4, color: 'var(--text-faint)' }}>
+                Optional columns not found: {preview.missing_optional_columns.map(c => colLabels[c] || c).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {preview.rejected_count > 0 && (
             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowRejected(v => !v)}>
@@ -2346,7 +2410,9 @@ export default function App() {
   const [actionModal, setActionModal]         = useState(null)
   const [actionConfirming, setActionConfirming] = useState(false)
 
-  const canRunJob = !!(preview && preview.accepted_count > 0)
+  const canRunJob = activeInputTab === 'upload'
+    ? !!(uploadPreview && uploadPreview.accepted_count > 0)
+    : !!(preview && preview.accepted_count > 0)
   const settingsLocked = !!(
     restoredFromSession ||
     (job && (job.status === 'queued' || job.status === 'running')) ||
@@ -2362,16 +2428,24 @@ export default function App() {
   }
 
   async function handleEstimate() {
-    if (!rawInput.trim()) return
+    const isUpload = activeInputTab === 'upload'
+    if (isUpload) {
+      if (!uploadPreview?.items?.length) return
+    } else if (!rawInput.trim()) {
+      return
+    }
     if (isQuotaStale()) await refreshQuota()
     setEstimating(true)
     setEstimateResult(null)
     setEstimateError(null)
     setEstimateStale(false)
     try {
+      const body = isUpload
+        ? { items: uploadPreview.items, input_mode: 'upload', ...settingsPayload }
+        : { raw_input: rawInput, input_mode: 'paste', ...settingsPayload }
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/estimate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
+        body: JSON.stringify(body),
       })
       if (!resp.ok) {
         const text = await resp.text().catch(() => 'Request failed')
@@ -2444,7 +2518,10 @@ export default function App() {
 
   function handleFileChange(e) {
     const f = e.target.files?.[0] || null
-    setSelectedFile(f); setUploadPreview(null); setUploadError(null)
+    setSelectedFile(f)
+    setUploadPreview(null)
+    setUploadError(null)
+    if (estimateResult) setEstimateStale(true)
   }
 
   async function handleUploadPreview() {
@@ -2456,8 +2533,18 @@ export default function App() {
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/upload-preview`, { method: 'POST', body: form })
       if (!resp.ok) { const t = await resp.text(); setUploadError(`HTTP ${resp.status}: ${t}`); return }
       setUploadPreview(await resp.json())
+      setEstimateResult(null)
+      setEstimateError(null)
+      setEstimateStale(false)
     } catch (err) { setUploadError(err.message || 'Network error') }
     finally { setUploadPreviewing(false) }
+  }
+
+  function handleInputTabChange(tab) {
+    setActiveInputTab(tab)
+    setEstimateResult(null)
+    setEstimateError(null)
+    setEstimateStale(false)
   }
 
   const pollJob = useCallback(async (id) => {
@@ -2590,7 +2677,12 @@ export default function App() {
   }
 
   async function handleRunJob() {
-    if (!rawInput.trim() || submitting) return
+    const isUpload = activeInputTab === 'upload'
+    if (isUpload) {
+      if (!uploadPreview?.items?.length || submitting) return
+    } else if (!rawInput.trim() || submitting) {
+      return
+    }
     const freshQuota = await refreshQuota()
     if (freshQuota && freshQuota.remaining <= 0) {
       setJobError(
@@ -2602,9 +2694,12 @@ export default function App() {
     setSelectedItem(null)
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     try {
+      const body = isUpload
+        ? { items: uploadPreview.items, input_mode: 'upload', ...settingsPayload }
+        : { raw_input: rawInput, input_mode: 'paste', ...settingsPayload }
       const resp = await fetch(`${API_BASE}/api/mdi/jobs/submit`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput, ...settingsPayload }),
+        body: JSON.stringify(body),
       })
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}))
@@ -2622,7 +2717,7 @@ export default function App() {
 
   useEffect(() => {
     if (estimateResult) setEstimateStale(true)
-  }, [useDomainReports, staleThresholdDays, autoRescanStale, maxAutoRescans])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [useDomainReports, staleThresholdDays, autoRescanStale, maxAutoRescans, uploadPreview])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refreshQuota() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2755,7 +2850,7 @@ export default function App() {
           <div className="top-workspace">
             <InputTabsPanel
               activeTab={activeInputTab}
-              onTabChange={setActiveInputTab}
+              onTabChange={handleInputTabChange}
               rawInput={rawInput}
               setRawInput={handleRawInputChange}
               validating={validating}

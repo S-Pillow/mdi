@@ -45,6 +45,7 @@ class InMemoryJob:
     stale_threshold_days: int = 7
     auto_rescan_stale: bool = False
     max_auto_rescans: int = 3
+    input_mode: str = "paste"
     error_message: Optional[str] = None
     item_order: List[str] = field(default_factory=list)  # input_normalized, in submission order
     results: Dict[str, MdiResultItem] = field(default_factory=dict)

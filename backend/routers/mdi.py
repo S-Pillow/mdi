@@ -41,7 +41,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, Dict, List
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -83,8 +84,10 @@ from models import (
     TriageBucket,
     TriageConfidence,
     UploadPreviewResponse,
+    UploadedInputItem,
     VtModeUsed,
 )
+from services.age_bucket import parse_date_string
 from services.build_info import APP_VERSION, load_build_info
 from services.vt_quota import get_usage_summary
 from services.input_parser import parse_raw_input
@@ -229,6 +232,8 @@ async def upload_preview(
         held_items=held_items,
         columns_detected=result.columns_detected,
         missing_optional_columns=result.missing_optional_columns,
+        header_row=result.header_row,
+        source_sheet=result.source_sheet,
         external_calls_made=False,
         quota_consumed=False,
     )
@@ -239,36 +244,31 @@ async def upload_preview(
 @router.post("/jobs/estimate", tags=["Jobs"], response_model=EstimateResponse)
 async def estimate(req: EstimateRequest) -> EstimateResponse:
     """
-    Return a quota and runtime estimate for the provided raw input.
+    Return a quota and runtime estimate for pasted or upload-validated input.
 
-    Parses raw_input using the standard input parser, then computes:
-      - accepted / rejected / duplicate counts
-      - per-type item breakdown (domain vs URL)
-      - conservative min/max VT API call estimates
-      - min/max runtime estimates based on the 4 req/min rate limit
-      - current shared quota remaining (read-only)
-      - quota warning when max estimate exceeds remaining quota
+    Paste mode parses raw_input. Upload mode uses pre-validated items from
+    upload-preview (held domains excluded from VT estimate).
 
-    No external calls are made.  No VT, WHOIS, DNS, or URL activity lookups.
-    No quota is consumed.  No job is created.  No runtime files are written.
-
-    held_skipped_count is always 0 for paste input because hold status is
-    NOT_CHECKED until WHOIS/RDAP runs (which happens during job processing,
-    not at estimate time).
+    No external calls. No quota consumed. No job created. No runtime writes.
     """
-    parse_result = parse_raw_input(
-        req.raw_input,
-        default_scheme=req.default_scheme,
-        max_items=req.max_items,
-    )
-
-    accepted = parse_result.accepted
-    rejected = parse_result.rejected
-    duplicates = parse_result.duplicates
-
-    # For paste input, all accepted items are eligible — hold status is unknown.
-    eligible_items = accepted
-    held_skipped_count = 0
+    if req.items:
+        accepted = list(req.items)
+        rejected: list = []
+        duplicates: list = []
+        held_items = [i for i in accepted if i.domain_hold.has_hold]
+        eligible_items = [i for i in accepted if not i.domain_hold.has_hold]
+        held_skipped_count = len(held_items)
+    else:
+        parse_result = parse_raw_input(
+            req.raw_input or "",
+            default_scheme=req.default_scheme,
+            max_items=req.max_items,
+        )
+        accepted = parse_result.accepted
+        rejected = parse_result.rejected
+        duplicates = parse_result.duplicates
+        eligible_items = accepted
+        held_skipped_count = 0
 
     est = estimate_job(
         eligible_items,
@@ -371,7 +371,51 @@ def _estimate_requests(
     )["total_estimated_vt_calls_max"]
 
 
+def _upload_created_at_dt(raw: Optional[str]) -> Optional[datetime]:
+    if not raw:
+        return None
+    parsed = parse_date_string(raw)
+    if parsed is None:
+        return None
+    return datetime.combine(parsed, datetime.min.time())
+
+
+def _result_from_upload_item(item: UploadedInputItem, *, held: bool) -> MdiResultItem:
+    """Build an initial MdiResultItem preserving upload metadata."""
+    created_dt = _upload_created_at_dt(item.created_at)
+    common = dict(
+        input_original=item.input_original,
+        input_normalized=item.input_normalized,
+        input_type=item.input_type,
+        position=item.position,
+        registrar=item.registrar,
+        epp_status=list(item.epp_status or []),
+        nameservers=list(item.assigned_nameservers or []),
+        age_bucket=item.age_bucket,
+        domain_hold=item.domain_hold,
+    )
+    if created_dt is not None:
+        common["created_at"] = created_dt
+    if held:
+        return MdiResultItem(
+            **common,
+            processing_status=MdiProcessingStatus.HOLD_SKIPPED,
+            vt_mode_used=VtModeUsed.SKIPPED_HOLD,
+            triage_bucket=item.triage_bucket,
+            triage_confidence=item.triage_confidence,
+            recommended_action=item.recommended_action,
+            evidence_status=EvidenceStatus.SKIPPED_HOLD,
+            live_status=LiveStatus.NOT_CHECKED,
+        )
+    return MdiResultItem(
+        **common,
+        processing_status=MdiProcessingStatus.PENDING,
+    )
+
+
 def _make_pending_result(item, input_type: InputType) -> MdiResultItem:
+    if isinstance(item, UploadedInputItem):
+        return _result_from_upload_item(item, held=False)
     return MdiResultItem(
         input_original=item.input_original,
         input_normalized=item.input_normalized,
@@ -382,6 +426,8 @@ def _make_pending_result(item, input_type: InputType) -> MdiResultItem:
 
 
 def _make_hold_skipped_result(item, input_type: InputType) -> MdiResultItem:
+    if isinstance(item, UploadedInputItem):
+        return _result_from_upload_item(item, held=True)
     return MdiResultItem(
         input_original=item.input_original,
         input_normalized=item.input_normalized,
@@ -405,45 +451,33 @@ def _make_hold_skipped_result(item, input_type: InputType) -> MdiResultItem:
 @router.post("/jobs/submit", tags=["Jobs"], response_model=JobSubmitResponse)
 async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
     """
-    Submit a VT-check job from raw pasted input.
+    Submit a VT-check job from pasted text or upload-validated items.
 
-    Processing steps:
-      1. Parse raw_input via input_parser.
-      2. Filter items with confirmed hold (has_hold=True) — they skip VT.
-         Items with unknown hold status are eligible for VT.
-      3. Estimate VT API quota required (conservative: URL-mode = 3, domain-mode = 1).
-      4. If estimated > remaining quota: reject with quota_blocked response (HTTP 429).
-      5. Create in-memory job, launch background asyncio task, return job_id.
+    Upload mode uses items from upload-preview; held domains skip VT/live checks.
+    Paste mode parses raw_input; hold status is unknown until enrichment runs.
 
-    No external calls are made during submission; VT calls happen in the background task.
+    No external calls during submission; VT calls happen in the background task.
     """
-    if not req.raw_input:
-        raise HTTPException(
-            status_code=422,
-            detail="raw_input is required. At least one domain or URL must be provided.",
+    if req.items:
+        accepted = list(req.items)
+        rejected_count = 0
+        held_items = [i for i in accepted if i.domain_hold.has_hold]
+        eligible_items = [i for i in accepted if not i.domain_hold.has_hold]
+    else:
+        if not req.raw_input or not req.raw_input.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="raw_input is required. At least one domain or URL must be provided.",
+            )
+        parse_result = parse_raw_input(
+            req.raw_input or "",
+            default_scheme=req.default_scheme,
+            max_items=req.max_items,
         )
-
-    parse_result = parse_raw_input(
-        req.raw_input,
-        default_scheme=req.default_scheme,
-        max_items=req.max_items,
-    )
-
-    accepted = parse_result.accepted
-    rejected_count = len(parse_result.rejected)
-
-    # Separate confirmed-held from eligible
-    held_items = [i for i in accepted if getattr(i, "domain_hold", None) and i.domain_hold.has_hold]  # type: ignore[attr-defined]
-    eligible_items = [i for i in accepted if i not in held_items]
-
-    # For MdiInputItem from parse_raw_input, hold status is NOT_CHECKED (no hold data yet).
-    # So all items from raw paste are eligible for VT (none are confirmed held at submit time).
-    # held_items will be empty for paste input; held filtering in MDI-06 is via the pre-populated
-    # held results pattern (from upload). For paste input, all accepted items go to VT queue.
-    # NOTE: If a future endpoint provides pre-populated UploadedInputItem with has_hold=True,
-    # those will be correctly filtered here.
-    held_items = []
-    eligible_items = accepted
+        accepted = parse_result.accepted
+        rejected_count = len(parse_result.rejected)
+        held_items = []
+        eligible_items = accepted
 
     held_skipped_count = len(held_items)
     estimated = _estimate_requests(
@@ -492,9 +526,9 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         stale_threshold_days=req.stale_threshold_days,
         auto_rescan_stale=req.auto_rescan_stale,
         max_auto_rescans=req.max_auto_rescans,
+        input_mode=req.input_mode,
     )
 
-    # Pre-populate results: held items first, then pending eligible items
     for item in held_items:
         job.results[item.input_normalized] = _make_hold_skipped_result(item, item.input_type)
         job.item_order.append(item.input_normalized)
@@ -561,6 +595,7 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         vt_scan_failed_count=job.vt_scan_failed_count,
         auto_rescan_stale=job.auto_rescan_stale,
         max_auto_rescans=job.max_auto_rescans,
+        input_mode=job.input_mode,
         auto_rescan_attempted_count=job.auto_rescan_attempted_count,
         auto_rescan_completed_count=job.auto_rescan_completed_count,
         auto_rescan_failed_count=job.auto_rescan_failed_count,

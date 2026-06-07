@@ -94,8 +94,17 @@ without scheme, trailing slashes, etc.).
 
 ### Upload CSV/Excel
 
-Upload a spreadsheet with a column containing domains or URLs. MDI maps the
-status column (if present) for hold detection during preview.
+1. Choose a **CSV or XLSX** file (legacy `.xls` is not supported).
+2. Click **Validate Upload** — preview shows accepted, rejected, held, and detected columns. **No quota consumed.**
+3. Review column mapping and held domains in the upload validation panel.
+4. Click **Estimate Quota & Runtime** — held upload domains are excluded from the VT estimate.
+5. Click **Run MDI Check** — upload metadata (create date, EPP status, registrar, nameservers) is preserved into job results.
+
+**Domain column** (required): DNS Form, Domain, Domain Name, Hostname, Host, URL, Target, Indicator.
+
+**Optional metadata columns**: Create Date, EPP Status, Domain State, Registrar Name, Assigned Nameservers.
+
+MDI detects the header row automatically, including files with leading `#` comment rows before the header.
 
 ### Auto-validation
 

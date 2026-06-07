@@ -346,6 +346,7 @@ class TestUploadParserCSV:
         result = parse_upload(_csv_bytes(csv_content), "test.csv")
         assert "created_at" in result.missing_optional_columns
         assert "epp_status" in result.missing_optional_columns
+        assert "domain_state" in result.missing_optional_columns
         assert "registrar" in result.missing_optional_columns
         assert "nameservers" in result.missing_optional_columns
 
