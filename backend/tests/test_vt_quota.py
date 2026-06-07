@@ -180,6 +180,7 @@ class TestModelSerialization:
         d = opts.model_dump()
         assert d["skip_held_domains"] is True
         assert d["auto_rescan_stale"] is False
+        assert d["max_auto_rescans"] == 3
         assert d["include_live_check"] is True
 
     def test_mdi_result_item_minimal(self):

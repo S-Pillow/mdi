@@ -223,6 +223,8 @@ async def reprocess_item_after_vt(
     job: InMemoryJob,
     result: MdiResultItem,
     vt_result: VtLookupResult,
+    *,
+    rerun_live_check: bool = True,
 ) -> MdiResultItem:
     """
     Apply updated VT data, optionally rerun live check, and recompute triage.
@@ -255,7 +257,7 @@ async def reprocess_item_after_vt(
         "errors": errors,
     })
 
-    if _should_rerun_live_check(updated):
+    if rerun_live_check and _should_rerun_live_check(updated):
         try:
             lc_result: LiveCheckResult = await live_check.live_check_item(
                 updated.input_normalized,

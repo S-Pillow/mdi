@@ -1115,6 +1115,27 @@ Usage history action aggregates: `refresh_count`, `scan_requested_count`,
 `scan_completed_count`, `scan_failed_count`, `rescan_selected_count`,
 `rescan_stale_count`, `operation` (`refresh` | `force_scan`).
 
+### MDI-15A auto-rescan fields
+
+| Field | Level | Purpose |
+|---|---|---|
+| `auto_rescan_stale` | job option | Operator toggle at submit; default `false` |
+| `max_auto_rescans` | job option | Per-job cap; default `3` |
+| `auto_rescan_attempted_count` | job / history | VT scan attempts during initial processing |
+| `auto_rescan_completed_count` | job / history | Scans that returned updated VT data |
+| `auto_rescan_failed_count` | job / history | Pending or hard-failed scans |
+| `auto_rescan_skipped_count` | job / history | Items evaluated but not rescanned |
+| `auto_rescan_quota_blocked_count` | job / history | Skipped due to insufficient quota |
+| `auto_rescan_enabled` | history | Mirror of `auto_rescan_stale` on job record |
+
+Estimate fields: `auto_rescan_estimated_quota_min/max`,
+`total_estimated_vt_calls_max`, `auto_rescan_estimated_duration_seconds_min/max`,
+`auto_rescan_note`.
+
+Auto-rescan eligibility: stale flagged URL-mode items only; not held, not
+domain-report mode, not clean/fresh/error. One attempt per row per job.
+Runs only during initial `process_job` — not on recovery or manual actions.
+
 ### Disabled row action stubs
 
 Each row has an eye icon button and a kebab-menu button. Both are `disabled`
@@ -1127,7 +1148,7 @@ soon"). No detail drawer in MDI-13.
 |---|---|
 | Detail drawer / per-item panel | MDI-14 |
 | Export (CSV/XLSX) | MDI-16 |
-| Rescan selected items | Future |
-| Rescan stale items | Future |
+| Auto-rescan on recovered jobs | Future |
+| Auto-rescan after manual refresh | Future |
 | Pagination (rows-per-page) | MDI-14+ |
 | Per-row WHOIS / Open in VT links | MDI-14 |

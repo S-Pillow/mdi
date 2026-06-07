@@ -571,6 +571,24 @@ body {
 .settings-number-input:focus { border-color: var(--border-focus); }
 .settings-number-input:disabled { opacity: 0.55; cursor: not-allowed; }
 
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-checkbox-row input { flex-shrink: 0; }
+.settings-checkbox-row input:disabled { cursor: not-allowed; }
+
+.settings-auto-rescan-warning {
+  font-size: 10px;
+  color: var(--status-warning);
+  line-height: 1.45;
+  margin: 0;
+}
+
 /* ── Job status bar ──────────────────────────────────────── */
 .job-status-bar {
   display: flex;

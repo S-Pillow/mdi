@@ -178,6 +178,31 @@ Action batches do not create a new job. Saved `use_domain_reports` and
 **Test isolation (MDI-14A + MDI-15):** All backend tests redirect runtime paths
 via `backend/tests/conftest.py` autouse fixture — live files are never touched.
 
+### MDI-15A auto-rescan (initial job processing only)
+
+Auto-rescan runs **only during initial job submission processing**, inline after
+the first VT report and triage for each item. It does **not** run on recovered
+jobs, after manual refresh/scan, or on a background schedule.
+
+**`mdi_latest_job.json` stores:**
+- Saved options: `auto_rescan_stale`, `max_auto_rescans`
+- Aggregate counters: `auto_rescan_attempted_count`, `auto_rescan_completed_count`,
+  `auto_rescan_failed_count`, `auto_rescan_skipped_count`,
+  `auto_rescan_quota_blocked_count`
+- Updated result rows and item-level `errors` (e.g. `auto_rescan_quota_blocked`,
+  `vt_scan_pending`)
+
+**`vt_usage_history.jsonl` stores (aggregate-only, on `operation: report_lookup`):**
+- `auto_rescan_enabled`
+- Same five auto-rescan counter fields
+
+**Must not appear in usage history:** raw domains, URLs, engine names, VT engine
+results, EPP status, registrar, nameservers, per-item live/HTTP status, full
+result rows, or `item_order`.
+
+**Test isolation:** `backend/tests/conftest.py` redirects all runtime paths to
+`tmp_path`; no live quota consumed during tests.
+
 ### MDI-08 recovery flow
 
 On `mdi-backend` restart the in-memory store is empty.  The frontend calls
@@ -487,3 +512,20 @@ to public internet hosts; SSRF protections block all internal/private targets.
 
 No new third-party APIs are added.  No credentials or tokens are required for
 live checks.  No results are sent to external services.
+
+---
+
+## MDI-15A — Auto-Rescan Estimate Fields
+
+Added to `EstimateResponse` (no runtime file interaction when estimating):
+
+| Field | Description |
+|---|---|
+| `auto_rescan_estimated_quota_min` | Always `0` when enabled |
+| `auto_rescan_estimated_quota_max` | `min(max_auto_rescans, url_report_mode_count) × 4` |
+| `total_estimated_vt_calls_max` | Base worst-case + auto-rescan worst-case |
+| `auto_rescan_estimated_duration_seconds_min` | `0` |
+| `auto_rescan_estimated_duration_seconds_max` | Sequential VT gap overhead for auto-rescan max |
+| `auto_rescan_note` | Conditional usage disclaimer |
+
+Submit guard uses `total_estimated_vt_calls_max` when `auto_rescan_stale` is enabled.

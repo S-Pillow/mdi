@@ -52,6 +52,17 @@ LIVE_CHECK_NOTE: str = (
     "The exact count is not known until VT processing completes."
 )
 
+AUTO_RESCAN_QUOTA_PER_ITEM_MAX: int = 4
+
+
+def _auto_rescan_note(max_calls: int) -> str:
+    if max_calls <= 0:
+        return ""
+    return (
+        f"Auto-rescan may add up to {max_calls} VT calls. "
+        "Actual usage depends on how many stale flagged URL-mode rows are found."
+    )
+
 
 def _enrichment_warning(lookups: int) -> str:
     """
@@ -90,6 +101,9 @@ def estimate_calls_for_item(input_type: InputType, use_domain_reports: bool) -> 
 def estimate_job(
     items: list,
     use_domain_reports: bool,
+    *,
+    auto_rescan_stale: bool = False,
+    max_auto_rescans: int = 3,
 ) -> dict:
     """
     Compute a full estimate for a list of eligible (non-held) MdiInputItem objects.
@@ -143,6 +157,21 @@ def estimate_job(
 
     warning = _enrichment_warning(estimated_enrichment_lookups)
 
+    auto_rescan_quota_min = 0
+    auto_rescan_quota_max = 0
+    if auto_rescan_stale and max_auto_rescans > 0:
+        auto_rescan_quota_max = (
+            min(max_auto_rescans, url_report_mode_count) * AUTO_RESCAN_QUOTA_PER_ITEM_MAX
+        )
+    auto_rescan_duration_min = 0.0
+    auto_rescan_duration_max = max(
+        0.0,
+        (auto_rescan_quota_max - 1) * VT_RATE_LIMIT_INTERVAL_SECONDS if auto_rescan_quota_max else 0.0,
+    )
+    total_vt_max = total_max + auto_rescan_quota_max
+    total_duration_max = duration_max + auto_rescan_duration_max
+    auto_rescan_note = _auto_rescan_note(auto_rescan_quota_max) if auto_rescan_stale else ""
+
     return {
         "domain_count": domain_count,
         "url_count": url_count,
@@ -162,4 +191,10 @@ def estimate_job(
         # MDI-12: live-check estimate (always 0 — flagged count unknown before VT)
         "estimated_live_check_count": 0,
         "live_check_note": LIVE_CHECK_NOTE,
+        "auto_rescan_estimated_quota_min": auto_rescan_quota_min,
+        "auto_rescan_estimated_quota_max": auto_rescan_quota_max,
+        "total_estimated_vt_calls_max": total_vt_max,
+        "auto_rescan_estimated_duration_seconds_min": auto_rescan_duration_min,
+        "auto_rescan_estimated_duration_seconds_max": auto_rescan_duration_max,
+        "auto_rescan_note": auto_rescan_note,
     }
