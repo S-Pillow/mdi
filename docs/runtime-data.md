@@ -250,6 +250,32 @@ Exports read job state from the in-memory store or recovered
 
 ---
 
+## MDI-17 dashboard runtime behavior
+
+`GET /api/mdi/dashboard` reads runtime files **read-only**:
+
+| File | Access |
+|---|---|
+| `vt_usage_history.jsonl` | READ — filter `tool_name == "mdi"`; skip malformed lines |
+| `vt_daily_history.json` | READ — optional quota trend summary |
+| `mdi_latest_job.json` | READ — Current Job aggregates only (via recovery path) |
+
+| Guarantee | Detail |
+|---|---|
+| New history file | **None** — no `mdi_job_history.jsonl` |
+| Backfill/rewrite | **None** |
+| Writes | **None** — dashboard does not append usage history |
+| Quota | **Zero** external calls |
+| Stored content | Aggregate counts only on **new** job completion records |
+
+Future `report_lookup` history lines may include MDI-17 aggregate fields
+(`triage_bucket_counts`, `job_duration_seconds`, etc.). Older lines remain
+valid; dashboard shows `data_quality` notes when fields are absent.
+
+Dashboard must never store or display raw domains/URLs from history.
+
+---
+
 ## MDI-07 runtime file access summary
 
 ### MDI-07 runtime behavior

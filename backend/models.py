@@ -801,6 +801,35 @@ class ExportRequest(BaseModel):
         return self
 
 
+# ─── Dashboard API models (MDI-17) ─────────────────────────────────────────────
+
+
+class DashboardDataQuality(BaseModel):
+    """Metadata about dashboard history read quality."""
+    history_file_present: bool = False
+    records_read: int = 0
+    records_skipped: int = 0
+    records_non_mdi_skipped: int = 0
+    records_missing_triage_fields: int = 0
+    records_missing_duration_fields: int = 0
+    notes: List[str] = Field(default_factory=list)
+
+
+class DashboardQuotaTrend(BaseModel):
+    """Read-only daily quota trend from vt_daily_history.json."""
+    available: bool = False
+    source: str = "vt_daily_history.json"
+    last_7_days: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class DashboardResponse(BaseModel):
+    """Operational dashboard summary — aggregate metadata only."""
+    generated_at: str
+    windows: Dict[str, Any]
+    quota_trend: DashboardQuotaTrend
+    data_quality: DashboardDataQuality
+
+
 # ─── Job-submit API models ────────────────────────────────────────────────────
 
 

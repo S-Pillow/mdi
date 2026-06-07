@@ -46,6 +46,13 @@ function IconGear() {
     </svg>
   )
 }
+function IconBarChart() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>
+    </svg>
+  )
+}
 function IconUpload() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -363,6 +370,147 @@ function QuotaNavWidget({ quota, loading, error }) {
         ? <span style={{ color: 'var(--risk-critical)', fontWeight: 700, fontSize: 10 }}>EXHAUSTED</span>
         : <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{remaining} left</span>
       }
+    </div>
+  )
+}
+
+// ── Dashboard panel (MDI-17) ────────────────────────────────────────────────
+
+const DASHBOARD_WINDOWS = [
+  { key: 'current', label: 'Current' },
+  { key: 'last_7_days', label: '7 Days' },
+  { key: 'last_30_days', label: '30 Days' },
+  { key: 'all_time', label: 'All Time' },
+]
+
+function dashFmt(value, suffix = '') {
+  if (value == null || value === '') return '—'
+  return `${value}${suffix}`
+}
+
+function dashPct(value) {
+  if (value == null) return '—'
+  return `${value}%`
+}
+
+function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindowChange, onRefresh }) {
+  if (!open) return null
+  const win = data?.windows?.[activeWindow] ?? {}
+  const isCurrent = activeWindow === 'current'
+  const triageRows = win.triage_bucket_counts
+    ? Object.entries(win.triage_bucket_counts).sort((a, b) => b[1] - a[1])
+    : []
+  const opRows = win.operation_counts
+    ? Object.entries(win.operation_counts).sort((a, b) => b[1] - a[1])
+    : []
+  const errRows = win.error_code_counts
+    ? Object.entries(win.error_code_counts).sort((a, b) => b[1] - a[1])
+    : []
+
+  return (
+    <div className="dashboard-panel" id={id} role="region" aria-label="MDI Operational Dashboard">
+      <div className="dashboard-panel-header">
+        <span className="dashboard-panel-title">Operational Dashboard</span>
+        <button type="button" className="btn btn-ghost dashboard-refresh-btn" onClick={onRefresh} disabled={loading}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
+      <div className="dashboard-panel-body">
+        <div className="dashboard-window-tabs">
+          {DASHBOARD_WINDOWS.map(w => (
+            <button
+              key={w.key}
+              type="button"
+              className={`dashboard-window-tab${activeWindow === w.key ? ' active' : ''}`}
+              onClick={() => onWindowChange(w.key)}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
+
+        {error && <p className="dashboard-error-msg">{error}</p>}
+        {loading && !data && <p className="dashboard-empty-msg">Loading dashboard…</p>}
+
+        {data && (
+          <>
+            {isCurrent && !win.available && (
+              <p className="dashboard-empty-msg">No current job available.</p>
+            )}
+            {(!isCurrent || win.available) && (
+              <>
+                <div className="dashboard-cards">
+                  <div className="dashboard-card"><span className="dashboard-card-label">Jobs</span><span className="dashboard-card-value">{dashFmt(isCurrent ? (win.available ? 1 : 0) : win.jobs_run)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Items processed</span><span className="dashboard-card-value">{dashFmt(win.processed ?? win.items_completed)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">VT quota used</span><span className="dashboard-card-value">{dashFmt(win.lookups_used ?? win.quota_units_consumed)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Flagged %</span><span className="dashboard-card-value">{dashPct(win.flagged_percent)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Clean %</span><span className="dashboard-card-value">{dashPct(win.clean_percent)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Unknown/Error %</span><span className="dashboard-card-value">{dashPct(win.unknown_error_percent)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Held %</span><span className="dashboard-card-value">{dashPct(win.held_percent)}</span></div>
+                </div>
+
+                <div className="dashboard-cards dashboard-cards-secondary">
+                  <div className="dashboard-card"><span className="dashboard-card-label">Avg runtime</span><span className="dashboard-card-value">{dashFmt(win.job_duration_seconds ?? win.avg_runtime_seconds, 's')}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Avg items/job</span><span className="dashboard-card-value">{dashFmt(win.avg_items_per_job)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">VT scans requested</span><span className="dashboard-card-value">{dashFmt(win.scan_requested_count)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Live checks</span><span className="dashboard-card-value">{dashFmt(win.live_check_count)}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">RDAP/WHOIS</span><span className="dashboard-card-value">{dashFmt((win.rdap_enriched_count ?? 0) + (win.whois_fallback_count ?? 0))}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Auto-rescan attempts</span><span className="dashboard-card-value">{dashFmt(win.auto_rescan_attempted_count)}</span></div>
+                </div>
+
+                {triageRows.length > 0 && (
+                  <div className="dashboard-table-section">
+                    <div className="dashboard-section-label">Triage bucket breakdown</div>
+                    <table className="dashboard-table">
+                      <tbody>
+                        {triageRows.map(([k, v]) => (
+                          <tr key={k}><td>{k}</td><td>{v}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {opRows.length > 0 && (
+                  <div className="dashboard-table-section">
+                    <div className="dashboard-section-label">Operation breakdown</div>
+                    <table className="dashboard-table">
+                      <tbody>
+                        {opRows.map(([k, v]) => (
+                          <tr key={k}><td>{k}</td><td>{v}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {errRows.length > 0 && (
+                  <div className="dashboard-table-section">
+                    <div className="dashboard-section-label">Error code breakdown</div>
+                    <table className="dashboard-table">
+                      <tbody>
+                        {errRows.map(([k, v]) => (
+                          <tr key={k}><td>{k}</td><td>{v}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {win.triage_metrics_available === false && !isCurrent && (
+                  <p className="dashboard-quality-note">Triage percentages unavailable for older history records.</p>
+                )}
+              </>
+            )}
+
+            {data.data_quality?.notes?.length > 0 && (
+              <div className="dashboard-quality-note">
+                {data.data_quality.notes.map((n, i) => <div key={i}>{n}</div>)}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -1785,12 +1933,36 @@ export default function App() {
   // Settings visibility
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsPanelId = 'mdi-settings-panel'
+  const [dashboardOpen, setDashboardOpen] = useState(false)
+  const dashboardPanelId = 'mdi-dashboard-panel'
+  const [dashboardData, setDashboardData] = useState(null)
+  const [dashboardLoading, setDashboardLoading] = useState(false)
+  const [dashboardError, setDashboardError] = useState(null)
+  const [dashboardWindow, setDashboardWindow] = useState('current')
 
   // Detail drawer — client-side only, no external calls
   const [selectedItem, setSelectedItem] = useState(null)
 
   // Input tabs
   const [activeInputTab, setActiveInputTab] = useState('paste')
+
+  async function fetchDashboard() {
+    setDashboardLoading(true)
+    setDashboardError(null)
+    try {
+      const resp = await fetch(`${API_BASE}/api/mdi/dashboard`)
+      if (!resp.ok) {
+        const t = await resp.text()
+        setDashboardError(`HTTP ${resp.status}: ${t}`)
+        return
+      }
+      setDashboardData(await resp.json())
+    } catch (err) {
+      setDashboardError(err.message || 'Network error')
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
 
   async function refreshQuota() {
     setQuotaLoading(true)
@@ -2145,16 +2317,22 @@ export default function App() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
   }, [])
 
-  // Close settings panel on outside click
   useEffect(() => {
-    if (!settingsOpen) return
+    if (dashboardOpen) fetchDashboard()
+  }, [dashboardOpen])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close settings/dashboard panels on outside click
+  useEffect(() => {
+    if (!settingsOpen && !dashboardOpen) return
     function handleClick(e) {
-      const anchor = document.querySelector('.nav-settings-anchor')
-      if (anchor && !anchor.contains(e.target)) setSettingsOpen(false)
+      const settingsAnchor = document.querySelector('.nav-settings-anchor')
+      const dashAnchor = document.querySelector('.nav-dashboard-anchor')
+      if (settingsOpen && settingsAnchor && !settingsAnchor.contains(e.target)) setSettingsOpen(false)
+      if (dashboardOpen && dashAnchor && !dashAnchor.contains(e.target)) setDashboardOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [settingsOpen])
+  }, [settingsOpen, dashboardOpen])
 
   return (
     <div className="console-shell">
@@ -2173,10 +2351,32 @@ export default function App() {
 
         <QuotaNavWidget quota={quotaState} loading={quotaLoading} error={quotaError} />
 
+        <div className="nav-dashboard-anchor">
+          <button
+            className="settings-gear-btn"
+            onClick={() => { setDashboardOpen(v => !v); setSettingsOpen(false) }}
+            aria-expanded={dashboardOpen}
+            aria-controls={dashboardPanelId}
+            title="Operational dashboard"
+          >
+            <IconBarChart /> Dashboard
+          </button>
+          <DashboardPanel
+            open={dashboardOpen}
+            id={dashboardPanelId}
+            data={dashboardData}
+            loading={dashboardLoading}
+            error={dashboardError}
+            activeWindow={dashboardWindow}
+            onWindowChange={setDashboardWindow}
+            onRefresh={fetchDashboard}
+          />
+        </div>
+
         <div className="nav-settings-anchor">
           <button
             className="settings-gear-btn"
-            onClick={() => setSettingsOpen(v => !v)}
+            onClick={() => { setSettingsOpen(v => !v); setDashboardOpen(false) }}
             aria-expanded={settingsOpen}
             aria-controls={settingsPanelId}
             title="Advanced settings"

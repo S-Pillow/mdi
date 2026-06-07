@@ -1125,6 +1125,27 @@ all/selected when explicitly chosen).
 
 **No usage-history write:** exports do not append to `vt_usage_history.jsonl`.
 
+### MDI-17 operational dashboard
+
+`GET /api/mdi/dashboard` — read-only aggregate summary for windows:
+Current Job, Last 7 Days, Last 30 Days, All Time.
+
+**Data sources:** `vt_usage_history.jsonl` (filter `tool_name == "mdi"`), optional
+`vt_daily_history.json` quota trend, current/recovered job for Current window.
+
+**Historical aggregate fields (forward-only on new job completion):**
+`job_duration_seconds`, `triage_bucket_counts`, `flagged_count`, `clean_count`,
+`unknown_count`, `error_item_count`, `held_count`, `error_code_counts`.
+
+**Dashboard privacy exclusions:** raw domains, URLs, `item_order`, result rows,
+`vt_engine_results`, registrar, nameservers, EPP status, per-item HTTP/live status,
+VT engine names.
+
+**Data quality:** `records_skipped`, `records_non_mdi_skipped`,
+`records_missing_triage_fields`, `records_missing_duration_fields`, `notes[]`.
+
+Exports and dashboard GET do not append usage history.
+
 Rescan actions show a confirmation modal with quota estimate before submitting.
 
 ### MDI-15 job action fields
