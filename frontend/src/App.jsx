@@ -116,6 +116,39 @@ function countSelectedScannable(results, selectedIds, job) {
 }
 
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
+function isExportFlagged(r) {
+  if (isRowHeld(r)) return false
+  if (FLAGGED_BUCKET_SET.has(r?.triage_bucket)) return true
+  return (r?.vt_hits ?? 0) > 0 || (r?.vt_suspicious ?? 0) > 0
+}
+
+async function downloadJobExport(jobId, { format, scope, positions }) {
+  const resp = await fetch(`${API_BASE}/api/mdi/jobs/${jobId}/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format, scope, positions: positions ?? null }),
+  })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    const msg = data?.detail || `HTTP ${resp.status}`
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+  }
+  const blob = await resp.blob()
+  const cd = resp.headers.get('Content-Disposition') || ''
+  const match = cd.match(/filename="([^"]+)"/)
+  const fallbackTs = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15)
+  const ext = format === 'json' ? 'json' : 'csv'
+  const prefix = format === 'json' ? 'mdi_evidence' : 'mdi_export'
+  const filename = match ? match[1] : `${prefix}_${scope}_${fallbackTs}.${ext}`
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 function isLive(r)          { return LIVE_ACTIVE_SET.has(r?.live_status) }
 function isNoLive(r)        { return LIVE_NO_SET.has(r?.live_status) }
 function isRecentAge(r)     { return RECENT_AGE_SET.has(r?.age_bucket) }
@@ -1075,10 +1108,16 @@ function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confi
 
 function BulkControls({
   selectedCount,
+  canExportAll,
+  canExportFlagged,
+  canExportSelected,
   canRescanSelected,
   canRescanStale,
   staleCount,
   actionInProgress,
+  onExportAll,
+  onExportFlagged,
+  onExportSelected,
   onRescanSelected,
   onRescanStale,
 }) {
@@ -1088,11 +1127,29 @@ function BulkControls({
       <button className="btn-stub" disabled aria-disabled="true" title="Select rows first">
         Actions {selectedCount > 0 ? `(${selectedCount})` : '▾'}
       </button>
-      <button className="btn-stub" disabled aria-disabled="true" title="Export available in MDI-16">
+      <button
+        className={canExportFlagged && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canExportFlagged || actionInProgress}
+        title={canExportFlagged ? 'Download flagged rows as CSV' : 'No flagged rows to export'}
+        onClick={onExportFlagged}
+      >
         <IconUpload /> Export Flagged
       </button>
-      <button className="btn-stub" disabled aria-disabled="true" title="Export available in MDI-16">
+      <button
+        className={canExportAll && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canExportAll || actionInProgress}
+        title={canExportAll ? 'Download all rows as CSV' : 'No results to export'}
+        onClick={onExportAll}
+      >
         <IconUpload /> Export All
+      </button>
+      <button
+        className={canExportSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canExportSelected || actionInProgress}
+        title={canExportSelected ? 'Download selected rows as CSV' : 'Select rows first'}
+        onClick={onExportSelected}
+      >
+        <IconUpload /> Export Selected
       </button>
       <button
         className={canRescanSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
@@ -1254,8 +1311,9 @@ function ResultsTable({ results, selectedIds, onToggleSelect, onToggleAll, selec
 function TriageWorkspace({
   job, jobError, jobId, restoredFromSession, onDismissRestore,
   selectedItem, onSelectItem,
-  actionInProgress, actionMessage,
+  actionInProgress, actionMessage, exportMessage,
   onRescanSelected, onRescanStale,
+  onExportAll, onExportFlagged, onExportSelected,
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -1316,11 +1374,18 @@ function TriageWorkspace({
   const selectedScannable = countSelectedScannable(allResults, selectedIds, job)
   const canRescanSelected = isComplete && !actionInProgress && selectedScannable > 0
   const canRescanStale = isComplete && !actionInProgress && staleScannable > 0
+  const flaggedCount = allResults.filter(isExportFlagged).length
+  const canExportAll = isComplete && !actionInProgress && allResults.length > 0
+  const canExportFlagged = isComplete && !actionInProgress && flaggedCount > 0
+  const canExportSelected = isComplete && !actionInProgress && selectedIds.size > 0
 
   return (
     <>
       {actionMessage && (
         <div className={`action-status-msg${actionInProgress ? ' running' : ''}`}>{actionMessage}</div>
+      )}
+      {exportMessage && (
+        <div className="export-status-msg">{exportMessage}</div>
       )}
       {/* Job status bar */}
       <div className="job-status-bar">
@@ -1388,10 +1453,16 @@ function TriageWorkspace({
       {allResults.length > 0 && (
         <BulkControls
           selectedCount={selectedIds.size}
+          canExportAll={canExportAll}
+          canExportFlagged={canExportFlagged}
+          canExportSelected={canExportSelected}
           canRescanSelected={canRescanSelected}
           canRescanStale={canRescanStale}
           staleCount={staleScannable}
           actionInProgress={actionInProgress}
+          onExportAll={onExportAll}
+          onExportFlagged={onExportFlagged}
+          onExportSelected={() => onExportSelected && onExportSelected([...selectedIds])}
           onRescanSelected={() => onRescanSelected && onRescanSelected([...selectedIds])}
           onRescanStale={() => onRescanStale && onRescanStale()}
         />
@@ -1457,6 +1528,7 @@ function DetailDrawer({
   actionInProgress,
   onRefreshRow,
   onScanRow,
+  onExportEvidence,
 }) {
   if (!r) {
     return (
@@ -1666,7 +1738,14 @@ function DetailDrawer({
         <div className="detail-section">
           <div className="detail-section-label">8. Actions</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button className="btn-stub" disabled title="Export evidence — available in MDI-16">↑ Export evidence (JSON) — MDI-16</button>
+            <button
+              className={r && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+              disabled={!r || actionInProgress}
+              title={r ? 'Download evidence JSON for this row' : 'Select a row first'}
+              onClick={() => onExportEvidence && onExportEvidence(r)}
+            >
+              ↑ Export evidence (JSON)
+            </button>
             <button className="btn-stub" disabled title="Open in VirusTotal — coming soon">↗ Open in VirusTotal</button>
             <button
               className={canRefreshRow(r) && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
@@ -1772,6 +1851,7 @@ export default function App() {
 
   const [actionInProgress, setActionInProgress] = useState(false)
   const [actionMessage, setActionMessage]     = useState(null)
+  const [exportMessage, setExportMessage]     = useState(null)
   const [actionModal, setActionModal]         = useState(null)
   const [actionConfirming, setActionConfirming] = useState(false)
 
@@ -1966,6 +2046,37 @@ export default function App() {
 
   function handleDrawerScan(row) {
     openActionModal('scan', 'selected', [row.position])
+  }
+
+  async function runExport({ format, scope, positions }) {
+    if (!jobId) return
+    setExportMessage(null)
+    try {
+      await downloadJobExport(jobId, { format, scope, positions })
+      setExportMessage(
+        format === 'json'
+          ? 'Evidence JSON download started.'
+          : `CSV export (${scope}) download started.`
+      )
+    } catch (err) {
+      setExportMessage(`Export failed: ${err.message}`)
+    }
+  }
+
+  function handleExportAll() {
+    runExport({ format: 'csv', scope: 'all' })
+  }
+
+  function handleExportFlagged() {
+    runExport({ format: 'csv', scope: 'flagged' })
+  }
+
+  function handleExportSelected(positions) {
+    runExport({ format: 'csv', scope: 'selected', positions })
+  }
+
+  function handleExportEvidence(row) {
+    runExport({ format: 'json', scope: 'selected', positions: [row.position] })
   }
 
   async function handleRunJob() {
@@ -2163,8 +2274,12 @@ export default function App() {
               onSelectItem={setSelectedItem}
               actionInProgress={actionInProgress || !!job?.action_in_progress}
               actionMessage={actionMessage}
+              exportMessage={exportMessage}
               onRescanSelected={handleRescanSelected}
               onRescanStale={handleRescanStale}
+              onExportAll={handleExportAll}
+              onExportFlagged={handleExportFlagged}
+              onExportSelected={handleExportSelected}
             />
           )}
 
@@ -2192,6 +2307,7 @@ export default function App() {
             actionInProgress={actionInProgress || !!job?.action_in_progress}
             onRefreshRow={handleDrawerRefresh}
             onScanRow={handleDrawerScan}
+            onExportEvidence={handleExportEvidence}
           />
         </div>
       </div>
