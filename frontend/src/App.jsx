@@ -89,6 +89,35 @@ const API_BASE = ''   // same-origin; nginx proxies /api/mdi/ to port 8011
 const QUOTA_STALE_MS = 60_000
 const MAX_ITEMS = 500
 
+/** Editable next-run settings defaults (must match useState initial values). */
+const DEFAULT_SETTINGS = {
+  use_domain_reports: false,
+  stale_threshold_days: 7,
+  auto_rescan_stale: false,
+  max_auto_rescans: 3,
+}
+
+function resetSettingsToDefaults(setters) {
+  setters.setUseDomainReports(DEFAULT_SETTINGS.use_domain_reports)
+  setters.setStaleThresholdDays(DEFAULT_SETTINGS.stale_threshold_days)
+  setters.setAutoRescanStale(DEFAULT_SETTINGS.auto_rescan_stale)
+  setters.setMaxAutoRescans(DEFAULT_SETTINGS.max_auto_rescans)
+}
+
+function formatJobOptionOnOff(value) {
+  return value ? 'ON' : 'OFF'
+}
+
+function formatJobRanWithSummary(job) {
+  if (!job) return null
+  return [
+    `Domain reports ${formatJobOptionOnOff(job.use_domain_reports)}`,
+    `Auto-rescan ${formatJobOptionOnOff(job.auto_rescan_stale)}`,
+    `Max auto-rescans ${job.max_auto_rescans ?? DEFAULT_SETTINGS.max_auto_rescans}`,
+    `Stale after ${job.stale_threshold_days ?? DEFAULT_SETTINGS.stale_threshold_days} days`,
+  ].join(' · ')
+}
+
 // ── Pure helper functions ─────────────────────────────────────────────────────
 
 function nv(value, fallback = '—') {
@@ -793,7 +822,8 @@ function CollapsibleSettingsPanel({
       <div className="settings-panel-body">
         {locked && (
           <p className="settings-panel-locked-msg">
-            Settings locked while a job is active or restored. Clear results to change settings.
+            Settings are locked while reviewing results. Saved options for this job are shown above.
+            Editable settings below apply to your next run.
           </p>
         )}
 
@@ -1166,7 +1196,7 @@ function ProcessingOptions({ useDomainReports, setUseDomainReports, locked }) {
       <div className="proc-options-body">
         {locked && (
           <p className="proc-locked-note">
-            Locked while a job is active. Clear results to change.
+            Locked while reviewing results. Saved job options are shown above; settings here apply to your next run.
           </p>
         )}
         <div style={ctrlStyle}>
@@ -1854,6 +1884,13 @@ function TriageWorkspace({
         </div>
       </div>
 
+      {job && formatJobRanWithSummary(job) && (
+        <div className="job-ran-with-summary" aria-label="Saved job options">
+          <span className="job-ran-with-label">Job ran with:</span>
+          <span className="job-ran-with-values">{formatJobRanWithSummary(job)}</span>
+        </div>
+      )}
+
       {/* Compact counters row */}
       {isComplete && showCounters && (
         <div className="job-counters-row">
@@ -2288,10 +2325,10 @@ export default function App() {
   const [uploadError, setUploadError]         = useState(null)
 
   // Settings state
-  const [useDomainReports, setUseDomainReports]     = useState(false)
-  const [staleThresholdDays, setStaleThresholdDays] = useState(7)
-  const [autoRescanStale, setAutoRescanStale]       = useState(false)
-  const [maxAutoRescans, setMaxAutoRescans]         = useState(3)
+  const [useDomainReports, setUseDomainReports]     = useState(DEFAULT_SETTINGS.use_domain_reports)
+  const [staleThresholdDays, setStaleThresholdDays] = useState(DEFAULT_SETTINGS.stale_threshold_days)
+  const [autoRescanStale, setAutoRescanStale]       = useState(DEFAULT_SETTINGS.auto_rescan_stale)
+  const [maxAutoRescans, setMaxAutoRescans]         = useState(DEFAULT_SETTINGS.max_auto_rescans)
 
   // VT job state
   const [submitting, setSubmitting]                 = useState(false)
@@ -2383,8 +2420,22 @@ export default function App() {
     autoParseInput(rawInput)
   }
 
+  function dismissDisplayedJob() {
+    setRestoredFromSession(false)
+    setJob(null)
+    setJobId(null)
+    setSelectedItem(null)
+    resetSettingsToDefaults({
+      setUseDomainReports,
+      setStaleThresholdDays,
+      setAutoRescanStale,
+      setMaxAutoRescans,
+    })
+  }
+
   function handleClear() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (job || jobId) dismissDisplayedJob()
     setRawInput(''); setPreview(null); setPreviewError(null); setValidating(false)
     setEstimateResult(null); setEstimateError(null); setEstimateStale(false)
   }
@@ -2584,10 +2635,6 @@ export default function App() {
         const data = await resp.json()
         if (cancelled) return
         setJob(data); setJobId(data.job_id); setRestoredFromSession(true)
-        if (data.stale_threshold_days != null) setStaleThresholdDays(data.stale_threshold_days)
-        if (data.use_domain_reports != null) setUseDomainReports(data.use_domain_reports)
-        if (data.auto_rescan_stale != null) setAutoRescanStale(data.auto_rescan_stale)
-        if (data.max_auto_rescans != null) setMaxAutoRescans(data.max_auto_rescans)
         if (data.status === 'queued' || data.status === 'running') {
           pollRef.current = setInterval(() => pollJob(data.job_id), 2000)
         }
@@ -2749,12 +2796,7 @@ export default function App() {
               jobError={jobError}
               jobId={jobId}
               restoredFromSession={restoredFromSession}
-              onDismissRestore={() => {
-                setRestoredFromSession(false)
-                setJob(null)
-                setJobId(null)
-                setSelectedItem(null)
-              }}
+              onDismissRestore={dismissDisplayedJob}
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
               actionInProgress={actionInProgress || !!job?.action_in_progress}

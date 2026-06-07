@@ -1245,12 +1245,24 @@ Usage history action aggregates: `refresh_count`, `scan_requested_count`,
 `scan_completed_count`, `scan_failed_count`, `rescan_selected_count`,
 `rescan_stale_count`, `operation` (`refresh` | `force_scan`).
 
+### MDI-29 recovered job settings vs editable UI state
+
+| Concept | Source | Purpose |
+|---|---|---|
+| **Saved job options** | `JobStatusResponse` fields on recovered/displayed job | Read-only **"Job ran with…"** metadata; what that job used at submit |
+| **Editable next-run Settings** | Frontend React state (`DEFAULT_SETTINGS` on dismiss/clear) | Estimate/Submit payload for the **next** job; not overwritten by recovery |
+
+Recovery (`GET /jobs/latest`) loads job results and saved options into the job
+object only. It does **not** copy saved options into editable Settings.
+Dismiss/Clear resets editable Settings to defaults (`auto_rescan_stale=false`,
+`use_domain_reports=false`, `stale_threshold_days=7`, `max_auto_rescans=3`).
+
 ### MDI-15A auto-rescan fields
 
 | Field | Level | Purpose |
 |---|---|---|
-| `auto_rescan_stale` | job option | Operator toggle at submit; default `false` |
-| `max_auto_rescans` | job option | Per-job cap; default `3` |
+| `auto_rescan_stale` | job option | Operator toggle at submit; default `false`; saved on job record |
+| `max_auto_rescans` | job option | Per-job cap; default `3`; saved on job record |
 | `auto_rescan_attempted_count` | job / history | VT scan attempts during initial processing |
 | `auto_rescan_completed_count` | job / history | Scans that returned updated VT data |
 | `auto_rescan_failed_count` | job / history | Pending or hard-failed scans |
