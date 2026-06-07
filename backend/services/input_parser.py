@@ -34,15 +34,18 @@ DEFAULT_MAX_ITEMS: int = 500
 DEFAULT_MAX_RAW_CHARS: int = 100_000
 MAX_TOKEN_LENGTH: int = 2_048
 
-# Matches valid domain labels: letters, digits, hyphens (not at start/end).
-# Also accepts bare IPv4 addresses and single-label hostnames (e.g. localhost).
-_DOMAIN_RE = re.compile(
-    r"^(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)*"
-    r"[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?$"
+# MDI accepts dotted public-style domains and IPv4 literals only — not single-label
+# hostnames (e.g. localhost, printer01) unless a future setting adds them.
+_ASCII_LABEL_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?$",
+    re.IGNORECASE,
 )
+_PUNYCODE_LABEL_RE = re.compile(r"^xn--[a-z0-9-]+$", re.IGNORECASE)
+_ASCII_TLD_RE = re.compile(r"^[a-z]{2,63}$", re.IGNORECASE)
 _IPV4_RE = re.compile(
     r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$"
 )
+_RESERVED_HOSTS: frozenset = frozenset({"localhost"})
 
 
 # ── Output structures ──────────────────────────────────────────────────────────
@@ -109,17 +112,60 @@ def _lowercase_url(parsed) -> str:
     ))
 
 
-def _is_valid_domain(s: str) -> bool:
+def _is_valid_label(label: str) -> bool:
+    """Return True if label is a valid domain label (ASCII or punycode)."""
+    if not label or "_" in label:
+        return False
+    if label.lower().startswith("xn--"):
+        return bool(_PUNYCODE_LABEL_RE.match(label))
+    return bool(_ASCII_LABEL_RE.match(label))
+
+
+def _is_valid_tld(label: str) -> bool:
+    """Return True if the rightmost label looks like a TLD (letters or punycode)."""
+    if not label:
+        return False
+    if label.lower().startswith("xn--"):
+        return bool(_PUNYCODE_LABEL_RE.match(label))
+    return bool(_ASCII_TLD_RE.match(label)) and label.isascii()
+
+
+def _is_valid_ipv4(s: str) -> bool:
+    if not _IPV4_RE.match(s):
+        return False
+    parts = [int(p) for p in s.split(".")]
+    return all(0 <= p <= 255 for p in parts)
+
+
+def _is_valid_host(host: str) -> bool:
     """
-    Return True if s looks like a valid domain, single-label host, or IPv4.
+    Return True if host is a dotted domain or IPv4 suitable for MDI triage.
+
+    Single-label names, localhost, empty labels, and underscores are rejected.
     Does not perform DNS resolution or network calls.
     """
-    if not s or " " in s or len(s) > 253:
+    if not host or " " in host or "_" in host or len(host) > 253:
         return False
-    if _IPV4_RE.match(s):
-        parts = [int(p) for p in s.split(".")]
-        return all(0 <= p <= 255 for p in parts)
-    return bool(_DOMAIN_RE.match(s))
+
+    host = host.rstrip(".").lower()
+    if not host or host in _RESERVED_HOSTS:
+        return False
+
+    if _is_valid_ipv4(host):
+        return True
+
+    if "." not in host:
+        return False
+
+    labels = host.split(".")
+    if any(not lbl for lbl in labels):
+        return False
+    if not all(_is_valid_label(lbl) for lbl in labels):
+        return False
+    if not _is_valid_tld(labels[-1]):
+        return False
+
+    return True
 
 
 def _make_error(code: str, message: str, source: str = "input_parser") -> MdiError:
@@ -180,6 +226,8 @@ def normalize_token(
 
         if not host:
             raise ValueError("missing_host")
+        if not _is_valid_host(host):
+            raise ValueError(f"invalid_host:{host}")
 
         normalized = _lowercase_url(parsed)
         return normalized, InputType.URL
@@ -194,6 +242,8 @@ def normalize_token(
             host = host.rstrip(".")
         if not host:
             raise ValueError("missing_host")
+        if not _is_valid_host(host):
+            raise ValueError(f"invalid_host:{host}")
         normalized = _lowercase_url(parsed)
         return normalized, InputType.URL
 
@@ -201,7 +251,7 @@ def normalize_token(
     domain = s.rstrip(".")   # strip trailing FQDN dot
     domain = domain.lower()
 
-    if not _is_valid_domain(domain):
+    if not _is_valid_host(domain):
         raise ValueError(f"invalid_domain:{domain}")
 
     return domain, InputType.DOMAIN
@@ -289,6 +339,9 @@ def parse_raw_input(
                 )
                 code = "unsupported_scheme"
             elif code_str.startswith("invalid_domain:"):
+                msg = f"'{raw_token}' does not appear to be a valid domain or URL."
+                code = "invalid_input"
+            elif code_str.startswith("invalid_host:"):
                 msg = f"'{raw_token}' does not appear to be a valid domain or URL."
                 code = "invalid_input"
             elif code_str == "missing_host":

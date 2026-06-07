@@ -240,6 +240,14 @@ severity, category). The UI shows severity badges — **ERROR**, **WARNING**,
 **Skips are not failures.** Warnings do **not** automatically force an ERROR
 triage bucket when VT succeeded.
 
+### Accepted input shape (parse / upload)
+
+Bare domains must be **dotted public-style names** (e.g. `example.com`,
+`sub.example.com`). **Single-label hostnames** (`localhost`, `printer01`, bare
+words like `not` or `valid`) and malformed fragments (`domain/.com`,
+`example..com`) are rejected at parse-preview with `invalid_input`. Internal
+hostname inventory is out of scope unless a future setting adds it.
+
 ### When to retry, refresh, or scan
 
 | Situation | Preferred action |
