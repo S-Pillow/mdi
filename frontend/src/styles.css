@@ -248,6 +248,143 @@ body {
   line-height: 1.5;
 }
 
+/* MDI-17 operational dashboard panel */
+.nav-dashboard-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+.dashboard-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 520px;
+  max-width: calc(100vw - 24px);
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35);
+  z-index: 300;
+  animation: fadeInDown 0.14s ease;
+}
+.dashboard-panel-header {
+  padding: 9px 14px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dashboard-panel-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.dashboard-refresh-btn {
+  font-size: 10px !important;
+  padding: 3px 8px !important;
+}
+.dashboard-panel-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dashboard-window-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dashboard-window-tab {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.dashboard-window-tab.active {
+  border-color: var(--accent-blue);
+  color: var(--text-main);
+  background: var(--bg-panel-2);
+}
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.dashboard-cards-secondary {
+  margin-top: 2px;
+}
+.dashboard-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dashboard-card-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.dashboard-card-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.dashboard-table-section {
+  margin-top: 4px;
+}
+.dashboard-section-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.dashboard-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+}
+.dashboard-table td:last-child {
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.dashboard-quality-note {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 6px 10px;
+  line-height: 1.45;
+}
+.dashboard-empty-msg {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.dashboard-error-msg {
+  font-size: 11px;
+  color: var(--status-warning);
+}
+
 .settings-section-label {
   font-size: 9px;
   font-weight: 700;

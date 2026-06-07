@@ -204,6 +204,14 @@ def build_usage_history_record(
     auto_rescan_failed_count: int = 0,
     auto_rescan_skipped_count: int = 0,
     auto_rescan_quota_blocked_count: int = 0,
+    job_duration_seconds: Optional[float] = None,
+    triage_bucket_counts: Optional[Dict[str, int]] = None,
+    flagged_count: Optional[int] = None,
+    clean_count: Optional[int] = None,
+    unknown_count: Optional[int] = None,
+    error_item_count: Optional[int] = None,
+    held_count: Optional[int] = None,
+    error_code_counts: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
@@ -213,7 +221,7 @@ def build_usage_history_record(
     Only aggregate counts are permitted (MDI-11 enrichment and MDI-12 live-check
     counts included).
     """
-    return {
+    record: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "tool_name": "mdi",
         "job_id": job_id,
@@ -252,3 +260,20 @@ def build_usage_history_record(
         "auto_rescan_skipped_count": auto_rescan_skipped_count,
         "auto_rescan_quota_blocked_count": auto_rescan_quota_blocked_count,
     }
+    if job_duration_seconds is not None:
+        record["job_duration_seconds"] = job_duration_seconds
+    if triage_bucket_counts is not None:
+        record["triage_bucket_counts"] = triage_bucket_counts
+    if flagged_count is not None:
+        record["flagged_count"] = flagged_count
+    if clean_count is not None:
+        record["clean_count"] = clean_count
+    if unknown_count is not None:
+        record["unknown_count"] = unknown_count
+    if error_item_count is not None:
+        record["error_item_count"] = error_item_count
+    if held_count is not None:
+        record["held_count"] = held_count
+    if error_code_counts is not None:
+        record["error_code_counts"] = error_code_counts
+    return record

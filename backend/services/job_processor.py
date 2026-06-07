@@ -56,6 +56,7 @@ from models import (
 )
 from services import (
     auto_rescan,
+    dashboard,
     domain_enrichment,
     job_persistence,
     job_store,
@@ -542,6 +543,11 @@ def _write_history(
         if r.processing_status == MdiProcessingStatus.ERROR
     )
 
+    aggregates = dashboard.compute_job_result_aggregates(job)
+    job_duration_seconds = None
+    if job.completed_at is not None and job.submitted_at:
+        job_duration_seconds = max(0.0, job.completed_at - job.submitted_at)
+
     record = quota_writer.build_usage_history_record(
         job_id=job.job_id,
         items_attempted=job.total,
@@ -577,6 +583,14 @@ def _write_history(
         auto_rescan_failed_count=job.auto_rescan_failed_count,
         auto_rescan_skipped_count=job.auto_rescan_skipped_count,
         auto_rescan_quota_blocked_count=job.auto_rescan_quota_blocked_count,
+        job_duration_seconds=job_duration_seconds,
+        triage_bucket_counts=aggregates["triage_bucket_counts"],
+        flagged_count=aggregates["flagged_count"],
+        clean_count=aggregates["clean_count"],
+        unknown_count=aggregates["unknown_count"],
+        error_item_count=aggregates["error_item_count"],
+        held_count=aggregates["held_count"],
+        error_code_counts=aggregates["error_code_counts"],
     )
     quota_writer.append_usage_history(record, history_file)
 

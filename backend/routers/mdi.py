@@ -28,6 +28,9 @@ MDI-15 endpoints:
 
 MDI-16 endpoints:
   POST /api/mdi/jobs/{job_id}/export  — CSV or JSON evidence download; no quota, no persistence
+
+MDI-17 endpoints:
+  GET  /api/mdi/dashboard             — read-only operational dashboard; metadata-only
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from models import (
     DomainHold,
     DomainHoldType,
     DomainStatusSource,
+    DashboardResponse,
     DuplicateItemResponse,
     EstimateRequest,
     EstimateResponse,
@@ -83,7 +87,7 @@ from services.job_store import (
     InMemoryJob, create_job, get_job,
     get_latest_completed_job_sync, register_recovered_job,
 )
-from services import export_service, job_actions, job_persistence, job_processor
+from services import dashboard, export_service, job_actions, job_persistence, job_processor
 from services.job_store import InMemoryJob
 from services.quota_writer import read_remaining_quota
 from services.estimate import estimate_job
@@ -709,6 +713,28 @@ async def job_status(job_id: str) -> JobStatusResponse:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
 
     return _build_job_status_response(job)
+
+
+# ── Operational dashboard (MDI-17) ─────────────────────────────────────────────
+
+@router.get("/dashboard", tags=["Dashboard"], response_model=DashboardResponse)
+async def operational_dashboard() -> DashboardResponse:
+    """
+    Return metadata-only operational dashboard for all time windows.
+
+    Reads vt_usage_history.jsonl and optional vt_daily_history.json read-only.
+    Current Job window uses in-memory or recovered latest job aggregates only.
+    No writes. No external calls. No quota consumed.
+    """
+    job = get_latest_completed_job_sync()
+    if job is None:
+        recovered = job_persistence.read_latest_job()
+        if recovered is not None:
+            register_recovered_job(recovered)
+            job = recovered
+
+    summary = dashboard.build_dashboard_summary(current_job=job)
+    return DashboardResponse(**summary)
 
 
 # ── Schema summary ─────────────────────────────────────────────────────────────
