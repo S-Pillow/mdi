@@ -1016,6 +1016,41 @@ body {
 .job-ran-with-values {
   color: var(--text-muted);
 }
+.results-job-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.02);
+}
+.results-job-context-bar.recovered {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(15, 23, 42, 0.18));
+}
+.results-job-context-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.results-job-context-title {
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.results-job-context-helper {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.results-start-new-btn {
+  flex-shrink: 0;
+}
 .job-counters-row {
   font-size: 10px;
   color: var(--text-muted);
@@ -2065,5 +2100,13 @@ body {
   .console-nav  { padding: 0 14px; }
   .options-sidebar { flex-direction: column; }
   .triage-card { min-width: 104px; max-width: 148px; }
+  .results-job-context-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .results-start-new-btn {
+    justify-content: center;
+    width: 100%;
+  }
   .triage-card .tc-count { font-size: 18px; }
 }

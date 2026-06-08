@@ -2107,6 +2107,45 @@ function ResultsTable({
   )
 }
 
+function ResultsJobContextBar({
+  job,
+  jobError,
+  restoredFromSession,
+  onStartNewScan,
+  actionInProgress,
+}) {
+  const resultCount = job?.results?.length ?? 0
+  const lookupCount = job?.lookups_used ?? 0
+  const isRunning = job?.status === 'queued' || job?.status === 'running' || actionInProgress
+  const title = restoredFromSession ? '↩ Recovered previous job' : jobError ? 'Run error' : 'Results ready'
+  const helper = restoredFromSession
+    ? `${resultCount.toLocaleString()} result${resultCount !== 1 ? 's' : ''} · Completed previous UTC day · ${lookupCount.toLocaleString()} VT lookup${lookupCount !== 1 ? 's' : ''} on this job`
+    : jobError
+      ? 'Clear this error and return to input.'
+      : `${resultCount.toLocaleString()} result${resultCount !== 1 ? 's' : ''}`
+
+  return (
+    <div className={`results-job-context-bar${restoredFromSession ? ' recovered' : ''}`} role="region" aria-label="Results job context">
+      <div className="results-job-context-copy">
+        <span className="results-job-context-title">{title}</span>
+        <span className="results-job-context-helper">
+          {isRunning ? 'Wait for this job to finish before starting another scan.' : helper}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="btn btn-primary results-start-new-btn"
+        onClick={onStartNewScan}
+        disabled={isRunning}
+        aria-label="Start a new MDI scan"
+        title={isRunning ? 'Wait for this job to finish before starting another scan.' : 'Clear displayed results and return to input'}
+      >
+        Start New Scan
+      </button>
+    </div>
+  )
+}
+
 // ── Triage workspace (replaces JobSection) ────────────────────────────────────
 
 function TriageWorkspace({
@@ -2117,6 +2156,8 @@ function TriageWorkspace({
   onExportAll, onExportFlagged, onExportSelected,
   onExportEvidence, onRefreshRow, onScanRow,
   onCloseDashboard,
+  restoredFromSession,
+  onStartNewScan,
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -2143,9 +2184,18 @@ function TriageWorkspace({
 
   if (jobError) {
     return (
-      <div className="submit-error-banner" role="alert">
-        <span style={{ color: 'var(--risk-critical)', fontSize: 12, fontWeight: 600 }}>⛔ Submit error: {jobError}</span>
-      </div>
+      <>
+        <ResultsJobContextBar
+          job={job}
+          jobError={jobError}
+          restoredFromSession={false}
+          onStartNewScan={onStartNewScan}
+          actionInProgress={actionInProgress}
+        />
+        <div className="submit-error-banner" role="alert">
+          <span style={{ color: 'var(--risk-critical)', fontSize: 12, fontWeight: 600 }}>⛔ Submit error: {jobError}</span>
+        </div>
+      </>
     )
   }
   if (!job && !jobId) return null
@@ -2154,6 +2204,7 @@ function TriageWorkspace({
   const prioritySorted  = [...allResults].sort(comparePriority)
   const filteredResults = getFilteredResults(prioritySorted, activeFilter)
   const isComplete  = job?.status === 'done' || job?.status === 'error'
+  const isRunning = job?.status === 'queued' || job?.status === 'running'
 
   const lcc  = job?.live_check_count ?? 0
   const lcsk = job?.live_check_skipped_count ?? 0
@@ -2177,6 +2228,13 @@ function TriageWorkspace({
       {exportMessage && (
         <div className="export-status-msg">{exportMessage}</div>
       )}
+
+      <ResultsJobContextBar
+        job={job}
+        restoredFromSession={restoredFromSession}
+        onStartNewScan={onStartNewScan}
+        actionInProgress={actionInProgress}
+      />
 
       {job && formatJobRanWithSummary(job) && (
         <div className="job-ran-with-summary" aria-label="Saved job options">
@@ -2530,6 +2588,7 @@ export default function App() {
 
   // Detail drawer — client-side only, no external calls
   const [selectedItem, setSelectedItem] = useState(null)
+  const inputPanelRef = useRef(null)
 
   // Input tabs
   const [activeInputTab, setActiveInputTab] = useState('paste')
@@ -2712,6 +2771,35 @@ export default function App() {
       setAutoRescanStale,
       setMaxAutoRescans,
     })
+  }
+
+  function focusInputPanel() {
+    window.requestAnimationFrame(() => {
+      const panel = inputPanelRef.current
+      if (!panel) return
+      panel.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      const target = activeInputTab === 'paste'
+        ? panel.querySelector('.input-area')
+        : panel.querySelector('.input-tab-btn.active')
+      target?.focus?.({ preventScroll: true })
+    })
+  }
+
+  function handleStartNewScan() {
+    if (job?.status === 'queued' || job?.status === 'running' || actionInProgress || job?.action_in_progress) return
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    dismissDisplayedJob()
+    setDashboardOpen(false)
+    setSettingsOpen(false)
+    setActionMessage(null)
+    setExportMessage(null)
+    setActionModal(null)
+    setActionConfirming(false)
+    setActionInProgress(false)
+    focusInputPanel()
   }
 
   function handleClear() {
@@ -3058,7 +3146,7 @@ export default function App() {
         {/* LEFT COLUMN */}
         <div className={`console-left${hasActiveResults ? ' has-results' : ''}`}>
 
-          <div className="pre-results-block">
+          <div className="pre-results-block" ref={inputPanelRef}>
           {/* Page heading */}
           <div className="mdi-page-heading">
             <div className="mdi-brand-row">
@@ -3138,6 +3226,8 @@ export default function App() {
               onRefreshRow={handleDrawerRefresh}
               onScanRow={handleDrawerScan}
               onCloseDashboard={closeDashboard}
+              restoredFromSession={restoredFromSession}
+              onStartNewScan={handleStartNewScan}
             />
             </div>
           )}

@@ -86,10 +86,13 @@ Editable settings in the sidebar (**Run Options**) and gear menu (**Advanced Set
 always reflect **defaults or your choices for the next job** — auto-rescan remains
 **OFF** by default until you enable it in Advanced Settings.
 
-**Dismiss or Clear** (when results are visible) removes the displayed job and
-**resets editable Settings to new-job defaults**. You can manually change
-Settings again before Estimate or Run MDI Check. If auto-rescan appeared ON only
-because a recovered job had been run with it ON, dismiss/clear returns it to OFF.
+**Start New Scan** appears above results when a current or recovered job is
+displayed. It clears the displayed results in the browser, closes result-only UI
+state, returns you to the input panel, and **does not consume quota** or delete
+backend/runtime history. It also **resets editable Settings to new-job defaults**.
+You can manually change Settings again before Estimate or Run MDI Check. If
+auto-rescan appeared ON only because a recovered job had been run with it ON,
+Start New Scan returns it to OFF.
 
 ---
 
