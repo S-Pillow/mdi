@@ -624,27 +624,26 @@ function triageColor(bucket) {
 }
 
 const TRIAGE_CARDS = [
+  { key: 'all',     label: 'All',                     color: 'var(--c-all)', filter: 'all' },
+  { key: 'held',    label: 'Domain On Hold',          color: 'var(--c-held)', filter: 'held' },
   { key: 'flr',     label: 'Flagged + Live + Recent', color: 'var(--c-flr)', filter: 'flr' },
-  { key: 'fl',      label: 'Flagged + Live',           color: 'var(--c-fl)',  filter: 'fl'  },
-  { key: 'fr',      label: 'Flagged + Recent',         color: 'var(--c-fr)', filter: 'fr'  },
-  { key: 'fs',      label: 'Flagged + Stale',          color: 'var(--c-fs)', filter: 'fs'  },
-  { key: 'fnl',     label: 'Flagged + No-Live',        color: 'var(--c-fnl)',filter: 'fnl' },
-  { key: 'unknown', label: 'Unknown / Errors',         color: 'var(--c-unk)',filter: 'unknown' },
-  { key: 'clean',   label: 'Clean',                    color: 'var(--c-cln)',filter: 'clean' },
+  { key: 'fl',      label: 'Flagged + Live',          color: 'var(--c-fl)',  filter: 'fl'  },
+  { key: 'fr',      label: 'Flagged + Recent',        color: 'var(--c-fr)',  filter: 'fr'  },
+  { key: 'fs',      label: 'Flagged + Stale',         color: 'var(--c-fs)',  filter: 'fs'  },
+  { key: 'fnl',     label: 'Flagged + No-Live',       color: 'var(--c-fnl)', filter: 'fnl' },
+  { key: 'unknown', label: 'Unknown / Errors',        color: 'var(--c-unk)', filter: 'unknown' },
+  { key: 'clean',   label: 'Clean',                   color: 'var(--c-cln)', filter: 'clean' },
 ]
 
-const NAMED_FILTERS = [
-  { key: 'all',     label: 'All' },
-  { key: 'held',    label: 'Domain On Hold' },
-  { key: 'flr',     label: 'Flagged + Live + Recent' },
-  { key: 'fl',      label: 'Flagged + Live' },
-  { key: 'fr',      label: 'Flagged + Recent' },
-  { key: 'fs',      label: 'Flagged + Stale' },
-  { key: 'fnl',     label: 'Flagged + No-Live' },
-  { key: 'flagged', label: 'All Flagged' },
-  { key: 'unknown', label: 'Unknown / Errors' },
-  { key: 'clean',   label: 'Clean' },
-]
+function filterLabelForKey(key) {
+  return TRIAGE_CARDS.find(c => c.filter === key)?.label ?? key
+}
+
+function formatJobIdDisplay(id) {
+  if (!id) return ''
+  if (id.length <= 22) return id
+  return `${id.slice(0, 8)}…${id.slice(-4)}`
+}
 
 // ── QuotaNavWidget (compact nav display) ─────────────────────────────────────
 
@@ -1019,12 +1018,15 @@ function InputTabsPanel({
   fileRef, selectedFile, onFileChange, onUploadPreview, uploadPreviewing,
   onRunJob, submitting, canRunJob,
   onEstimate, estimating,
+  estimate, estimateError, estimateStale,
+  hasActiveResults,
+  restoredFromSession, onDismissRestore,
 }) {
   const hasInput = rawInput.trim().length > 0
   const lineCount = hasInput ? rawInput.trim().split('\n').filter(l => l.trim()).length : 0
 
   return (
-    <div className="input-panel">
+    <div className={`input-panel${hasActiveResults ? ' input-panel-compact' : ''}`}>
       <div className="input-tabs-nav">
         <button
           className={`input-tab-btn${activeTab === 'paste' ? ' active' : ''}`}
@@ -1038,6 +1040,18 @@ function InputTabsPanel({
         >
           Upload CSV / Excel
         </button>
+        {restoredFromSession && (
+          <div className="input-restored-notice" role="status">
+            <span>↩ Restored previous job input</span>
+            <button
+              type="button"
+              className="restored-dismiss-btn"
+              onClick={onDismissRestore}
+              title="Dismiss restored job"
+              aria-label="Dismiss restored job"
+            >✕</button>
+          </div>
+        )}
       </div>
 
       <div className="input-panel-body">
@@ -1116,6 +1130,13 @@ function InputTabsPanel({
                 Validation runs automatically · no quota consumed
               </span>
             )}
+
+            <EstimatePanel
+              estimate={estimate}
+              error={estimateError}
+              stale={estimateStale}
+              minimized={hasActiveResults}
+            />
           </>
         )}
 
@@ -1170,6 +1191,13 @@ function InputTabsPanel({
                 Validate upload to review accepted items before estimating or running.
               </span>
             )}
+
+            <EstimatePanel
+              estimate={estimate}
+              error={estimateError}
+              stale={estimateStale}
+              minimized={hasActiveResults}
+            />
           </>
         )}
       </div>
@@ -1179,7 +1207,7 @@ function InputTabsPanel({
 
 // ── VT Usage & Status panel ───────────────────────────────────────────────────
 
-function VtUsagePanel({ quota, quotaLoading, job }) {
+function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const used      = quota?.daily_lookups_used ?? 0
   const limit     = quota?.daily_limit ?? 500
   const remaining = quota?.remaining ?? (limit - used)
@@ -1251,6 +1279,12 @@ function VtUsagePanel({ quota, quotaLoading, job }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {jobId && (
+        <div className="vt-job-id-section">
+          <span className="vt-job-id-label">Job ID</span>
+          <code className="vt-job-id-value" title={jobId}>{formatJobIdDisplay(jobId)}</code>
         </div>
       )}
     </div>
@@ -1444,115 +1478,84 @@ function UploadPreviewResultsSection({ preview, error }) {
   )
 }
 
-// ── Estimate section ──────────────────────────────────────────────────────────
+// ── Estimate panel (compact, input-adjacent) ──────────────────────────────────
 
-function Row({ label, value, note, bold, color, warn }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span style={{ fontFamily: 'monospace', fontWeight: bold ? 700 : 400, color: warn ? 'var(--warn)' : color ?? 'var(--text)' }}>
-        {value}{note && <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontFamily: 'inherit' }}> ({note})</span>}
-      </span>
-    </div>
-  )
-}
-
-function EstimateSection({ estimate, error, stale }) {
+function EstimatePanel({ estimate, error, stale, minimized }) {
   if (error) {
     return (
-      <div className="card">
-        <div className="card-header"><span className="card-label">Quota &amp; Runtime Estimate</span></div>
-        <div className="card-body">
-          <p style={{ color: 'var(--danger)', fontSize: 13 }}>Estimate error: {error}</p>
-        </div>
+      <div className="estimate-panel estimate-panel-error" role="alert">
+        <span className="estimate-panel-label">Estimate error</span>
+        <span>{error}</span>
       </div>
     )
   }
   if (!estimate) return null
 
   const {
-    accepted_count, rejected_count, duplicate_count,
-    eligible_vt_count, held_skipped_count,
+    accepted_count, eligible_vt_count,
     estimated_vt_calls_min, estimated_vt_calls_max,
     total_estimated_vt_calls_max,
-    auto_rescan_estimated_quota_min, auto_rescan_estimated_quota_max,
-    auto_rescan_domain_eligible_max, auto_rescan_url_eligible_max,
-    auto_rescan_estimated_duration_seconds_max,
-    auto_rescan_note,
-    quota_remaining_now, will_exceed_quota, quota_headroom,
+    auto_rescan_estimated_quota_max,
     estimated_duration_seconds_min, estimated_duration_seconds_max,
-    rate_limit_note, job_state_note, live_check_note,
+    quota_remaining_now, will_exceed_quota,
+    held_skipped_count,
   } = estimate
   const totalVtMax = total_estimated_vt_calls_max ?? estimated_vt_calls_max
 
-  return (
-    <div className="card" style={{ borderColor: will_exceed_quota ? 'var(--danger)' : stale ? 'var(--warn)' : undefined }}>
-      <div className="card-header">
-        <span className="card-label">Quota &amp; Runtime Estimate</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Estimate only — no VT calls, no quota consumed</span>
-        {stale && <span style={{ fontSize: 11, color: 'var(--warn)', fontWeight: 600 }}>⚠ Input changed — estimate outdated</span>}
+  if (minimized) {
+    return (
+      <div className="estimate-panel estimate-panel-minimal" role="status">
+        <span className="estimate-panel-label">Last estimate</span>
+        <span className="estimate-minimal-summary">
+          {accepted_count} items · {estimated_vt_calls_min}–{estimated_vt_calls_max} VT calls · {fmtDuration(estimated_duration_seconds_min)}–{fmtDuration(estimated_duration_seconds_max)}
+        </span>
+        {stale && <span className="estimate-stale-tag">Outdated</span>}
+        <span className="estimate-no-quota-note">No quota consumed</span>
       </div>
-      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {will_exceed_quota && (
-          <div style={{ padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#FCA5A5', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span>⛔</span>
-            <span>Worst-case estimate ({totalVtMax} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission will be blocked.</span>
+    )
+  }
+
+  return (
+    <div className={`estimate-panel${will_exceed_quota ? ' estimate-panel-warn' : ''}${stale ? ' estimate-panel-stale' : ''}`}>
+      <div className="estimate-panel-head">
+        <span className="estimate-panel-label">Quota &amp; Runtime Estimate</span>
+        <span className="estimate-no-quota-note">Estimate only — no VT calls, no quota consumed</span>
+        {stale && <span className="estimate-stale-tag">Input changed — outdated</span>}
+      </div>
+      {will_exceed_quota && (
+        <div className="estimate-quota-warn" role="alert">
+          Worst-case ({totalVtMax} VT calls) exceeds remaining quota ({quota_remaining_now}). Submission blocked.
+        </div>
+      )}
+      <div className="estimate-compact-grid">
+        <div className="estimate-stat">
+          <span className="estimate-stat-val">{accepted_count}</span>
+          <span className="estimate-stat-lbl">Items</span>
+        </div>
+        <div className="estimate-stat">
+          <span className="estimate-stat-val">{eligible_vt_count}</span>
+          <span className="estimate-stat-lbl">Eligible VT</span>
+        </div>
+        <div className="estimate-stat">
+          <span className="estimate-stat-val">{estimated_vt_calls_min}–{estimated_vt_calls_max}</span>
+          <span className="estimate-stat-lbl">VT calls</span>
+        </div>
+        <div className="estimate-stat">
+          <span className="estimate-stat-val">{fmtDuration(estimated_duration_seconds_min)}–{fmtDuration(estimated_duration_seconds_max)}</span>
+          <span className="estimate-stat-lbl">Runtime</span>
+        </div>
+        {auto_rescan_estimated_quota_max > 0 && (
+          <div className="estimate-stat">
+            <span className="estimate-stat-val">+{auto_rescan_estimated_quota_max}</span>
+            <span className="estimate-stat-lbl">Auto-rescan max</span>
           </div>
         )}
-        <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-          {[
-            { label: 'Accepted',    value: accepted_count,    color: accepted_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Eligible VT', value: eligible_vt_count, color: eligible_vt_count > 0 ? 'var(--ok)' : 'var(--text-muted)' },
-            { label: 'Rejected',    value: rejected_count,    color: rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
-            { label: 'Duplicates',  value: duplicate_count,   color: duplicate_count > 0 ? 'var(--warn)' : 'var(--text-muted)' },
-          ].map(t => (
-            <div key={t.label} className="summary-tile">
-              <span className="tile-label">{t.label}</span>
-              <span className="tile-value" style={{ color: t.color, fontSize: 18 }}>{t.value}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
-            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>VT call estimate</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Row label="Best case"     value={`${estimated_vt_calls_min} call${estimated_vt_calls_min !== 1 ? 's' : ''}`} />
-              <Row label="Worst case"    value={`${estimated_vt_calls_max} call${estimated_vt_calls_max !== 1 ? 's' : ''}`} bold />
-              {auto_rescan_estimated_quota_max > 0 && (
-                <>
-                  <Row label="Auto-rescan (extra)" value={`${auto_rescan_estimated_quota_min}–${auto_rescan_estimated_quota_max} calls`} />
-                  {(auto_rescan_domain_eligible_max > 0 || auto_rescan_url_eligible_max > 0) && (
-                    <Row
-                      label="Auto-rescan slots"
-                      value={`${auto_rescan_domain_eligible_max} domain · ${auto_rescan_url_eligible_max} URL`}
-                      note="worst case"
-                    />
-                  )}
-                  <Row label="Total worst case" value={`${totalVtMax} calls`} bold />
-                </>
-              )}
-              <Row label="Quota remaining" value={quota_remaining_now} />
-              <Row label="Headroom" value={quota_headroom >= 0 ? `+${quota_headroom}` : String(quota_headroom)} color={quota_headroom >= 0 ? 'var(--ok)' : 'var(--danger)'} />
-            </div>
+        {held_skipped_count > 0 && (
+          <div className="estimate-stat">
+            <span className="estimate-stat-val">{held_skipped_count}</span>
+            <span className="estimate-stat-lbl">Hold-skipped</span>
           </div>
-          <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '10px 14px', fontSize: 12 }}>
-            <p style={{ color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>Estimated runtime</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <Row label="Best case"  value={fmtDuration(estimated_duration_seconds_min)} />
-              <Row label="Worst case" value={fmtDuration(estimated_duration_seconds_max)} />
-              {auto_rescan_estimated_quota_max > 0 && (
-                <Row label="Auto-rescan (extra)" value={auto_rescan_estimated_duration_seconds_max > 0 ? `up to ${fmtDuration(auto_rescan_estimated_duration_seconds_max)}` : 'may add time'} />
-              )}
-              {held_skipped_count > 0 && <Row label="Hold-skipped" value={held_skipped_count} note="0 calls" warn />}
-            </div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Rate limit:</strong> {rate_limit_note}</p>
-          <p style={{ fontSize: 11, color: 'var(--status-warning)' }}><strong>Job state:</strong> {job_state_note}</p>
-          {live_check_note && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}><strong style={{ color: 'var(--text-secondary)' }}>Live checks:</strong> {live_check_note}</p>}
-          {auto_rescan_note && <p style={{ fontSize: 11, color: 'var(--status-warning)' }}><strong>Auto-rescan:</strong> {auto_rescan_note}</p>}
-        </div>
+        )}
       </div>
     </div>
   )
@@ -1565,11 +1568,11 @@ function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
   const total = results.length
 
   return (
-    <div className="triage-cards-row" role="group" aria-label="Triage summary — click to filter">
+    <div className="triage-cards-row" role="group" aria-label="Result filters — click to filter">
       {TRIAGE_CARDS.map(card => {
-        const count = counts[card.key] ?? 0
+        const count = card.key === 'all' ? total : (counts[card.key] ?? 0)
         const isActive = activeFilter === card.filter
-        const isMuted = count === 0 && !isActive
+        const isMuted = count === 0 && !isActive && card.key !== 'all'
         return (
           <button
             key={card.key}
@@ -1578,37 +1581,12 @@ function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
             style={{ borderLeftColor: card.color }}
             onClick={() => onFilterChange(isActive ? 'all' : card.filter)}
             aria-pressed={isActive}
+            aria-current={isActive ? 'true' : undefined}
             title={`Filter by: ${card.label} (${count} item${count !== 1 ? 's' : ''})`}
           >
             <span className="tc-label">{card.label}</span>
-            <span className="tc-count" style={{ color: count > 0 ? card.color : 'var(--text-faint)' }}>{count}</span>
+            <span className="tc-count" style={{ color: count > 0 || card.key === 'all' ? card.color : 'var(--text-faint)' }}>{count}</span>
             <span className="tc-pct">{formatPercent(count, total)}</span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── Filter bar ────────────────────────────────────────────────────────────────
-
-function FilterBar({ results, activeFilter, onFilterChange }) {
-  return (
-    <div className="filter-bar" role="group" aria-label="Result filters">
-      {NAMED_FILTERS.map(f => {
-        const count = getFilterCount(results, f.key)
-        const isActive = activeFilter === f.key
-        const isZero = count === 0 && f.key !== 'all'
-        return (
-          <button
-            key={f.key}
-            className={`filter-btn${isActive ? ' active' : ''}${isZero ? ' zero' : ''}`}
-            style={isActive ? { borderColor: 'var(--accent)', color: 'var(--text)' } : {}}
-            onClick={() => onFilterChange(isActive && f.key !== 'all' ? 'all' : f.key)}
-            aria-pressed={isActive}
-          >
-            {f.label}
-            <span className="filter-count">{f.key === 'all' ? results.length : count}</span>
           </button>
         )
       })}
@@ -2076,7 +2054,7 @@ function ResultsTable({
 // ── Triage workspace (replaces JobSection) ────────────────────────────────────
 
 function TriageWorkspace({
-  job, jobError, jobId, restoredFromSession, onDismissRestore,
+  job, jobError, jobId,
   selectedItem, onSelectItem,
   actionInProgress, actionMessage, exportMessage,
   onRescanSelected, onRescanStale,
@@ -2108,30 +2086,17 @@ function TriageWorkspace({
 
   if (jobError) {
     return (
-      <div className="job-status-bar" style={{ borderColor: 'rgba(239,68,68,0.4)' }}>
+      <div className="submit-error-banner" role="alert">
         <span style={{ color: 'var(--risk-critical)', fontSize: 12, fontWeight: 600 }}>⛔ Submit error: {jobError}</span>
       </div>
     )
   }
   if (!job && !jobId) return null
 
-  const done        = job ? (job.processed ?? 0) : 0
-  const total       = job ? (job.total ?? 0) : 0
-  const pct         = total > 0 ? Math.round((done / total) * 100) : 0
   const allResults  = job?.results ?? []
   const prioritySorted  = [...allResults].sort(comparePriority)
   const filteredResults = getFilteredResults(prioritySorted, activeFilter)
   const isComplete  = job?.status === 'done' || job?.status === 'error'
-  const isRunning   = job?.status === 'running' || job?.status === 'queued'
-
-  const statusColor = {
-    queued: 'var(--text-muted)',
-    running: 'var(--accent-blue)',
-    done: 'var(--risk-clean)',
-    error: 'var(--risk-critical)',
-  }[job?.status] ?? 'var(--text-muted)'
-
-  const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' ? 'var(--risk-clean)' : 'var(--accent-blue)'
 
   const lcc  = job?.live_check_count ?? 0
   const lcsk = job?.live_check_skipped_count ?? 0
@@ -2155,40 +2120,6 @@ function TriageWorkspace({
       {exportMessage && (
         <div className="export-status-msg">{exportMessage}</div>
       )}
-      {/* Job status bar */}
-      <div className="job-status-bar">
-        <span className="job-status-badge" style={{ color: statusColor, borderColor: statusColor + '55' }}>
-          {job?.status?.toUpperCase() ?? 'LOADING'}
-        </span>
-        <div className="job-status-bar-meta">
-          {total > 0 && (
-            <div className="job-status-bar-progress">
-              <div className="job-status-bar-progress-label">
-                <span>{isRunning ? `Processing… ${done} / ${total}` : `${done} / ${total} processed`}</span>
-                <span style={{ fontWeight: 600 }}>{pct}%</span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${pct}%`, background: progressColor }} />
-              </div>
-            </div>
-          )}
-          <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-            Job: <code style={{ fontSize: 10 }}>{jobId}</code>
-          </span>
-          {restoredFromSession && (
-            <span style={{ fontSize: 11, color: 'var(--risk-clean)', display: 'flex', alignItems: 'center', gap: 5 }}>
-              ↩ Restored
-              <button
-                type="button"
-                className="restored-dismiss-btn"
-                onClick={onDismissRestore}
-                title="Dismiss restored job"
-                aria-label="Dismiss restored job"
-              >✕</button>
-            </span>
-          )}
-        </div>
-      </div>
 
       {job && formatJobRanWithSummary(job) && (
         <div className="job-ran-with-summary" aria-label="Saved job options">
@@ -2211,15 +2142,6 @@ function TriageWorkspace({
       {/* Triage cards */}
       {allResults.length > 0 && (
         <TriageSummaryCards
-          results={allResults}
-          activeFilter={activeFilter}
-          onFilterChange={handleFilterChange}
-        />
-      )}
-
-      {/* Filter bar */}
-      {allResults.length > 0 && (
-        <FilterBar
           results={allResults}
           activeFilter={activeFilter}
           onFilterChange={handleFilterChange}
@@ -2252,7 +2174,7 @@ function TriageWorkspace({
             {activeFilter !== 'all' ? ` of ${allResults.length}` : ''} result{filteredResults.length !== 1 ? 's' : ''}
             {activeFilter !== 'all' && (
               <span style={{ color: 'var(--accent-blue)', marginLeft: 6 }}>
-                — filtered by: {NAMED_FILTERS.find(f => f.key === activeFilter)?.label ?? activeFilter}
+                — filtered by: {filterLabelForKey(activeFilter)}
               </span>
             )}
           </span>
@@ -2988,6 +2910,8 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [settingsOpen, dashboardOpen])
 
+  const hasActiveResults = !!(job?.results?.length > 0)
+
   return (
     <div className="console-shell">
 
@@ -3055,8 +2979,9 @@ export default function App() {
       <div className="console-workspace">
 
         {/* LEFT COLUMN */}
-        <div className="console-left">
+        <div className={`console-left${hasActiveResults ? ' has-results' : ''}`}>
 
+          <div className="pre-results-block">
           {/* Page heading */}
           <div className="mdi-page-heading">
             <div className="mdi-brand-row">
@@ -3072,7 +2997,7 @@ export default function App() {
           </div>
 
           {/* Top workspace: input + sidebar */}
-          <div className="top-workspace">
+          <div className={`top-workspace${hasActiveResults ? ' top-workspace-compact' : ''}`}>
             <InputTabsPanel
               activeTab={activeInputTab}
               onTabChange={handleInputTabChange}
@@ -3093,10 +3018,16 @@ export default function App() {
               canRunJob={canRunJob}
               onEstimate={handleEstimate}
               estimating={estimating}
+              estimate={estimateResult}
+              estimateError={estimateError}
+              estimateStale={estimateStale}
+              hasActiveResults={hasActiveResults}
+              restoredFromSession={restoredFromSession}
+              onDismissRestore={dismissDisplayedJob}
             />
 
             <div className="options-sidebar">
-              <VtUsagePanel quota={quotaState} quotaLoading={quotaLoading} job={job} />
+              <VtUsagePanel quota={quotaState} quotaLoading={quotaLoading} job={job} jobId={jobId} />
               <ProcessingOptions
                 useDomainReports={useDomainReports}
                 setUseDomainReports={setUseDomainReports}
@@ -3105,20 +3036,17 @@ export default function App() {
             </div>
           </div>
 
-          {/* Estimate section */}
-          <EstimateSection estimate={estimateResult} error={estimateError} stale={estimateStale} />
-
           {/* Upload validation results */}
           <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
+          </div>
 
           {/* Job + triage workspace */}
           {(job || jobError || jobId) && (
+            <div className="results-primary-block">
             <TriageWorkspace
               job={job}
               jobError={jobError}
               jobId={jobId}
-              restoredFromSession={restoredFromSession}
-              onDismissRestore={dismissDisplayedJob}
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
               actionInProgress={actionInProgress || !!job?.action_in_progress}
@@ -3133,6 +3061,7 @@ export default function App() {
               onRefreshRow={handleDrawerRefresh}
               onScanRow={handleDrawerScan}
             />
+            </div>
           )}
 
           <ActionConfirmModal

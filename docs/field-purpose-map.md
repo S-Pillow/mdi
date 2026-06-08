@@ -470,7 +470,7 @@ This data never appears in `vt_usage_history.jsonl`.
 
 | State variable | Type | Purpose |
 |---|---|---|
-| `restoredFromSession` | `bool` | Set to `true` when `/api/mdi/jobs/latest` returns a job on mount. Controls "↩ Restored from last session" notice. |
+| `restoredFromSession` | `bool` | Set to `true` when `/api/mdi/jobs/latest` returns a job on mount. Controls "↩ Restored previous job input" notice in the input panel. |
 
 The notice is dismissible (user can click ✕).  It is automatically cleared when
 the user submits a new job via "Run MDI Check".
@@ -569,9 +569,9 @@ Both feed `settingsPayload` for estimate/submit. Values are saved with the job a
 
 When a job is active or recovered, the triage workspace shows a read-only
 **"Job ran with:"** summary (domain reports, auto-rescan, max auto-rescans,
-stale threshold) from `JobStatusResponse` fields. Job ID and progress appear in
-the job status bar. These reflect settings **saved at submit time** — not current
-editable Run Options / Advanced Settings.
+stale threshold) from `JobStatusResponse` fields. **Job ID** and **current-run
+progress** appear in **VT Usage & Status** (sidebar). These reflect settings
+**saved at submit time** — not current editable Run Options / Advanced Settings.
 
 ### `settingsLocked` behavior
 
@@ -1138,23 +1138,18 @@ items that are also `Flagged + Live + Recent`.
 > **Important:** If `triage_rules.py` priority changes, `PRIORITY_RANK` in
 > `App.jsx` must be updated to match.
 
-### Triage summary cards (`TriageSummaryCards`)
+### Triage filter cards (`TriageSummaryCards`)
 
-Seven clickable cards rendered above the results table, one per virtual bucket
-in priority order. Each card shows: uppercase bucket label, item count, and
-percentage of total. A colored left-border accent identifies the bucket. Cards
-are real `<button>` elements with `aria-pressed`.
+Compact clickable cards are the **only** result filter UI, rendered above the
+results table. Cards (in order): All / Domain On Hold / Flagged + Live + Recent /
+Flagged + Live / Flagged + Recent / Flagged + Stale / Flagged + No-Live /
+Unknown·Errors / Clean. Each shows label, count, and percentage. A colored
+left-border accent identifies the bucket. Cards are real `<button>` elements with
+`aria-pressed` and `aria-current` when active.
 
 Clicking a card sets `activeFilter` to that bucket's filter key. Clicking an
-active card resets to `'all'`. No API calls, no quota use.
-
-### Filter bar (`FilterBar`)
-
-A secondary row of pill-style filter buttons below the cards. Named filters:
-All / Domain On Hold / Flagged + Live + Recent / Flagged + Live / Flagged +
-Recent / Flagged + Stale / Flagged + No-Live / All Flagged / Unknown·Errors /
-Clean. Each shows a count badge. Active filter highlighted. Empty filter state
-shows a message with a "clear filter" button.
+active card resets to `'all'`. No API calls, no quota use. The legacy pill-style
+`FilterBar` was removed in MDI-35.
 
 ### Results table (`ResultsTable`)
 
@@ -1371,7 +1366,7 @@ recovery or manual actions. IP inputs rejected before job creation (MDI-27).
 | Export XLSX/PDF/ZIP | deferred | Not implemented |
 | Custom live-check scope toggle | deferred | Fixed flagged-only rule today (read-only in Run Options) |
 | Extra export scopes (clean-only, stale-only) | deferred | CSV/JSON scopes above are active |
-| Post-results UI layout cleanup (MDI-38) | deferred | Duplicate progress strip, filter rows, estimate layout |
+| Post-results UI layout cleanup (MDI-35) | done | Unified filter cards, Job ID in VT Usage & Status, compact estimate |
 | Row click-target refinement | deferred | Eye icon vs full-row click |
 | Dashboard quota trend chart | deferred | Nav quota widget shows current counter |
 | Auto-rescan on recovered jobs | deferred / by design | Initial job submission only |

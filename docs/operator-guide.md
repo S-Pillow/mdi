@@ -54,8 +54,9 @@ API at `/api/mdi/`).
 ### Recovered latest job
 
 On page load, MDI calls `GET /api/mdi/jobs/latest`. If a prior completed job
-was persisted to disk, the UI restores it and shows a **"↩ Restored"** notice
-with a dismiss control (✕) beside the job status bar.
+was persisted to disk, the UI restores it and shows **"↩ Restored previous job input"**
+in the input panel (with a dismiss control ✕). Job progress and Job ID appear in
+**VT Usage & Status** in the sidebar — not in a separate bottom status strip.
 
 **Expectations:**
 
@@ -163,6 +164,8 @@ editable values apply to the next run only. See §2 for dismiss/clear behavior.
 
 Always click **Estimate** before **Run MDI Check**. Estimate is free: it makes
 **no VT, RDAP, WHOIS, DNS, or live URL calls** and does not consume quota.
+Estimate output appears in a compact panel below the input action buttons; after
+results exist it minimizes to a "Last estimate" line when still present.
 
 Estimate shows:
 
@@ -228,11 +231,13 @@ submitted with auto-rescan enabled; it does not change your next-run Settings.
 
 ## 6. Triage cards and filtering
 
-Triage cards are **client-side workflow filters** over the current job results.
-They are **not** separate backend job types.
+Triage filter cards are the **single client-side filter system** over the current
+job results. They are **not** separate backend job types.
 
 | Card | Filter logic |
 |---|---|
+| **All** | All result rows |
+| **Domain On Hold** | `held` triage bucket |
 | **Flagged + Live + Recent** | Malicious/suspicious + live/redirect + very new/new domain age |
 | **Flagged + Live** | Malicious/suspicious + live or redirect |
 | **Flagged + Recent** | Malicious/suspicious + very new/new age (live not required) |
@@ -241,11 +246,8 @@ They are **not** separate backend job types.
 | **Unknown / Errors** | `error`, `unresolvable`, or `pending` buckets |
 | **Clean** | `clean` bucket |
 
-**Domain On Hold** is available as a separate named filter (not shown as a
-top triage card).
-
-Click a card to filter the results table. Counts on cards reflect the current
-job only.
+Click a card to filter the results table. Counts and percentages on cards reflect
+the current job only. Active filter is indicated by card styling and `aria-pressed`.
 
 ---
 
@@ -503,7 +505,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 | **Open in VirusTotal link population** | ~~Deferred~~ **Active (MDI-34)** when `vt_report_url` is derivable from saved results |
 | **Custom live-check scope controls** | Deferred — fixed to eligible flagged items today |
 | **Extra export scopes** (clean-only, stale-only, etc.) | Deferred — may be reviewed in a future ticket |
-| **Post-results UI layout cleanup** (MDI-38) | Deferred — duplicate progress/filters, compact estimate layout |
+| **Post-results UI layout cleanup** (MDI-35) | Done — unified filter cards, Job ID in VT Usage & Status, compact estimate near input |
 | **Row click-target refinement** | Deferred — eye icon vs row click behavior |
 | **Dashboard quota trend surfacing** | Deferred — dashboard is metadata aggregates; nav quota widget shows current counter |
 
