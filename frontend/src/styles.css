@@ -285,7 +285,7 @@ body {
   right: 0;
   width: 520px;
   max-width: calc(100vw - 24px);
-  max-height: min(70vh, 640px);
+  max-height: min(42vh, 340px);
   overflow: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
@@ -301,6 +301,36 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.dashboard-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.dashboard-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.dashboard-close-btn:hover {
+  color: var(--text-muted);
+}
+.dashboard-close-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 .dashboard-panel-title {
   font-size: 10px;
@@ -409,6 +439,35 @@ body {
 .dashboard-error-msg {
   font-size: 11px;
   color: var(--status-warning);
+}
+
+/* Narrow viewports: dock dashboard/settings popovers to bottom so they do not cover results/actions */
+@media (max-width: 1366px) {
+  .dashboard-panel,
+  .settings-panel {
+    position: fixed;
+    top: auto !important;
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    max-height: min(42vh, 420px);
+    z-index: 320;
+  }
+}
+
+/* When triage results are visible, keep dashboard popover off the results/action column */
+.console-shell.has-active-results .dashboard-panel {
+  position: fixed;
+  top: auto !important;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-width: none;
+  max-height: min(42vh, 420px);
+  z-index: 320;
 }
 
 .settings-section-label {

@@ -465,6 +465,11 @@ slow or fail in the browser. Export in smaller scopes if needed.
 
 The operational dashboard (`GET /api/mdi/dashboard`) is **metadata-only**.
 
+Open it from the nav **Dashboard** button. The panel behaves as a popover: click outside,
+press **Escape**, or use the **×** close control to dismiss it. Interacting with the
+results workspace (row actions, detail drawer, filters) also closes the dashboard so it
+does not block triage review on narrower viewports.
+
 | Window | Content |
 |---|---|
 | **Current** | Aggregates from latest recovered job (if any) |

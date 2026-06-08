@@ -740,7 +740,7 @@ function dashPct(value) {
   return `${value}%`
 }
 
-function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindowChange, onRefresh }) {
+function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindowChange, onRefresh, onClose }) {
   if (!open) return null
   const win = data?.windows?.[activeWindow] ?? {}
   const isCurrent = activeWindow === 'current'
@@ -758,9 +758,12 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
     <div className="dashboard-panel" id={id} role="region" aria-label="MDI Operational Dashboard">
       <div className="dashboard-panel-header">
         <span className="dashboard-panel-title">Operational Dashboard</span>
-        <button type="button" className="btn btn-ghost dashboard-refresh-btn" onClick={onRefresh} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div className="dashboard-panel-header-actions">
+          <button type="button" className="btn btn-ghost dashboard-refresh-btn" onClick={onRefresh} disabled={loading}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button type="button" className="dashboard-close-btn" onClick={onClose} aria-label="Close dashboard">×</button>
+        </div>
       </div>
       <div className="dashboard-panel-body">
         <div className="dashboard-window-tabs">
@@ -1786,6 +1789,7 @@ function RowActionsMenu({
   open,
   onToggle,
   onClose,
+  onCloseDashboard,
   onExportEvidence,
   onRefreshRow,
   onScanRow,
@@ -1805,7 +1809,10 @@ function RowActionsMenu({
         aria-controls={menuId}
         aria-haspopup="menu"
         title={`More actions for ${row.input_normalized}`}
-        onMouseDown={e => e.stopPropagation()}
+        onMouseDown={e => {
+          onCloseDashboard?.()
+          e.stopPropagation()
+        }}
         onPointerDown={e => e.stopPropagation()}
         onClick={e => {
           e.stopPropagation()
@@ -1918,6 +1925,7 @@ function ResultsTable({
   onExportEvidence,
   onRefreshRow,
   onScanRow,
+  onCloseDashboard,
 }) {
   const allSelected = results.length > 0 && results.every(r => selectedIds.has(r.position))
   const [openMenuPosition, setOpenMenuPosition] = useState(null)
@@ -1949,6 +1957,7 @@ function ResultsTable({
     )) {
       return
     }
+    onCloseDashboard?.()
     onSelectItem?.(r)
   }
 
@@ -2066,6 +2075,7 @@ function ResultsTable({
                       onPointerDown={e => e.stopPropagation()}
                       onClick={e => {
                         e.stopPropagation()
+                        onCloseDashboard?.()
                         onSelectItem?.(isDetailActive ? null : r)
                       }}
                       title={isDetailActive ? 'Close detail panel' : 'View details in panel →'}
@@ -2081,6 +2091,7 @@ function ResultsTable({
                       open={openMenuPosition === r.position}
                       onToggle={() => setOpenMenuPosition(prev => (prev === r.position ? null : r.position))}
                       onClose={() => setOpenMenuPosition(null)}
+                      onCloseDashboard={onCloseDashboard}
                       onExportEvidence={onExportEvidence}
                       onRefreshRow={onRefreshRow}
                       onScanRow={onScanRow}
@@ -2105,6 +2116,7 @@ function TriageWorkspace({
   onRescanSelected, onRescanStale,
   onExportAll, onExportFlagged, onExportSelected,
   onExportEvidence, onRefreshRow, onScanRow,
+  onCloseDashboard,
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -2243,6 +2255,7 @@ function TriageWorkspace({
           onExportEvidence={onExportEvidence}
           onRefreshRow={onRefreshRow}
           onScanRow={onScanRow}
+          onCloseDashboard={onCloseDashboard}
         />
       )}
 
@@ -2942,7 +2955,25 @@ export default function App() {
     if (dashboardOpen) fetchDashboard()
   }, [dashboardOpen])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close settings/dashboard panels on outside click
+  useEffect(() => {
+    if (!dashboardOpen) return undefined
+    function handleEscape(e) {
+      if (e.key === 'Escape') setDashboardOpen(false)
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [dashboardOpen])
+
+  function closeDashboard() {
+    setDashboardOpen(false)
+  }
+
+  function handleSelectItem(item) {
+    closeDashboard()
+    setSelectedItem(item)
+  }
+
+  // Close settings/dashboard panels on outside click (capture so table action stopPropagation does not block)
   useEffect(() => {
     if (!settingsOpen && !dashboardOpen) return
     function handleClick(e) {
@@ -2951,14 +2982,14 @@ export default function App() {
       if (settingsOpen && settingsAnchor && !settingsAnchor.contains(e.target)) setSettingsOpen(false)
       if (dashboardOpen && dashAnchor && !dashAnchor.contains(e.target)) setDashboardOpen(false)
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('mousedown', handleClick, true)
+    return () => document.removeEventListener('mousedown', handleClick, true)
   }, [settingsOpen, dashboardOpen])
 
   const hasActiveResults = !!(job?.results?.length > 0)
 
   return (
-    <div className="console-shell">
+    <div className={`console-shell${hasActiveResults ? ' has-active-results' : ''}`}>
 
       {/* ── Nav ── */}
       <nav className="console-nav">
@@ -2993,6 +3024,7 @@ export default function App() {
             activeWindow={dashboardWindow}
             onWindowChange={setDashboardWindow}
             onRefresh={fetchDashboard}
+            onClose={closeDashboard}
           />
         </div>
 
@@ -3093,7 +3125,7 @@ export default function App() {
               jobError={jobError}
               jobId={jobId}
               selectedItem={selectedItem}
-              onSelectItem={setSelectedItem}
+              onSelectItem={handleSelectItem}
               actionInProgress={actionInProgress || !!job?.action_in_progress}
               actionMessage={actionMessage}
               exportMessage={exportMessage}
@@ -3105,6 +3137,7 @@ export default function App() {
               onExportEvidence={handleExportEvidence}
               onRefreshRow={handleDrawerRefresh}
               onScanRow={handleDrawerScan}
+              onCloseDashboard={closeDashboard}
             />
             </div>
           )}
