@@ -1165,7 +1165,7 @@ Polished operations-console table replacing the flat debug table. Columns:
 8. Freshness (badge)
 9. Live (badge)
 10. Created (YYYY-MM-DD)
-11. Age (age_bucket label)
+11. Age (calculated from `created_at`; `age_bucket` shown as secondary context)
 12. Evidence Status (badge)
 13. Actions (detail eye + More Actions menu — MDI-30C)
 

@@ -557,6 +557,27 @@ function formatDate(val) {
 function formatAgeBucket(val) {
   return { very_new: 'Very new', new: 'New', established: 'Established', mature: 'Mature', unknown: 'Unknown' }[val] ?? (val ?? '—')
 }
+function parseCreatedDate(val) {
+  if (!val) return null
+  const time = Date.parse(val)
+  if (!Number.isNaN(time)) return new Date(time)
+  const s = String(val).substring(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00Z`) : null
+}
+function formatCalculatedAge(createdAt, now = new Date()) {
+  const created = parseCreatedDate(createdAt)
+  if (!created) return 'Unknown'
+  const diffMs = now.getTime() - created.getTime()
+  if (!Number.isFinite(diffMs) || diffMs < 0) return 'Unknown'
+  const days = Math.floor(diffMs / 86400000)
+  if (days < 1) return '<1d'
+  if (days < 30) return `${days}d`
+  const totalMonths = Math.floor(days / 30.4375)
+  if (totalMonths < 12) return `${Math.max(1, totalMonths)}mo`
+  const years = Math.floor(totalMonths / 12)
+  const months = totalMonths % 12
+  return months > 0 ? `${years}y ${months}m` : `${years}y`
+}
 function formatVtRatio(r) {
   if (r?.vt_ratio) return r.vt_ratio
   if (r?.vt_hits != null && r?.vt_total_engines != null) {
@@ -2054,7 +2075,12 @@ function ResultsTable({
                   ) : <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>—</span>}
                 </td>
                 <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
-                <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatAgeBucket(r.age_bucket)}</td>
+                <td className="age-cell" title={`Age bucket: ${formatAgeBucket(r.age_bucket)}`}>
+                  <span className="age-cell-primary">{formatCalculatedAge(r.created_at)}</span>
+                  {r.age_bucket && (
+                    <span className="age-cell-secondary">{formatAgeBucket(r.age_bucket)}</span>
+                  )}
+                </td>
                 <td>
                   {r.evidence_status ? (
                     <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>

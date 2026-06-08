@@ -423,6 +423,22 @@ body {
   font-weight: 600;
   color: var(--text-main);
 }
+.age-cell {
+  font-size: 11px;
+  white-space: nowrap;
+  min-width: 64px;
+}
+.age-cell-primary {
+  display: block;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.age-cell-secondary {
+  display: block;
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.25;
+}
 .dashboard-quality-note {
   font-size: 10px;
   color: var(--text-muted);
