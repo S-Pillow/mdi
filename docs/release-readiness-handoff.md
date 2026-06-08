@@ -36,12 +36,13 @@ Taste-only changes belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-38: `b83c8799095356f0988fa0ab02f0553fb9ad04b2` | Static bundle deploy |
+| Frontend | MDI-41: `a77ff42e7ee3238c333f736b11a467e4014b2c2b` | Static bundle: `index-Dp1pErKk.js`, `index-CXgBcijl.css` |
 | Backend | MDI-34: `719e40521de566331628f0683f2755e8bf31f691` | `/api/mdi/version` build marker |
 
-The frontend/backend split is expected. MDI-35, MDI-36, and MDI-38 were
-frontend-only changes, so backend `build_info.commit` intentionally remains at
-MDI-34 until a backend deploy occurs.
+The frontend/backend split is expected. MDI-40A, MDI-40B, MDI-40C, and MDI-41
+were frontend-only post-release defect fixes, so backend `build_info.commit`
+intentionally remains at MDI-34 until a backend deploy occurs. MDI-41 is the
+current accepted production frontend.
 
 ## 3. Stabilization Sequence
 
@@ -58,6 +59,15 @@ MDI-34 until a backend deploy occurs.
 | MDI-36 | Dashboard overlay / narrow viewport cleanup accepted |
 | MDI-37 | Good-enough checkpoint completed |
 | MDI-38 | Results mode, Start New Scan, centered filters, and calculated Age column accepted |
+
+### Post-release defect series (frontend-only)
+
+| Ticket | Outcome |
+|---|---|
+| MDI-40A | Cleared completed action status banner accepted |
+| MDI-40B | Detail drawer calculated age parity accepted |
+| MDI-40C | Enrichment evidence copy clarity accepted |
+| MDI-41 | Row More Actions popover clipping/scrollbar fix accepted |
 
 ## 4. Current Capabilities
 
@@ -127,6 +137,10 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-35 results-first layout and UTC quota labels | Accepted |
 | MDI-36 dashboard overlay | Accepted |
 | MDI-38 results mode / Start New Scan / Age column | Accepted |
+| MDI-40A action status banner | Accepted |
+| MDI-40B detail drawer calculated age | Accepted |
+| MDI-40C enrichment evidence copy | Accepted |
+| MDI-41 row More Actions popover | Accepted |
 
 Recent frontend/read-only smokes consumed no quota and did not modify runtime
 metadata. Production upload acceptance consumed expected quota only when an

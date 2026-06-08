@@ -25,6 +25,46 @@ MDI is a **production-capable** analyst tool (not a shell or placeholder). It:
 **Not in MVP:** automated enforcement, block rules, watchlist, Salesforce/ticketing,
 monitoring, or persistent domain history search.
 
+## MDI Processing Flow
+
+MDI validates quota first, skips already-held domains, enriches domain context
+where needed, uses VirusTotal for eligible items, reruns triage after
+rescans/live checks, and saves the final result.
+
+```mermaid
+flowchart TD
+    A[Submit] --> B{Enough quota?}
+    B -- No --> C[Rejected]
+    B -- Yes --> D[For each domain]
+
+    D --> E{Already on hold?}
+    E -- Yes --> F[HELD → done]
+    E -- No --> G[RDAP lookup]
+
+    G --> H{RDAP failed?}
+    H -- Yes --> I[WHOIS fallback]
+    H -- No --> J{Hold found?}
+    I --> J
+
+    J -- Yes --> K[HELD → done]
+    J -- No --> L[VT lookup]
+
+    L --> M{Quota left?}
+    M -- No --> N[ERROR → done]
+    M -- Yes --> O[Triage initial result]
+
+    O --> P{Auto-rescan needed?}
+    P -- Yes --> Q[New VT scan]
+    Q --> R[Re-triage]
+    P -- No --> S{Flagged or suspicious?}
+    R --> S
+
+    S -- Yes --> T[Live check]
+    T --> U[Re-triage]
+    S -- No --> V[Final result → save]
+    U --> V
+```
+
 ## Architecture
 
 | Layer | Stack | Path / port |
