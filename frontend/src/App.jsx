@@ -2693,6 +2693,8 @@ export default function App() {
   const [jobError, setJobError]                     = useState(null)
   const [restoredFromSession, setRestoredFromSession] = useState(false)
   const pollRef = useRef(null)
+  const pollJobRef = useRef(null)
+  const rowActionPendingRef = useRef(false)
 
   const [actionInProgress, setActionInProgress] = useState(false)
   const [actionMessage, setActionMessage]     = useState(null)
@@ -2817,6 +2819,7 @@ export default function App() {
       clearInterval(pollRef.current)
       pollRef.current = null
     }
+    rowActionPendingRef.current = false
     dismissDisplayedJob()
     setDashboardOpen(false)
     setSettingsOpen(false)
@@ -2881,12 +2884,22 @@ export default function App() {
       if ((data.status === 'done' || data.status === 'error') && actionDone) {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
         refreshQuota()
-        if (actionMessage && actionMessage.includes('…')) {
+        if (rowActionPendingRef.current) {
+          rowActionPendingRef.current = false
           setActionMessage('VT action completed. Results updated.')
         }
       }
     } catch (_) { /* ignore poll errors */ }
-  }, [selectedItem, actionMessage])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedItem])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    pollJobRef.current = pollJob
+  }, [pollJob])
+
+  function scheduleJobPoll(id) {
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(() => pollJobRef.current?.(id), 2000)
+  }
 
   async function fetchActionEstimate(action, scope, positions) {
     const resp = await fetch(`${API_BASE}/api/mdi/jobs/${jobId}/${action}`, {
@@ -2935,13 +2948,14 @@ export default function App() {
     setActionConfirming(true)
     try {
       await startAction(actionModal.action, actionModal.scope, actionModal.positions)
+      rowActionPendingRef.current = true
       setActionInProgress(true)
       setActionMessage(`${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`)
       setActionModal(null)
-      if (pollRef.current) clearInterval(pollRef.current)
-      pollRef.current = setInterval(() => pollJob(jobId), 2000)
+      scheduleJobPoll(jobId)
       await pollJob(jobId)
     } catch (err) {
+      rowActionPendingRef.current = false
       setActionMessage(`Action failed: ${err.message}`)
     } finally {
       setActionConfirming(false)
@@ -3028,7 +3042,7 @@ export default function App() {
       const data = await resp.json()
       const id = data.job_id
       setJobId(id)
-      pollRef.current = setInterval(() => pollJob(id), 2000)
+      scheduleJobPoll(id)
       await pollJob(id)
     } catch (err) { setJobError(err.message || 'Network error') }
     finally { setSubmitting(false) }
@@ -3052,7 +3066,7 @@ export default function App() {
         if (cancelled) return
         setJob(data); setJobId(data.job_id); setRestoredFromSession(true)
         if (data.status === 'queued' || data.status === 'running') {
-          pollRef.current = setInterval(() => pollJob(data.job_id), 2000)
+          scheduleJobPoll(data.job_id)
         }
       } catch (_) { /* non-blocking */ }
     }
