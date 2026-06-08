@@ -87,6 +87,7 @@ and frontend asset filenames when auditing production.
 | Doc | Purpose |
 |---|---|
 | [`docs/operator-guide.md`](docs/operator-guide.md) | Analyst workflow, quota rules, UI behavior |
+| [`docs/release-readiness-handoff.md`](docs/release-readiness-handoff.md) | Release status, operator handoff, known limitations |
 | [`docs/field-purpose-map.md`](docs/field-purpose-map.md) | Field/control contracts and classification |
 | [`docs/runtime-data.md`](docs/runtime-data.md) | Runtime files and API side effects |
 | [`docs/error-recovery-matrix.md`](docs/error-recovery-matrix.md) | Error codes and recovery actions |

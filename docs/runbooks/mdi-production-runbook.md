@@ -516,7 +516,7 @@ code-level table and test matrix. Quick admin/operator cues:
 - `vt_daily_history.json` schema differs between MDI and VT Bulk (documented, not unified)
 - Dashboard old records may lack triage/runtime aggregate fields
 - Large exports are in-memory only
-- Open in VirusTotal is **disabled**
+- Open in VirusTotal requires a saved `vt_report_url` on the row
 - Watchlist and Create Block Rule are **not implemented**
 - Mid-job restart loses in-progress work
 

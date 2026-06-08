@@ -31,7 +31,7 @@ action on your behalf.
 - Block domains, URLs, or traffic
 - Add items to a watchlist (not implemented)
 - Create firewall or DNS block rules (not implemented)
-- Open items directly in the VirusTotal web UI (disabled)
+- Open items in VirusTotal unless a saved `vt_report_url` is available
 - Guarantee that every item receives a fresh VT scan on first pass
 - Reserve VT quota in advance (estimate is advisory; see §4)
 - Store a searchable historical database of every domain ever submitted
