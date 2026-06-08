@@ -518,7 +518,7 @@ body {
   order: -1;
 }
 .console-left.has-results .pre-results-block {
-  order: 1;
+  display: none;
 }
 .console-left.has-results .mdi-desc {
   display: none;
@@ -1464,6 +1464,9 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.console-left.has-results .triage-cards-row {
+  justify-content: center;
 }
 
 .triage-card {
