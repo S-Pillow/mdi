@@ -58,6 +58,12 @@ was persisted to disk, the UI restores it and shows **"↩ Restored previous job
 in the input panel (with a dismiss control ✕). Job progress and Job ID appear in
 **VT Usage & Status** in the sidebar — not in a separate bottom status strip.
 
+**Daily quota vs recovered job:** **Used today (UTC)** and **Remaining** reflect the
+current UTC quota day from `GET /api/mdi/usage`. If a recovered job completed on a
+prior UTC day, the sidebar labels that section **Recovered job** (not **Current run**)
+and shows how many VT lookups that saved job used. Daily quota counts reset at UTC
+midnight and are independent of recovered-job progress stats.
+
 **Expectations:**
 
 - Only the **last completed or errored** job is recovered

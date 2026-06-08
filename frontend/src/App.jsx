@@ -645,6 +645,44 @@ function formatJobIdDisplay(id) {
   return `${id.slice(0, 8)}…${id.slice(-4)}`
 }
 
+function parseJobUtcDateString(job) {
+  if (!job) return null
+  const raw = job.completed_at ?? job.submitted_at ?? job.started_at ?? job.finished_at
+  if (raw == null) return null
+  try {
+    if (typeof raw === 'number') {
+      return new Date(raw * 1000).toISOString().slice(0, 10)
+    }
+    const s = String(raw).trim()
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      return new Date(parseFloat(s) * 1000).toISOString().slice(0, 10)
+    }
+    if (s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+      return s.slice(0, 10)
+    }
+  } catch { /* fall through */ }
+  return null
+}
+
+function isPreviousUtcQuotaDayJob(job, quotaDateUtc) {
+  if (!job || !quotaDateUtc) return false
+  if (job.status === 'running' || job.status === 'queued') return false
+  const jobDate = parseJobUtcDateString(job)
+  if (!jobDate) return false
+  return jobDate < quotaDateUtc
+}
+
+function formatRecoveredJobQuotaNote(job, attempted, completed) {
+  const lookups = job?.lookups_used
+  if (lookups != null && lookups >= 0) {
+    return `Completed previous UTC day · ${lookups} VT lookup${lookups !== 1 ? 's' : ''} on this job`
+  }
+  if (attempted > 0 || completed > 0) {
+    return `Completed previous UTC day · ${completed} / ${attempted} processed`
+  }
+  return 'Completed previous UTC day'
+}
+
 // ── QuotaNavWidget (compact nav display) ─────────────────────────────────────
 
 function QuotaNavWidget({ quota, loading, error }) {
@@ -1212,6 +1250,7 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const limit     = quota?.daily_limit ?? 500
   const remaining = quota?.remaining ?? (limit - used)
   const valColor  = remaining <= 0 ? 'var(--risk-critical)' : remaining < 50 ? 'var(--risk-medium)' : 'var(--text-main)'
+  const quotaDateUtc = quota?.date_utc ?? null
 
   const hasJob    = !!job
   const attempted = job?.total ?? 0
@@ -1219,6 +1258,8 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const queued    = Math.max(0, attempted - completed)
   const pct       = attempted > 0 ? Math.round((completed / attempted) * 100) : 0
   const isRunning = job?.status === 'running' || job?.status === 'queued'
+  const isRecoveredPreviousDay = isPreviousUtcQuotaDayJob(job, quotaDateUtc)
+  const runSectionLabel = isRecoveredPreviousDay ? 'Recovered job' : 'Current run'
   const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' ? 'var(--risk-clean)' : 'var(--accent-blue)'
 
   return (
@@ -1238,7 +1279,7 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
           <span className="vt-stat-val">{limit}<span style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 400 }}>/day</span></span>
         </div>
         <div className="vt-stat-box">
-          <span className="vt-stat-lbl">Used today</span>
+          <span className="vt-stat-lbl">Used today (UTC)</span>
           <span className="vt-stat-val" style={{ color: used > 0 ? 'var(--text-main)' : 'var(--text-muted)' }}>{used}</span>
         </div>
         <div className="vt-stat-box">
@@ -1246,10 +1287,14 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
           <span className="vt-stat-val" style={{ color: valColor }}>{remaining}</span>
         </div>
       </div>
+      <p className="vt-quota-reset-note">Daily quota resets at UTC midnight.</p>
 
       {hasJob && (
         <div className="current-run-section">
-          <span className="current-run-label">Current run</span>
+          <span className="current-run-label">{runSectionLabel}</span>
+          {isRecoveredPreviousDay && (
+            <p className="vt-recovered-job-note">{formatRecoveredJobQuotaNote(job, attempted, completed)}</p>
+          )}
           <div className="current-run-stats">
             <div className="cr-stat">
               <span className="cr-stat-val">{attempted}</span>

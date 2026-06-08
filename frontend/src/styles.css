@@ -680,6 +680,21 @@ body {
 .vt-stat-val { font-size: 17px; font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; line-height: 1.1; }
 .vt-stat-note { font-size: 9px; color: var(--text-faint); }
 
+.vt-quota-reset-note {
+  margin: 0;
+  padding: 4px 12px 6px;
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 1.35;
+  border-bottom: 1px solid var(--border-soft);
+}
+.vt-recovered-job-note {
+  margin: 0 0 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
 .current-run-section {
   padding: 8px 12px;
   border-top: 1px solid var(--border-soft);
