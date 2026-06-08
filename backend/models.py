@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Self
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 
 # ─── Enumerations ─────────────────────────────────────────────────────────────
@@ -357,6 +357,13 @@ class MdiResultItem(BaseModel):
             "None means unavailable, pre-MDI-14 job, or VT not checked."
         ),
     )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def vt_report_url(self) -> Optional[str]:
+        """[display] Public VT GUI link derived from saved row data; no API call."""
+        from services.vt_gui_url import vt_gui_report_url_for_item
+        return vt_gui_report_url_for_item(self)
 
     # ── URL live activity ─────────────────────────────────────────────────────
     live_status: LiveStatus = Field(

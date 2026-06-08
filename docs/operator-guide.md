@@ -339,7 +339,7 @@ Clicking it opens a compact **Actions** menu with four explicit controls:
 | Action | Status | Quota | Notes |
 |---|---|---|---|
 | **Export evidence (JSON)** | **Active** when a row is selected and no action is in progress | **None** | Uses existing `POST /api/mdi/jobs/{job_id}/export` with `format=json`, `scope=selected` |
-| **Open in VirusTotal** | **Disabled** — no VT report URL in row data yet | **None** | Opens external tab only when a URL becomes available; does not call VT API |
+| **Open in VirusTotal** | **Active** when row includes `vt_report_url` | **None** | Opens public VT GUI in a new browser tab; no backend call |
 | **Refresh report** | **Active** when row is eligible (not held, has normalized input, job loaded) | **~1 unit per row** when confirmed | Reuses existing refresh modal + `POST …/refresh` |
 | **Request new scan** | **Active** when row is scannable (URL or domain, not held) | **2–4+ units** when confirmed | Reuses existing scan modal + `POST …/scan` |
 
@@ -494,13 +494,13 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 
 | Feature | Status |
 |---|---|
-| **Open in VirusTotal** | **Disabled** — explicit menu control; `vt_report_url` not populated in row data yet |
+| **Open in VirusTotal** | **Active** when `vt_report_url` is present on the row (domain or URL GUI link derived from saved VT results). Opens a new browser tab to the public VT site — **no quota consumed**, no VT API call. Disabled when no safe link can be built. |
 
 ### Deferred / future backlog
 
 | Feature | Status |
 |---|---|
-| **Open in VirusTotal link population** | Deferred — menu exists; needs VT report URL in row model |
+| **Open in VirusTotal link population** | ~~Deferred~~ **Active (MDI-34)** when `vt_report_url` is derivable from saved results |
 | **Custom live-check scope controls** | Deferred — fixed to eligible flagged items today |
 | **Extra export scopes** (clean-only, stale-only, etc.) | Deferred — may be reviewed in a future ticket |
 | **Post-results UI layout cleanup** (MDI-38) | Deferred — duplicate progress/filters, compact estimate layout |
@@ -548,7 +548,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 - Large exports are generated in memory
 - Auto-rescan only during initial job processing
 - Request New Scan on bare domains uses domain reanalysis in domain-report mode (higher cost than refresh)
-- Open in VirusTotal link population, watchlist, and Create Block Rule are disabled/unimplemented
+- Open in VirusTotal is active when `vt_report_url` is present; disabled when no safe GUI link exists
 - Mid-job backend restart loses in-flight work; previous completed job may restore
 
 ---

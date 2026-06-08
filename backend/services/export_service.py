@@ -317,6 +317,7 @@ def _result_json(result: MdiResultItem) -> Dict[str, Any]:
         "nameservers": list(result.nameservers),
         "domain_hold": _domain_hold_json(result),
         "vt_mode_used": _enum_value(result.vt_mode_used),
+        "vt_report_url": result.vt_report_url,
     }
 
 

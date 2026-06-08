@@ -72,6 +72,7 @@ UI control / feature status (MDI-32):
 | `vt_scan_date` | `Optional[datetime]` | display, filtering, reporting | UTC timestamp of the VT scan used. Basis for `freshness`. |
 | `freshness` | `Freshness` | display, filtering, workflow | `fresh` (<5d), `stale` (5–30d), `very_stale` (>30d), `never_scanned`, `unknown`. Drives auto-rescan eligibility. |
 | `vt_engine_results` | `Optional[List[Dict]]` | display, reporting | Non-clean VT engine detections. **Excluded from CSV**; **included in JSON evidence** (`mdi-evidence-v1`). |
+| `vt_report_url` | `Optional[str]` | display, action link | Computed public VT GUI URL (MDI-34). Domain report → `/gui/domain/{domain}`; URL report → `/gui/url/{base64url}`. Browser only — no VT API, no quota. UI disabled when absent. |
 
 ### URL live activity
 
@@ -1185,7 +1186,7 @@ Shared by the results-row More Actions menu and detail drawer section 8.
 | Action | Active when | Backend | External call | Quota | Runtime | Owning ticket if disabled |
 |---|---|---|---|---|---|---|
 | **Export evidence (JSON)** | Row present; no action in progress | `POST /api/mdi/jobs/{job_id}/export` (`format=json`, `scope=selected`) | No | None | Reads saved job only | — |
-| **Open in VirusTotal** | Row has `vt_report_url` (not yet populated) | None | Browser tab only when active | None | None | Future VT link ticket |
+| **Open in VirusTotal** | Row has `vt_report_url` | None | Browser tab to public VT GUI | None | None | MDI-34 |
 | **Refresh report** | Row not held; normalized input; job loaded; not action-in-progress | `POST /api/mdi/jobs/{job_id}/refresh` | Yes (VT GET) when confirmed | ~1 unit per row | Updates job in memory + `mdi_latest_job.json` via existing path | — |
 | **Request new scan** | Row scannable (URL/domain, not held); job loaded; not action-in-progress | `POST /api/mdi/jobs/{job_id}/scan` | Yes (VT POST/poll) when confirmed | 2–4+ units per row | Updates job in memory + `mdi_latest_job.json` via existing path | — |
 
@@ -1362,7 +1363,7 @@ recovery or manual actions. IP inputs rejected before job creation (MDI-27).
 
 | Feature | Classification | Status |
 |---|---|---|
-| **Open in VirusTotal** | deferred | **Disabled control** in row menu and drawer — `vt_report_url` not populated yet |
+| **Open in VirusTotal** | active | Enabled when `vt_report_url` is present; opens public VT GUI (MDI-34) |
 | **Watchlist** | rejected / out of scope | Not implemented |
 | **Create Block Rule** | rejected / out of scope | Not implemented |
 | **Salesforce / ticketing** | rejected / out of scope | Not shown |

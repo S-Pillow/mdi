@@ -154,9 +154,7 @@ function canRefreshRow(r) {
   return !isRowHeld(r) && !!r.input_normalized
 }
 function vtReportUrlForRow(r) {
-  // Row model has no persisted vt_report_url; enable only when backend adds one.
-  if (!r?.vt_report_url) return null
-  return r.vt_report_url
+  return r?.vt_report_url ?? null
 }
 function canOpenVtRow(r) {
   return !!vtReportUrlForRow(r)
@@ -164,7 +162,7 @@ function canOpenVtRow(r) {
 function openVtRowTitle(r) {
   return canOpenVtRow(r)
     ? 'Open VirusTotal report in a new tab (no quota consumed)'
-    : 'VirusTotal link unavailable.'
+    : 'VirusTotal link unavailable for this result.'
 }
 function refreshRowTitle(r, job, actionInProgress) {
   if (!r || !job) return 'Job required for refresh'
