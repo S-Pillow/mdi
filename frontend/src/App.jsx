@@ -2504,8 +2504,16 @@ function DetailDrawer({
           <div className="detail-kv-grid">
             <span>Created</span><span>{formatDate(r.created_at)}</span>
             <span>Age</span>
-            <span>
-              {r.age_days != null ? `${r.age_days} days` : formatAgeBucket(r.age_bucket)}
+            <span
+              className="age-cell"
+              title={r.created_at
+                ? `Created: ${formatDate(r.created_at)} · Bucket: ${formatAgeBucket(r.age_bucket)}`
+                : `Age bucket: ${formatAgeBucket(r.age_bucket)}`}
+            >
+              <span className="age-cell-primary">{formatCalculatedAge(r.created_at)}</span>
+              {r.age_bucket && (
+                <span className="age-cell-secondary">{formatAgeBucket(r.age_bucket)}</span>
+              )}
             </span>
             <span>Age bucket</span><span>{formatAgeBucket(r.age_bucket)}</span>
             {r.registrar && (
