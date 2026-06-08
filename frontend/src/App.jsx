@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 // ── Icons (inline SVG — no external icon library) ────────────────────────────
 
@@ -1837,6 +1838,24 @@ function RowActionButtons({
   )
 }
 
+function computeRowActionsMenuPosition(triggerEl, menuEl) {
+  const rect = triggerEl.getBoundingClientRect()
+  const menuWidth = 220
+  const gap = 4
+  const pad = 8
+  const menuHeight = menuEl?.offsetHeight ?? 160
+  let left = rect.right - menuWidth
+  let top = rect.bottom + gap
+  if (left < pad) left = pad
+  if (left + menuWidth > window.innerWidth - pad) {
+    left = Math.max(pad, window.innerWidth - menuWidth - pad)
+  }
+  if (top + menuHeight > window.innerHeight - pad) {
+    top = Math.max(pad, rect.top - menuHeight - gap)
+  }
+  return { top, left, minWidth: menuWidth }
+}
+
 function RowActionsMenu({
   row,
   job,
@@ -1850,6 +1869,57 @@ function RowActionsMenu({
   onRefreshRow,
   onScanRow,
 }) {
+  const triggerRef = useRef(null)
+  const menuRef = useRef(null)
+  const [menuStyle, setMenuStyle] = useState(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null)
+      return undefined
+    }
+    const trigger = triggerRef.current
+    if (!trigger) return undefined
+    let frame = 0
+    const updatePosition = () => {
+      if (!triggerRef.current) return
+      setMenuStyle(computeRowActionsMenuPosition(triggerRef.current, menuRef.current))
+      if ((!menuRef.current?.offsetHeight) && frame < 2) {
+        frame += 1
+        requestAnimationFrame(updatePosition)
+      }
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    return () => window.removeEventListener('resize', updatePosition)
+  }, [open, row.position])
+
+  const menuPanel = open ? (
+    <div
+      ref={menuRef}
+      className="row-actions-menu row-actions-menu-portal"
+      id={menuId}
+      role="menu"
+      aria-label={`Actions for ${row.input_normalized}`}
+      style={menuStyle ?? { position: 'fixed', top: -9999, left: -9999, visibility: 'hidden', minWidth: 220 }}
+      onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="row-actions-menu-label">Actions</div>
+      <RowActionButtons
+        r={row}
+        job={job}
+        actionInProgress={actionInProgress}
+        onExportEvidence={onExportEvidence}
+        onRefreshRow={onRefreshRow}
+        onScanRow={onScanRow}
+        onAfterAction={onClose}
+        className="row-action-buttons-menu"
+      />
+    </div>
+  ) : null
+
   return (
     <div
       className="row-actions-wrap"
@@ -1858,6 +1928,7 @@ function RowActionsMenu({
       onClick={e => e.stopPropagation()}
     >
       <button
+        ref={triggerRef}
         type="button"
         className={`icon-btn row-more-btn${open ? ' active' : ''}`}
         aria-label={`More actions for ${row.input_normalized}`}
@@ -1877,29 +1948,7 @@ function RowActionsMenu({
       >
         <IconMoreVertical />
       </button>
-      {open && (
-        <div
-          className="row-actions-menu"
-          id={menuId}
-          role="menu"
-          aria-label={`Actions for ${row.input_normalized}`}
-          onMouseDown={e => e.stopPropagation()}
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="row-actions-menu-label">Actions</div>
-          <RowActionButtons
-            r={row}
-            job={job}
-            actionInProgress={actionInProgress}
-            onExportEvidence={onExportEvidence}
-            onRefreshRow={onRefreshRow}
-            onScanRow={onScanRow}
-            onAfterAction={onClose}
-            className="row-action-buttons-menu"
-          />
-        </div>
-      )}
+      {menuPanel && createPortal(menuPanel, document.body)}
     </div>
   )
 }
@@ -1990,6 +2039,7 @@ function ResultsTable({
     if (openMenuPosition == null) return undefined
     function handlePointerDown(e) {
       if (e.target.closest?.('.row-actions-wrap')) return
+      if (e.target.closest?.('.row-actions-menu')) return
       setOpenMenuPosition(null)
     }
     function handleKeyDown(e) {

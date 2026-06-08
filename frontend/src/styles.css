@@ -1295,10 +1295,6 @@ body {
   padding: 4px 6px;
 }
 .row-actions-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 70;
   min-width: 220px;
   background: #1a2234;
   border: 1px solid var(--border-strong);
@@ -1306,6 +1302,11 @@ body {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
   padding: 8px;
   pointer-events: auto;
+}
+.row-actions-menu-portal {
+  position: fixed;
+  z-index: 400;
+  margin: 0;
 }
 .row-actions-menu-label {
   font-size: 9px;
