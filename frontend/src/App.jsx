@@ -1707,7 +1707,12 @@ function RowActionButtons({
   }
 
   return (
-    <div className={`row-action-buttons${className ? ` ${className}` : ''}`}>
+    <div
+      className={`row-action-buttons${className ? ` ${className}` : ''}`}
+      onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+    >
       <button
         type="button"
         className={canExport ? 'row-action-btn row-action-btn-active' : 'row-action-btn row-action-btn-disabled'}
@@ -1765,7 +1770,12 @@ function RowActionsMenu({
   onScanRow,
 }) {
   return (
-    <div className="row-actions-wrap">
+    <div
+      className="row-actions-wrap"
+      onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => e.stopPropagation()}
+    >
       <button
         type="button"
         className={`icon-btn row-more-btn${open ? ' active' : ''}`}
@@ -1774,6 +1784,8 @@ function RowActionsMenu({
         aria-controls={menuId}
         aria-haspopup="menu"
         title={`More actions for ${row.input_normalized}`}
+        onMouseDown={e => e.stopPropagation()}
+        onPointerDown={e => e.stopPropagation()}
         onClick={e => {
           e.stopPropagation()
           onToggle()
@@ -1787,6 +1799,8 @@ function RowActionsMenu({
           id={menuId}
           role="menu"
           aria-label={`Actions for ${row.input_normalized}`}
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
           onClick={e => e.stopPropagation()}
         >
           <div className="row-actions-menu-label">Actions</div>
@@ -1908,6 +1922,15 @@ function ResultsTable({
     setOpenMenuPosition(null)
   }, [results])
 
+  function handleRowActivate(e, r) {
+    if (e.target.closest?.(
+      '.ops-table-actions-cell, .row-actions-wrap, .row-actions-menu, button, input, textarea, select, a, details, summary'
+    )) {
+      return
+    }
+    onSelectItem?.(r)
+  }
+
   return (
     <div className="ops-table-wrap">
       <table className="ops-table">
@@ -1946,7 +1969,7 @@ function ResultsTable({
                 key={r.position}
                 className={`${rowTierClass(r)}${isSelected ? ' row-selected' : ''}${isDetailActive ? ' row-detail-active' : ''}`}
                 data-bucket={bucket}
-                onClick={() => onSelectItem && onSelectItem(r)}
+                onClick={e => handleRowActivate(e, r)}
               >
                 <td className="accent-cell" style={{ paddingLeft: 8 }}>
                   <input
@@ -2008,11 +2031,22 @@ function ResultsTable({
                   ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
                   {hasErrors && <EvidenceErrorIndicator errors={r.errors} evidenceStatus={r.evidence_status} />}
                 </td>
-                <td onClick={e => e.stopPropagation()}>
-                  <div style={{ display: 'flex', gap: 4 }}>
+                <td
+                  className="ops-table-actions-cell"
+                  onMouseDown={e => e.stopPropagation()}
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="ops-table-actions-inner">
                     <button
+                      type="button"
                       className={`icon-btn${isDetailActive ? ' active' : ''}`}
-                      onClick={() => onSelectItem && onSelectItem(isDetailActive ? null : r)}
+                      onMouseDown={e => e.stopPropagation()}
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={e => {
+                        e.stopPropagation()
+                        onSelectItem?.(isDetailActive ? null : r)
+                      }}
                       title={isDetailActive ? 'Close detail panel' : 'View details in panel →'}
                       aria-label={`View details for ${r.input_normalized}`}
                     >
