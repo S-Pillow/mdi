@@ -249,7 +249,6 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 ## 11. Future Backlog / Non-Blocking Items
 
 - Add quota-cost hint parity for Request New Scan tooltip.
-- Add copy note explaining upstream unavailable / partial evidence states.
 - Add backup-pruning routine or runbook note.
 - Surface dashboard quota trends if still desired.
 - Add searchable historical job/domain history if approved.

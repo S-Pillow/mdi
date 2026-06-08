@@ -242,6 +242,39 @@ function inferClientCategory(code, source) {
   return 'unknown'
 }
 
+const ENRICHMENT_LOOKUP_ERROR_CODES = new Set(['whois_failed', 'enrichment_error', 'rdap_failed'])
+
+function hasPreservedEnrichmentMetadata(row) {
+  if (!row) return false
+  if (row.created_at) return true
+  if (row.registrar) return true
+  if (row.nameservers?.length > 0) return true
+  if (row.epp_status?.length > 0) return true
+  if (row.domain_hold?.source === 'uploaded_file') return true
+  return false
+}
+
+function isEnrichmentLookupError(error) {
+  const n = normalizeMdiError(error)
+  if (!n) return false
+  return n.source === 'domain_enrichment' || ENRICHMENT_LOOKUP_ERROR_CODES.has(n.code)
+}
+
+function enrichmentErrorDisplayMessage(error, row) {
+  const n = normalizeMdiError(error)
+  if (!n) return ''
+  if (!isEnrichmentLookupError(error) || !ENRICHMENT_LOOKUP_ERROR_CODES.has(n.code)) {
+    return n.message
+  }
+  if (hasPreservedEnrichmentMetadata(row)) {
+    return 'Live RDAP/WHOIS lookup unavailable; preserved metadata is still shown where available.'
+  }
+  if (n.code === 'enrichment_error') {
+    return 'Live RDAP/WHOIS enrichment lookup unavailable for this domain.'
+  }
+  return 'RDAP and WHOIS lookup unavailable for this domain.'
+}
+
 function normalizeMdiError(error) {
   if (error == null) return null
   if (typeof error === 'string') {
@@ -303,12 +336,13 @@ function severityBadgeClass(severity) {
 function formatMdiError(error, options = {}) {
   const n = normalizeMdiError(error)
   if (!n) return ''
-  const { short = true, includeMeta = false } = options
+  const { short = true, includeMeta = false, row = null } = options
+  const message = row != null ? enrichmentErrorDisplayMessage(error, row) : n.message
   const label = errorSeverityLabel(n.severity).toLowerCase()
   if (short) {
-    return `[${label}] ${n.code}: ${n.message}`
+    return `[${label}] ${n.code}: ${message}`
   }
-  const lines = [`${n.code}: ${n.message}`]
+  const lines = [`${n.code}: ${message}`]
   if (includeMeta) {
     const meta = []
     if (n.source && n.source !== 'unknown') meta.push(`source: ${n.source}`)
@@ -319,9 +353,9 @@ function formatMdiError(error, options = {}) {
   return lines.join('\n')
 }
 
-function formatMdiErrorList(errors) {
+function formatMdiErrorList(errors, row = null) {
   if (!errors?.length) return ''
-  return errors.map(e => formatMdiError(e, { short: true })).filter(Boolean).join('; ')
+  return errors.map(e => formatMdiError(e, { short: true, row })).filter(Boolean).join('; ')
 }
 
 function formatApiErrorDetail(detail, prefix) {
@@ -375,13 +409,14 @@ function formatDuplicateDisplay(d) {
   return String(d)
 }
 
-function ErrorNoticeList({ errors }) {
+function ErrorNoticeList({ errors, row = null }) {
   if (!errors?.length) return null
   return (
     <div className="error-notice-list">
       {errors.map((e, i) => {
         const n = normalizeMdiError(e)
         if (!n) return null
+        const message = row != null ? enrichmentErrorDisplayMessage(e, row) : n.message
         const meta = []
         if (n.source && n.source !== 'unknown') meta.push(n.source)
         if (n.category && n.category !== 'unknown') meta.push(n.category)
@@ -390,7 +425,7 @@ function ErrorNoticeList({ errors }) {
           <div key={i} className={`error-notice-row ${getErrorSeverityClass(n.severity)}`}>
             <span className={`badge ${severityBadgeClass(n.severity)}`}>{errorSeverityLabel(n.severity)}</span>
             <code className="error-code">{n.code}</code>
-            <span className="error-message">{n.message}</span>
+            <span className="error-message">{message}</span>
             {meta.length > 0 && <span className="error-meta">{meta.join(' · ')}</span>}
           </div>
         )
@@ -419,9 +454,9 @@ function RejectedItemRow({ item }) {
   )
 }
 
-function EvidenceErrorIndicator({ errors, evidenceStatus }) {
+function EvidenceErrorIndicator({ errors, evidenceStatus, row = null }) {
   if (!errors?.length) return null
-  const title = formatMdiErrorList(errors)
+  const title = formatMdiErrorList(errors, row)
   const blocking = hasBlockingErrors(errors)
   const warningsOnly = hasWarningsOnly(errors)
   const skipsOnly = hasSkipsOnly(errors)
@@ -2085,7 +2120,7 @@ function ResultsTable({
                   {r.evidence_status ? (
                     <span className={`badge ${evidenceBadgeClass(r.evidence_status)}`}>{r.evidence_status.replace(/_/g, ' ')}</span>
                   ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
-                  {hasErrors && <EvidenceErrorIndicator errors={r.errors} evidenceStatus={r.evidence_status} />}
+                  {hasErrors && <EvidenceErrorIndicator errors={r.errors} evidenceStatus={r.evidence_status} row={r} />}
                 </td>
                 <td
                   className="ops-table-actions-cell"
@@ -2581,7 +2616,7 @@ function DetailDrawer({
             {r.freshness && (
               <span className={`badge ${freshnessBadgeClass(r.freshness)}`} style={{ marginLeft: 6 }}>{r.freshness.replace(/_/g, ' ')}</span>
             )}
-            <ErrorNoticeList errors={r.errors} />
+            <ErrorNoticeList errors={r.errors} row={r} />
           </div>
         )}
 

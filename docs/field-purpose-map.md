@@ -120,7 +120,9 @@ Structured per-item errors. Recovery actions and test scenarios:
 `blocks_triage` (or `severity=error` when `blocks_triage` is unset) controls
 whether an error can force the ERROR bucket — not merely the presence of any
 `errors[]` entry. A row with VT success plus `whois_failed` (warning) keeps its
-VT-derived triage bucket.
+VT-derived triage bucket. When preserved metadata exists (e.g. from upload),
+the UI may show clearer copy that live RDAP/WHOIS lookup failed while existing
+metadata remains visible — backend `errors[].code` and message are unchanged.
 
 ### Frontend display severity (MDI-22B)
 

@@ -300,6 +300,11 @@ severity, category). The UI shows severity badges — **ERROR**, **WARNING**,
 **Skips are not failures.** Warnings do **not** automatically force an ERROR
 triage bucket when VT succeeded.
 
+For `whois_failed` / RDAP-WHOIS warnings on upload rows, preserved spreadsheet
+metadata (created date, registrar, etc.) may still be shown. The UI clarifies when
+live lookup failed but existing metadata remains available — this is not a total
+row or upload failure.
+
 ### Accepted input shape (parse / upload)
 
 MDI accepts **domains** and **URLs with domain hostnames** only (e.g.
