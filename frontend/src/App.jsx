@@ -792,6 +792,32 @@ function dashFmt(value, suffix = '') {
   return `${value}${suffix}`
 }
 
+function formatDashboardRuntime(seconds) {
+  if (seconds == null || seconds === '') return '—'
+  const s = Number(seconds)
+  if (!Number.isFinite(s) || s < 0) return '—'
+
+  if (s >= 3600) {
+    const h = Math.floor(s / 3600)
+    const rem = s % 3600
+    const m = Math.floor(rem / 60)
+    const sec = Math.round(rem % 60)
+    if (m > 0 && sec > 0) return `${h}h ${m}m ${sec}s`
+    if (m > 0) return `${h}h ${m}m`
+    return sec > 0 ? `${h}h ${sec}s` : `${h}h`
+  }
+
+  if (s >= 60) {
+    const m = Math.floor(s / 60)
+    const sec = Math.round(s % 60)
+    return sec > 0 ? `${m}m ${sec}s` : `${m}m`
+  }
+
+  if (s >= 10) return `${Math.round(s)} sec`
+
+  return `${(Math.round(s * 10) / 10).toFixed(1)} sec`
+}
+
 function dashPct(value) {
   if (value == null) return '—'
   return `${value}%`
@@ -857,7 +883,7 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
                 </div>
 
                 <div className="dashboard-cards dashboard-cards-secondary">
-                  <div className="dashboard-card"><span className="dashboard-card-label">Avg runtime</span><span className="dashboard-card-value">{dashFmt(win.job_duration_seconds ?? win.avg_runtime_seconds, 's')}</span></div>
+                  <div className="dashboard-card"><span className="dashboard-card-label">Avg runtime</span><span className="dashboard-card-value">{formatDashboardRuntime(win.job_duration_seconds ?? win.avg_runtime_seconds)}</span></div>
                   <div className="dashboard-card"><span className="dashboard-card-label">Avg items/job</span><span className="dashboard-card-value">{dashFmt(win.avg_items_per_job)}</span></div>
                   <div className="dashboard-card"><span className="dashboard-card-label">VT scans requested</span><span className="dashboard-card-value">{dashFmt(win.scan_requested_count)}</span></div>
                   <div className="dashboard-card"><span className="dashboard-card-label">Live checks</span><span className="dashboard-card-value">{dashFmt(win.live_check_count)}</span></div>
