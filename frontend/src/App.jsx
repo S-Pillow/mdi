@@ -1132,6 +1132,52 @@ function ValidationSummary({ validating, preview, previewError, onRefresh }) {
   )
 }
 
+// ── Setup workflow guidance (MDI-48) ─────────────────────────────────────────
+
+function InputActionGuidance() {
+  return (
+    <div className="input-action-guidance" role="note" aria-label="Estimate and run actions">
+      <p>
+        <span className="input-action-guidance-label">Estimate Quota &amp; Runtime</span>
+        <span className="input-action-guidance-desc">
+          {' '}— checks your input and previews VT quota impact and runtime before starting a job. No VT quota consumed.
+        </span>
+      </p>
+      <p>
+        <span className="input-action-guidance-label">Run MDI Check</span>
+        <span className="input-action-guidance-desc">
+          {' '}— starts triage and may consume VT quota for eligible domains/URLs.
+        </span>
+      </p>
+    </div>
+  )
+}
+
+function SetupWorkflowGuidance() {
+  return (
+    <>
+      <div className="setup-workflow-guidance" role="region" aria-label="Setup workflow">
+        <p className="setup-workflow-heading">Workflow</p>
+        <ol className="setup-workflow-steps">
+          <li><span className="setup-step-num" aria-hidden="true">1</span> Add domains or URLs</li>
+          <li><span className="setup-step-num" aria-hidden="true">2</span> Estimate quota</li>
+          <li><span className="setup-step-num" aria-hidden="true">3</span> Run MDI Check</li>
+          <li><span className="setup-step-num" aria-hidden="true">4</span> Review triage results</li>
+        </ol>
+      </div>
+      <div className="setup-results-placeholder">
+        <p className="setup-placeholder-lead">
+          After you run MDI Check, this setup view will switch to the results workspace.
+        </p>
+        <p className="setup-placeholder-detail">
+          Paste or upload domains, estimate quota, then run MDI Check. When the job finishes,
+          MDI will switch to the results workspace for triage review.
+        </p>
+      </div>
+    </>
+  )
+}
+
 // ── Input panel with tabs ─────────────────────────────────────────────────────
 
 function InputTabsPanel({
@@ -1250,10 +1296,12 @@ function InputTabsPanel({
               </span>
             )}
             {!hasInput && (
-              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                Validation runs automatically · no quota consumed
+              <span className="input-paste-hint">
+                Input is validated as you paste — no VT quota consumed.
               </span>
             )}
+
+            {!hasActiveResults && <InputActionGuidance />}
 
             <EstimatePanel
               estimate={estimate}
@@ -1315,6 +1363,8 @@ function InputTabsPanel({
                 Validate upload to review accepted items before estimating or running.
               </span>
             )}
+
+            {!hasActiveResults && <InputActionGuidance />}
 
             <EstimatePanel
               estimate={estimate}
@@ -3363,12 +3413,8 @@ export default function App() {
           {/* Upload validation results */}
           <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
 
-          {/* Setup-only placeholder: marks where results will render; non-functional */}
-          {!(job || jobError || jobId) && (
-            <div className="setup-results-placeholder">
-              Results will appear here after you estimate and run a check.
-            </div>
-          )}
+          {/* Setup-only workflow guidance and placeholder (MDI-48) */}
+          {!(job || jobError || jobId) && <SetupWorkflowGuidance />}
           </div>
 
           {/* Job + triage workspace */}
