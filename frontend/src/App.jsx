@@ -3362,6 +3362,13 @@ export default function App() {
 
           {/* Upload validation results */}
           <UploadPreviewResultsSection preview={uploadPreview} error={uploadError} />
+
+          {/* Setup-only placeholder: marks where results will render; non-functional */}
+          {!(job || jobError || jobId) && (
+            <div className="setup-results-placeholder">
+              Results will appear here after you estimate and run a check.
+            </div>
+          )}
           </div>
 
           {/* Job + triage workspace */}
