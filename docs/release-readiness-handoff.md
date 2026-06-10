@@ -43,13 +43,13 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-44: `e5795ccaf4b2d10d887923935971af0d859a023e` | Static bundle: `index-ZflssZLn.js`, `index-CXgBcijl.css` |
+| Frontend | MDI-45: `a63c7d6ae92ce07931d3a3c392a23a1014203501` | Static bundle: `index-5vSrNkeb.js`, `index-CXgBcijl.css` |
 | Backend | MDI-34: `719e40521de566331628f0683f2755e8bf31f691` | `/api/mdi/version` build marker |
 
 The frontend/backend split is expected. MDI-40A, MDI-40B, MDI-40C, MDI-41, and
-the subsequent frontend-only fixes through MDI-44 do not change backend behavior,
+the subsequent frontend-only fixes through MDI-45 do not change backend behavior,
 so backend `build_info.commit` intentionally remains at MDI-34 until a backend
-deploy occurs. MDI-44 is the current accepted production frontend.
+deploy occurs. MDI-45 is the current accepted production frontend.
 
 ## 3. Stabilization Sequence
 
@@ -75,7 +75,8 @@ deploy occurs. MDI-44 is the current accepted production frontend.
 | MDI-40B | Detail drawer calculated age parity accepted |
 | MDI-40C | Enrichment evidence copy clarity accepted |
 | MDI-41 | Row More Actions popover clipping/scrollbar fix accepted |
-| MDI-44 | Dashboard average runtime formatting fix accepted (current production frontend) |
+| MDI-44 | Dashboard average runtime formatting fix accepted |
+| MDI-45 | Setup detail rail cleanup accepted and deployed (current production frontend) |
 
 ### MDI-FABLE-01 external UI/UX review intake
 
@@ -290,15 +291,17 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 
 | Ticket | Scope | Status |
 |---|---|---|
-| MDI-45 | Hide empty setup-mode detail rail; handoff UI-lock clarification | This change (pending merge/deploy) |
-| MDI-46 | Setup-mode max-width and wide-viewport drawer width | Deferred until after MDI-45 screenshots |
+| MDI-45 | Hide empty setup-mode detail rail; handoff UI-lock clarification | Accepted and deployed (production frontend) |
+| MDI-46 | Input Page Layout Cohesion Pass — centered setup workbench (frontend-only; input/start screen layout only; not a broad redesign; no backend/quota/runtime/results-mode behavior change) | In progress (pending merge/deploy) |
 | MDI-47 | Type-floor/readability pass (raise 9px floor) | Deferred until after MDI-45/46 review |
 | MDI-48 | Setup workflow hint / primary action emphasis | Optional |
 | Broad redesign | Full layout/visual redesign | Rejected/deferred unless separately approved |
 
-MDI-46, MDI-47, and MDI-48 are **documented backlog only — not implemented**.
-MDI-45 does not claim to fix all stretch/readability concerns; it addresses only
-the empty setup-mode detail rail.
+MDI-47 and MDI-48 are **documented backlog only — not implemented**. MDI-46 is
+in progress and not yet deployed or accepted; it does not include the MDI-47
+type-floor/readability sweep or any registration-not-found work. MDI-45
+addressed only the empty setup-mode detail rail and did not claim to fix all
+stretch/readability concerns.
 
 ### Other non-blocking items
 
