@@ -19,8 +19,14 @@ Related docs:
 MDI is release-ready for internal use as a production-capable prototype. No current
 release blocker is known.
 
-The UI/workflow is locked as good enough. Additional UI-only work should be
-blocked unless it addresses one of:
+The UI/workflow reached a **good-enough stable checkpoint**. Good-enough status
+means a stable checkpoint, not a permanent design freeze. Future UI changes are
+allowed when supported by real operator use, screenshots, accessibility/readability
+concerns, workflow clarity issues, or external review. Such changes must remain
+AIPF-controlled, scoped, reversible, and must preserve stable backend, quota,
+runtime, and results-mode behavior unless separately approved.
+
+UI-only work should still be prioritized when it addresses one of:
 
 - functional defect
 - unreadable or unclickable control
@@ -29,20 +35,21 @@ blocked unless it addresses one of:
 - major layout regression
 - misleading quota/action behavior
 - production-blocking usability issue
+- reviewed workflow-clarity or readability friction (see MDI-FABLE-01 intake below)
 
-Taste-only changes belong in backlog.
+Taste-only changes without supporting evidence belong in backlog.
 
 ## 2. Production Version Alignment
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-41: `a77ff42e7ee3238c333f736b11a467e4014b2c2b` | Static bundle: `index-Dp1pErKk.js`, `index-CXgBcijl.css` |
+| Frontend | MDI-44: `e5795ccaf4b2d10d887923935971af0d859a023e` | Static bundle: `index-ZflssZLn.js`, `index-CXgBcijl.css` |
 | Backend | MDI-34: `719e40521de566331628f0683f2755e8bf31f691` | `/api/mdi/version` build marker |
 
-The frontend/backend split is expected. MDI-40A, MDI-40B, MDI-40C, and MDI-41
-were frontend-only post-release defect fixes, so backend `build_info.commit`
-intentionally remains at MDI-34 until a backend deploy occurs. MDI-41 is the
-current accepted production frontend.
+The frontend/backend split is expected. MDI-40A, MDI-40B, MDI-40C, MDI-41, and
+the subsequent frontend-only fixes through MDI-44 do not change backend behavior,
+so backend `build_info.commit` intentionally remains at MDI-34 until a backend
+deploy occurs. MDI-44 is the current accepted production frontend.
 
 ## 3. Stabilization Sequence
 
@@ -68,6 +75,23 @@ current accepted production frontend.
 | MDI-40B | Detail drawer calculated age parity accepted |
 | MDI-40C | Enrichment evidence copy clarity accepted |
 | MDI-41 | Row More Actions popover clipping/scrollbar fix accepted |
+| MDI-44 | Dashboard average runtime formatting fix accepted (current production frontend) |
+
+### MDI-FABLE-01 external UI/UX review intake
+
+An external UI/UX review (MDI-FABLE-01) of the stable app reopened **targeted**
+UI refinement. Key conclusions carried forward:
+
+- The always-rendered empty setup-mode detail rail was identified as the safest
+  first correction (addressed by MDI-45).
+- Setup-mode stretch above ~1600px is a valid future layout refinement (MDI-46).
+- The small type floor (9–10px labels) is a valid future readability refinement
+  (MDI-47).
+- A broad redesign is **not justified** at this time; results mode is stable and
+  should not be disturbed.
+
+This review is the evidence basis for the scoped UI refinement path below. It
+does not reopen unrestricted UI work.
 
 ## 4. Current Capabilities
 
@@ -262,6 +286,22 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 
 ## 11. Future Backlog / Non-Blocking Items
 
+### Scoped UI refinement path (from MDI-FABLE-01)
+
+| Ticket | Scope | Status |
+|---|---|---|
+| MDI-45 | Hide empty setup-mode detail rail; handoff UI-lock clarification | This change (pending merge/deploy) |
+| MDI-46 | Setup-mode max-width and wide-viewport drawer width | Deferred until after MDI-45 screenshots |
+| MDI-47 | Type-floor/readability pass (raise 9px floor) | Deferred until after MDI-45/46 review |
+| MDI-48 | Setup workflow hint / primary action emphasis | Optional |
+| Broad redesign | Full layout/visual redesign | Rejected/deferred unless separately approved |
+
+MDI-46, MDI-47, and MDI-48 are **documented backlog only — not implemented**.
+MDI-45 does not claim to fix all stretch/readability concerns; it addresses only
+the empty setup-mode detail rail.
+
+### Other non-blocking items
+
 - Add quota-cost hint parity for Request New Scan tooltip.
 - Add backup-pruning routine or runbook note.
 - Surface dashboard quota trends if still desired.
@@ -272,9 +312,12 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 
 ## 12. Change Control
 
-MDI UI/workflow is locked as good enough for internal use. Future UI-only changes
-should not proceed unless they address a real defect, an accessibility issue, a
-misleading quota/action behavior, a broken workflow, or an approved product
-decision.
+MDI UI/workflow is at a good-enough **stable checkpoint** for internal use — a
+checkpoint, not a permanent design freeze. Future UI-only changes should proceed
+only when they address a real defect, an accessibility/readability issue, a
+misleading quota/action behavior, a broken workflow, a reviewed workflow-clarity
+friction (e.g. MDI-FABLE-01 findings), or an approved product decision. All such
+changes must remain AIPF-controlled, scoped, reversible, and must preserve stable
+backend, quota, runtime, and results-mode behavior unless separately approved.
 
 For any future work, keep merge approval and deployment approval separate.
