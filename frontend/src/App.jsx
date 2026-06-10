@@ -3406,18 +3406,20 @@ export default function App() {
           </footer>
         </div>
 
-        {/* RIGHT COLUMN: detail drawer */}
-        <div className="console-right">
-          <DetailDrawer
-            selectedItem={selectedItem}
-            onClose={() => setSelectedItem(null)}
-            job={job}
-            actionInProgress={actionInProgress || !!job?.action_in_progress}
-            onRefreshRow={handleDrawerRefresh}
-            onScanRow={handleDrawerScan}
-            onExportEvidence={handleExportEvidence}
-          />
-        </div>
+        {/* RIGHT COLUMN: detail drawer — hidden in fresh setup mode (no job/results context) */}
+        {(job || jobError || jobId) && (
+          <div className="console-right">
+            <DetailDrawer
+              selectedItem={selectedItem}
+              onClose={() => setSelectedItem(null)}
+              job={job}
+              actionInProgress={actionInProgress || !!job?.action_in_progress}
+              onRefreshRow={handleDrawerRefresh}
+              onScanRow={handleDrawerScan}
+              onExportEvidence={handleExportEvidence}
+            />
+          </div>
+        )}
       </div>
     </div>
   )
