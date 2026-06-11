@@ -178,3 +178,74 @@ class TestDashboardSourceFilterApi:
         data = client.get("/api/mdi/dashboard?source=all").json()
         assert data["data_quality"]["records_skipped"] == 1
         assert data["windows"]["all_time"]["jobs_run"] == 1
+
+
+class TestDashboardMetricOwnership:
+    def test_vt_bulk_does_not_alter_mdi_triage_under_all(self, history_file, monkeypatch):
+        bulk_with_fake_triage = _vt_bulk_line(
+            flagged_count=999,
+            clean_count=999,
+            triage_bucket_counts={"malicious": 999},
+            live_check_count=888,
+            rdap_enriched_count=777,
+            auto_rescan_attempted_count=666,
+        )
+        history_file.write_text("\n".join([_mdi_line(), bulk_with_fake_triage]) + "\n")
+        monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(history_file))
+        win = client.get("/api/mdi/dashboard?source=all").json()["windows"]["all_time"]
+        assert win["jobs_run"] == 2
+        assert win["quota_units_consumed"] == 5 + 221
+        assert win["items_completed"] == 10 + 221
+        assert win["triage_metrics_applicable"] is True
+        assert win["triage_metrics_label"] == "MDI only"
+        assert win["flagged_count"] == 1
+        assert win["clean_count"] == 9
+        assert win["live_check_count"] == 0
+        assert win["rdap_enriched_count"] == 0
+        assert win["auto_rescan_attempted_count"] == 0
+
+    def test_all_shared_cards_include_vt_bulk(self, history_file, monkeypatch):
+        history_file.write_text("\n".join([_mdi_line(), _vt_bulk_line()]) + "\n")
+        monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(history_file))
+        win = client.get("/api/mdi/dashboard?source=all").json()["windows"]["all_time"]
+        assert win["jobs_run"] == 2
+        assert win["quota_units_consumed"] == 226
+        assert win["items_completed"] == 231
+        assert win["avg_items_per_job"] == round(231 / 2, 2)
+
+    def test_vt_bulk_only_hides_mdi_triage(self, history_file, monkeypatch):
+        history_file.write_text(
+            "\n".join([_mdi_line(), _vt_bulk_line(flagged_count=50)]) + "\n"
+        )
+        monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(history_file))
+        win = client.get("/api/mdi/dashboard?source=vt_bulk_check").json()["windows"]["all_time"]
+        assert win["jobs_run"] == 1
+        assert win["quota_units_consumed"] == 221
+        assert win["triage_metrics_applicable"] is False
+        assert win["flagged_percent"] is None
+        assert win["live_check_count"] is None
+        assert win["triage_bucket_counts"] is None
+
+    def test_legacy_not_in_mdi_triage_percentages(self, history_file, monkeypatch):
+        legacy_with_triage = _legacy_line(
+            flagged_count=100,
+            clean_count=100,
+            triage_bucket_counts={"malicious": 100},
+        )
+        history_file.write_text("\n".join([_mdi_line(), legacy_with_triage]) + "\n")
+        monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(history_file))
+        win = client.get("/api/mdi/dashboard?source=all").json()["windows"]["all_time"]
+        assert win["jobs_run"] == 2
+        assert win["flagged_count"] == 1
+        assert win["clean_count"] == 9
+
+    def test_mdi_only_triage_under_mdi_filter(self, history_file, monkeypatch):
+        history_file.write_text(
+            "\n".join([_mdi_line(), _vt_bulk_line(flagged_count=999)]) + "\n"
+        )
+        monkeypatch.setenv("VT_USAGE_HISTORY_FILE", str(history_file))
+        win = client.get("/api/mdi/dashboard?source=mdi").json()["windows"]["all_time"]
+        assert win["jobs_run"] == 1
+        assert win["flagged_count"] == 1
+        assert win["triage_metrics_applicable"] is True
+        assert win.get("triage_metrics_label") is None

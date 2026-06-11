@@ -355,26 +355,75 @@ def _pct(numerator: float, denominator: float) -> Optional[float]:
     return round((numerator / denominator) * 100.0, 2)
 
 
-def aggregate_window(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dict[str, int]]:
-    """
-    Aggregate historical window metrics from MDI history records.
-    Returns (summary, quality_counters).
-    """
-    quality = {
-        "records_missing_triage_fields": 0,
-        "records_missing_duration_fields": 0,
-    }
+def _mdi_source_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Records that contribute to MDI-only triage/enrichment metrics."""
+    mdi: List[Dict[str, Any]] = []
+    for record in records:
+        source_tool = record.get("source_tool")
+        if source_tool == "mdi":
+            mdi.append(record)
+        elif source_tool is None and record.get("tool_name") == "mdi":
+            mdi.append(record)
+    return mdi
+
+
+def _triage_metrics_applicable_for_filter(source_filter: str) -> bool:
+    return source_filter in ("mdi", "all")
+
+
+def _aggregate_shared_operational(
+    records: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    """Shared VT operational metrics across MDI, VT Bulk Check, and legacy records."""
+    quality = {"records_missing_duration_fields": 0}
 
     report_lookup = [r for r in records if r.get("operation") == "report_lookup"]
     jobs_run = len(report_lookup)
+    items_attempted = _sum_field(records, "items_attempted")
+    items_completed = _sum_field(records, "items_completed")
+
+    duration_values: List[float] = []
+    for record in records:
+        if record.get(_DURATION_FIELD) is not None:
+            duration_values.append(safe_number(record.get(_DURATION_FIELD)))
+        elif record.get("operation") == "report_lookup":
+            quality["records_missing_duration_fields"] += 1
+
+    avg_runtime = None
+    if duration_values:
+        avg_runtime = round(sum(duration_values) / len(duration_values), 2)
+
+    quota_total = _sum_field(records, "quota_units_consumed")
+    summary: Dict[str, Any] = {
+        "jobs_run": jobs_run,
+        "items_attempted": int(items_attempted),
+        "items_completed": int(items_completed),
+        "quota_units_consumed": int(quota_total),
+        "quota_blocked_count": int(_sum_field(records, "quota_blocked_count")),
+        "scan_requested_count": int(_sum_field(records, "scan_requested_count")),
+        "scan_completed_count": int(_sum_field(records, "scan_completed_count")),
+        "scan_failed_count": int(_sum_field(records, "scan_failed_count")),
+        "avg_runtime_seconds": avg_runtime,
+        "avg_items_per_job": round(items_completed / jobs_run, 2) if jobs_run else None,
+        "avg_quota_per_job": round(quota_total / jobs_run, 2) if jobs_run else None,
+    }
+    _assert_no_forbidden_keys(summary)
+    return summary, quality
+
+
+def _aggregate_mdi_triage_metrics(
+    mdi_records: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    """MDI-only triage, enrichment, and workflow metrics."""
+    quality = {"records_missing_triage_fields": 0}
 
     operation_counts: Dict[str, int] = defaultdict(int)
-    for record in records:
+    for record in mdi_records:
         op = record.get("operation") or "unknown"
         operation_counts[str(op)] += 1
 
-    items_attempted = _sum_field(records, "items_attempted")
-    items_completed = _sum_field(records, "items_completed")
+    items_attempted = _sum_field(mdi_records, "items_attempted")
+    items_completed = _sum_field(mdi_records, "items_completed")
 
     flagged_total = 0.0
     clean_total = 0.0
@@ -383,10 +432,9 @@ def aggregate_window(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dic
     held_total = 0.0
     triage_merged: Dict[str, int] = defaultdict(int)
     error_codes_merged: Dict[str, int] = defaultdict(int)
-    duration_values: List[float] = []
     triage_records = 0
 
-    for record in records:
+    for record in mdi_records:
         has_triage = all(record.get(f) is not None for f in ("flagged_count", "clean_count"))
         if record.get("triage_bucket_counts") is not None:
             has_triage = True
@@ -409,51 +457,32 @@ def aggregate_window(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dic
         else:
             quality["records_missing_triage_fields"] += 1
 
-        if record.get(_DURATION_FIELD) is not None:
-            duration_values.append(safe_number(record.get(_DURATION_FIELD)))
-        elif record.get("operation") == "report_lookup":
-            quality["records_missing_duration_fields"] += 1
-
     item_basis = items_completed or items_attempted
     triage_available = triage_records > 0
 
-    avg_runtime = None
-    if duration_values:
-        avg_runtime = round(sum(duration_values) / len(duration_values), 2)
-
     summary: Dict[str, Any] = {
-        "jobs_run": jobs_run,
-        "items_attempted": int(items_attempted),
-        "items_completed": int(items_completed),
-        "quota_units_consumed": int(_sum_field(records, "quota_units_consumed")),
-        "quota_blocked_count": int(_sum_field(records, "quota_blocked_count")),
-        "errors_count": int(_sum_field(records, "errors_count")),
-        "held_skipped_count": int(_sum_field(records, "held_skipped_count")),
-        "rdap_enriched_count": int(_sum_field(records, "rdap_enriched_count")),
-        "rdap_failed_count": int(_sum_field(records, "rdap_failed_count")),
-        "whois_fallback_count": int(_sum_field(records, "whois_fallback_count")),
-        "live_check_count": int(_sum_field(records, "live_check_count")),
-        "live_check_skipped_count": int(_sum_field(records, "live_check_skipped_count")),
-        "live_check_error_count": int(_sum_field(records, "live_check_error_count")),
-        "refresh_count": int(_sum_field(records, "refresh_count")),
-        "scan_requested_count": int(_sum_field(records, "scan_requested_count")),
-        "scan_completed_count": int(_sum_field(records, "scan_completed_count")),
-        "scan_failed_count": int(_sum_field(records, "scan_failed_count")),
-        "auto_rescan_attempted_count": int(_sum_field(records, "auto_rescan_attempted_count")),
-        "auto_rescan_completed_count": int(_sum_field(records, "auto_rescan_completed_count")),
-        "auto_rescan_failed_count": int(_sum_field(records, "auto_rescan_failed_count")),
-        "auto_rescan_skipped_count": int(_sum_field(records, "auto_rescan_skipped_count")),
+        "triage_metrics_applicable": True,
+        "triage_metrics_scope": "mdi",
+        "errors_count": int(_sum_field(mdi_records, "errors_count")),
+        "held_skipped_count": int(_sum_field(mdi_records, "held_skipped_count")),
+        "rdap_enriched_count": int(_sum_field(mdi_records, "rdap_enriched_count")),
+        "rdap_failed_count": int(_sum_field(mdi_records, "rdap_failed_count")),
+        "whois_fallback_count": int(_sum_field(mdi_records, "whois_fallback_count")),
+        "live_check_count": int(_sum_field(mdi_records, "live_check_count")),
+        "live_check_skipped_count": int(_sum_field(mdi_records, "live_check_skipped_count")),
+        "live_check_error_count": int(_sum_field(mdi_records, "live_check_error_count")),
+        "refresh_count": int(_sum_field(mdi_records, "refresh_count")),
+        "auto_rescan_attempted_count": int(_sum_field(mdi_records, "auto_rescan_attempted_count")),
+        "auto_rescan_completed_count": int(_sum_field(mdi_records, "auto_rescan_completed_count")),
+        "auto_rescan_failed_count": int(_sum_field(mdi_records, "auto_rescan_failed_count")),
+        "auto_rescan_skipped_count": int(_sum_field(mdi_records, "auto_rescan_skipped_count")),
         "auto_rescan_quota_blocked_count": int(
-            _sum_field(records, "auto_rescan_quota_blocked_count")
+            _sum_field(mdi_records, "auto_rescan_quota_blocked_count")
         ),
         "operation_counts": dict(operation_counts),
-        "avg_items_per_job": round(items_completed / jobs_run, 2) if jobs_run else None,
-        "avg_quota_per_job": round(
-            _sum_field(records, "quota_units_consumed") / jobs_run, 2
-        ) if jobs_run else None,
-        "error_rate": round(_sum_field(records, "errors_count") / items_attempted, 4)
-        if items_attempted else None,
-        "avg_runtime_seconds": avg_runtime,
+        "error_rate": round(_sum_field(mdi_records, "errors_count") / items_attempted, 4)
+        if items_attempted
+        else None,
         "triage_bucket_counts": dict(triage_merged) if triage_available else None,
         "error_code_counts": dict(error_codes_merged) if error_codes_merged else None,
         "flagged_percent": _pct(flagged_total, item_basis) if triage_available else None,
@@ -469,6 +498,76 @@ def aggregate_window(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dic
         "held_count": int(held_total) if triage_available else None,
         "triage_metrics_available": triage_available,
     }
+    _assert_no_forbidden_keys(summary)
+    return summary, quality
+
+
+def _empty_mdi_triage_summary() -> Dict[str, Any]:
+    """Placeholder when MDI triage metrics do not apply to the selected source."""
+    return {
+        "triage_metrics_applicable": False,
+        "triage_metrics_scope": None,
+        "errors_count": None,
+        "held_skipped_count": None,
+        "rdap_enriched_count": None,
+        "rdap_failed_count": None,
+        "whois_fallback_count": None,
+        "live_check_count": None,
+        "live_check_skipped_count": None,
+        "live_check_error_count": None,
+        "refresh_count": None,
+        "auto_rescan_attempted_count": None,
+        "auto_rescan_completed_count": None,
+        "auto_rescan_failed_count": None,
+        "auto_rescan_skipped_count": None,
+        "auto_rescan_quota_blocked_count": None,
+        "operation_counts": None,
+        "error_rate": None,
+        "triage_bucket_counts": None,
+        "error_code_counts": None,
+        "flagged_percent": None,
+        "clean_percent": None,
+        "unknown_error_percent": None,
+        "held_percent": None,
+        "flagged_count": None,
+        "clean_count": None,
+        "unknown_count": None,
+        "error_item_count": None,
+        "held_count": None,
+        "triage_metrics_available": False,
+    }
+
+
+def aggregate_window(
+    records: List[Dict[str, Any]],
+    *,
+    source_filter: str = "mdi",
+) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    """
+    Aggregate dashboard window with metric ownership by source.
+
+    Shared operational metrics use all records in the filtered set.
+    MDI triage/enrichment metrics use MDI-tagged records only.
+    """
+    if source_filter not in VALID_SOURCE_FILTERS:
+        source_filter = "mdi"
+
+    shared, shared_quality = _aggregate_shared_operational(records)
+    quality = {
+        "records_missing_triage_fields": 0,
+        "records_missing_duration_fields": shared_quality["records_missing_duration_fields"],
+    }
+
+    if _triage_metrics_applicable_for_filter(source_filter):
+        mdi_records = _mdi_source_records(records)
+        mdi_summary, mdi_quality = _aggregate_mdi_triage_metrics(mdi_records)
+        quality["records_missing_triage_fields"] = mdi_quality["records_missing_triage_fields"]
+        if source_filter == "all":
+            mdi_summary["triage_metrics_label"] = "MDI only"
+        summary = {**shared, **mdi_summary}
+    else:
+        summary = {**shared, **_empty_mdi_triage_summary()}
+
     _assert_no_forbidden_keys(summary)
     return summary, quality
 
@@ -577,7 +676,7 @@ def build_dashboard_summary(
     def _agg(days: Optional[int]) -> Dict[str, Any]:
         nonlocal windows_quality
         subset = window_filter(filtered, now, days)
-        summary, q = aggregate_window(subset)
+        summary, q = aggregate_window(subset, source_filter=source_filter)
         windows_quality["records_missing_triage_fields"] += q["records_missing_triage_fields"]
         windows_quality["records_missing_duration_fields"] += q["records_missing_duration_fields"]
         return summary
@@ -593,10 +692,10 @@ def build_dashboard_summary(
         "records_missing_duration_fields"
     ]
 
-    if data_quality["records_missing_triage_fields"] > 0:
+    if data_quality["records_missing_triage_fields"] > 0 and source_filter in ("mdi", "all"):
         data_quality["notes"].append(
-            "Older history records lack triage aggregate fields; "
-            "percentages unavailable until new jobs complete after MDI-17."
+            "Older MDI history records lack triage aggregate fields; "
+            "MDI triage percentages unavailable until new jobs complete after MDI-17."
         )
     if data_quality["records_missing_duration_fields"] > 0:
         data_quality["notes"].append(
@@ -611,6 +710,15 @@ def build_dashboard_summary(
             f"Excluded {data_quality['records_filtered_out']} record(s) by source filter."
         )
 
+    if source_filter == "all" and (
+        data_quality["records_by_source"]["vt_bulk_check"] > 0
+        or data_quality["records_by_source"]["legacy"] > 0
+    ):
+        data_quality["notes"].append(
+            "Shared operational metrics include all selected VT tools; "
+            "MDI triage metrics reflect MDI records only."
+        )
+
     current = build_current_job_summary(current_job)
     if current.get("available"):
         total = current.get("processed") or current.get("total") or 0
@@ -623,6 +731,12 @@ def build_dashboard_summary(
                 total,
             )
             current["held_percent"] = _pct(current.get("held_count", 0), total)
+        current["triage_metrics_applicable"] = source_filter != "vt_bulk_check"
+        current["triage_metrics_scope"] = "mdi"
+        if source_filter == "all":
+            current["triage_metrics_label"] = "MDI only"
+        if source_filter == "vt_bulk_check":
+            current["triage_metrics_available"] = False
 
     payload = {
         "generated_at": now.isoformat(),

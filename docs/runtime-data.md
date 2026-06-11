@@ -381,6 +381,16 @@ Legacy/unattributed records (no `tool_name`, including pre-02B VT Bulk lines) ar
 **never** counted as MDI. When `source=all`, they appear with label
 `Legacy / Unattributed` and a `data_quality` note.
 
+### Dashboard metric ownership (VTFIX-02C revision)
+
+| Metric group | Scope by source filter |
+|---|---|
+| Shared operational (jobs, items processed, VT quota used, quota blocked, avg runtime, avg items/job, VT scans requested, daily usage trend) | Aggregates all records in the selected filter (`mdi`, `vt_bulk_check`, or `all`) |
+| MDI triage/enrichment (flagged/clean/held %, live checks, RDAP/WHOIS, auto-rescan, triage bucket breakdown, operation/error breakdowns) | **MDI records only** when filter is `mdi` or `all`; **not applicable** when filter is `vt_bulk_check` |
+
+When `source=all`, shared cards include MDI + VT Bulk Check + legacy/unattributed records;
+MDI triage cards are labeled **MDI only** and exclude VT Bulk and legacy lines.
+
 No runtime JSONL rewrite, backfill, or schema migration is performed by the dashboard.
 
 | Guarantee | Detail |
