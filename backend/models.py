@@ -919,9 +919,16 @@ class ExportRequest(BaseModel):
 class DashboardDataQuality(BaseModel):
     """Metadata about dashboard history read quality."""
     history_file_present: bool = False
+    source_filter: str = "mdi"
     records_read: int = 0
     records_skipped: int = 0
     records_non_mdi_skipped: int = 0
+    records_filtered_out: int = 0
+    records_by_source: Dict[str, int] = Field(default_factory=lambda: {
+        "mdi": 0,
+        "vt_bulk_check": 0,
+        "legacy": 0,
+    })
     records_missing_triage_fields: int = 0
     records_missing_duration_fields: int = 0
     notes: List[str] = Field(default_factory=list)
@@ -937,6 +944,7 @@ class DashboardQuotaTrend(BaseModel):
 class DashboardResponse(BaseModel):
     """Operational dashboard summary — aggregate metadata only."""
     generated_at: str
+    source_filter: str = "mdi"
     windows: Dict[str, Any]
     quota_trend: DashboardQuotaTrend
     data_quality: DashboardDataQuality

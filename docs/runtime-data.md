@@ -357,9 +357,31 @@ Exports read job state from the in-memory store or recovered
 
 | File | Access |
 |---|---|
-| `vt_usage_history.jsonl` | READ — filter `tool_name == "mdi"`; skip malformed lines |
+| `vt_usage_history.jsonl` | READ — normalized JSONL with optional `source` filter (default `mdi`); skip malformed lines |
 | `vt_daily_history.json` | READ — optional quota trend summary |
 | `mdi_latest_job.json` | READ — Current Job aggregates only (via recovery path) |
+
+### Dashboard source attribution (VTFIX-02C)
+
+Query parameter `source` on `GET /api/mdi/dashboard`:
+
+| Value | UI label | Records included |
+|---|---|---|
+| `mdi` (default) | MDI | `tool_name == "mdi"` only — preserves pre-02C behavior |
+| `vt_bulk_check` | VT Bulk Check | `tool_name == "vt_bulk_check"` only |
+| `all` | All VT Tools | MDI + VT Bulk Check + legacy/unattributed (missing `tool_name`) |
+
+Each JSONL line is normalized at read time to aggregate-safe metadata:
+
+- `source_tool` — `mdi`, `vt_bulk_check`, or `legacy`
+- `source_label` — `MDI`, `VT Bulk Check`, or `Legacy / Unattributed`
+- `timestamp`, `quota_units_consumed`, `job_id`, `status` when present
+
+Legacy/unattributed records (no `tool_name`, including pre-02B VT Bulk lines) are
+**never** counted as MDI. When `source=all`, they appear with label
+`Legacy / Unattributed` and a `data_quality` note.
+
+No runtime JSONL rewrite, backfill, or schema migration is performed by the dashboard.
 
 | Guarantee | Detail |
 |---|---|

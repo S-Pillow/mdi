@@ -478,7 +478,9 @@ code-level table and test matrix. Quick admin/operator cues:
 | Step | Action |
 |---|---|
 | Check | `GET /api/mdi/dashboard` response `data_quality` notes |
+| Check | `source` query param: `mdi` (default), `vt_bulk_check`, or `all` for shared VT attribution (VTFIX-02C) |
 | Note | Pre-MDI-17 history lacks triage percentage fields |
+| Note | Legacy JSONL lines without `tool_name` appear only under `source=all` as Legacy / Unattributed |
 | Note | Dashboard is metadata-only — not a domain search |
 
 ### Export failure

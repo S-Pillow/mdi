@@ -39,6 +39,24 @@ _TRIAGE_FIELDS = (
 )
 _DURATION_FIELD = "job_duration_seconds"
 
+VALID_SOURCE_FILTERS = frozenset({"all", "mdi", "vt_bulk_check"})
+SOURCE_LABELS = {
+    "mdi": "MDI",
+    "vt_bulk_check": "VT Bulk Check",
+    "legacy": "Legacy / Unattributed",
+}
+_AGGREGATION_FIELD_KEYS = frozenset({
+    "operation", "items_attempted", "items_completed", "quota_blocked_count",
+    "errors_count", "held_skipped_count", "rdap_enriched_count", "rdap_failed_count",
+    "whois_fallback_count", "live_check_count", "live_check_skipped_count",
+    "live_check_error_count", "refresh_count", "scan_requested_count",
+    "scan_completed_count", "scan_failed_count", "auto_rescan_attempted_count",
+    "auto_rescan_completed_count", "auto_rescan_failed_count", "auto_rescan_skipped_count",
+    "auto_rescan_quota_blocked_count", "flagged_count", "clean_count", "unknown_count",
+    "error_item_count", "held_count", "triage_bucket_counts", "error_code_counts",
+    "job_duration_seconds",
+})
+
 
 def _default_history_file() -> Path:
     return Path(os.environ.get("VT_USAGE_HISTORY_FILE", "/var/lib/dns-tool/vt_usage_history.jsonl"))
@@ -92,21 +110,116 @@ def parse_history_line(line: str) -> Optional[Dict[str, Any]]:
 
 
 def filter_mdi_records(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Keep only MDI tool records."""
+    """Keep only MDI tool records (raw JSONL dicts)."""
     return [r for r in records if r.get("tool_name") == "mdi"]
+
+
+def _format_timestamp_iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+
+
+def detect_source_tool(raw: Dict[str, Any]) -> str:
+    tool_name = raw.get("tool_name")
+    if tool_name == "mdi":
+        return "mdi"
+    if tool_name == "vt_bulk_check":
+        return "vt_bulk_check"
+    return "legacy"
+
+
+def _aggregation_fields_for_record(raw: Dict[str, Any], source_tool: str) -> Dict[str, Any]:
+    """Map raw JSONL fields to aggregate_window-compatible metadata."""
+    out: Dict[str, Any] = {}
+    for key in _AGGREGATION_FIELD_KEYS:
+        if key in raw:
+            out[key] = raw[key]
+
+    quota = raw.get("quota_units_consumed")
+    if quota is None:
+        quota = raw.get("actual_lookups", 0)
+    out["quota_units_consumed"] = int(safe_number(quota, 0))
+
+    if source_tool in ("vt_bulk_check", "legacy"):
+        out.setdefault("operation", "report_lookup")
+        completed = raw.get("items_completed")
+        if completed is None:
+            completed = raw.get("processed")
+        if completed is None:
+            completed = raw.get("total") or raw.get("accepted_count")
+        out.setdefault("items_completed", int(safe_number(completed, 0)))
+        attempted = raw.get("items_attempted")
+        if attempted is None:
+            attempted = raw.get("total") or raw.get("accepted_count") or out["items_completed"]
+        out.setdefault("items_attempted", int(safe_number(attempted, 0)))
+        if out.get("job_duration_seconds") is None:
+            submitted = raw.get("submitted_at")
+            completed_at = raw.get("completed_at")
+            if completed_at is None:
+                completed_at = raw.get("ts")
+            if submitted is not None and completed_at is not None:
+                out["job_duration_seconds"] = max(0.0, float(completed_at) - float(submitted))
+
+    return out
+
+
+def normalize_usage_history_record(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one JSONL record for shared dashboard attribution (VTFIX-02C)."""
+    source_tool = detect_source_tool(raw)
+    source_label = SOURCE_LABELS[source_tool]
+
+    ts_iso: Optional[str] = None
+    raw_ts = raw.get("timestamp")
+    if raw_ts is not None:
+        if isinstance(raw_ts, (int, float)):
+            ts_iso = _format_timestamp_iso(float(raw_ts))
+        else:
+            ts_iso = str(raw_ts)
+    elif raw.get("ts") is not None:
+        ts_iso = _format_timestamp_iso(float(raw["ts"]))
+
+    quota = raw.get("quota_units_consumed")
+    if quota is None:
+        quota = raw.get("actual_lookups", 0)
+
+    record: Dict[str, Any] = {
+        "source_tool": source_tool,
+        "source_label": source_label,
+        "timestamp": ts_iso,
+        "quota_units_consumed": int(safe_number(quota, 0)),
+        "job_id": raw.get("job_id"),
+        "status": raw.get("status"),
+    }
+    record.update(_aggregation_fields_for_record(raw, source_tool))
+    _assert_no_forbidden_keys(record)
+    return record
+
+
+def filter_by_source(
+    records: List[Dict[str, Any]],
+    source_filter: str,
+) -> List[Dict[str, Any]]:
+    if source_filter == "all":
+        return list(records)
+    return [r for r in records if r.get("source_tool") == source_filter]
 
 
 def _parse_record_timestamp(record: Dict[str, Any]) -> Optional[datetime]:
     ts = record.get("timestamp")
-    if not ts:
-        return None
-    try:
-        if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
-        text = str(ts).replace("Z", "+00:00")
-        return datetime.fromisoformat(text)
-    except (TypeError, ValueError, OSError):
-        return None
+    if ts is not None:
+        try:
+            if isinstance(ts, (int, float)):
+                return datetime.fromtimestamp(float(ts), tz=timezone.utc)
+            text = str(ts).replace("Z", "+00:00")
+            return datetime.fromisoformat(text)
+        except (TypeError, ValueError, OSError):
+            pass
+    ts_unix = record.get("ts")
+    if ts_unix is not None:
+        try:
+            return datetime.fromtimestamp(float(ts_unix), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            pass
+    return None
 
 
 def window_filter(
@@ -408,45 +521,62 @@ def build_dashboard_summary(
     history_file: Optional[Path] = None,
     daily_file: Optional[Path] = None,
     now: Optional[datetime] = None,
+    source_filter: str = "mdi",
 ) -> Dict[str, Any]:
     """Build full dashboard payload for all windows."""
     now = now or datetime.now(timezone.utc)
     hist_path = history_file or _default_history_file()
+    if source_filter not in VALID_SOURCE_FILTERS:
+        source_filter = "mdi"
 
     data_quality: Dict[str, Any] = {
         "history_file_present": hist_path.exists(),
+        "source_filter": source_filter,
         "records_read": 0,
         "records_skipped": 0,
         "records_non_mdi_skipped": 0,
+        "records_filtered_out": 0,
+        "records_by_source": {"mdi": 0, "vt_bulk_check": 0, "legacy": 0},
         "records_missing_triage_fields": 0,
         "records_missing_duration_fields": 0,
         "notes": [],
     }
 
-    parsed: List[Dict[str, Any]] = []
+    normalized: List[Dict[str, Any]] = []
     for line in read_usage_history_lines(hist_path):
         data_quality["records_read"] += 1
-        record = parse_history_line(line)
-        if record is None:
+        raw = parse_history_line(line)
+        if raw is None:
             data_quality["records_skipped"] += 1
             continue
-        if record.get("tool_name") != "mdi":
-            data_quality["records_non_mdi_skipped"] += 1
+        try:
+            record = normalize_usage_history_record(raw)
+        except (TypeError, ValueError):
+            data_quality["records_skipped"] += 1
             continue
-        parsed.append(record)
+        source_tool = record.get("source_tool", "legacy")
+        if source_tool in data_quality["records_by_source"]:
+            data_quality["records_by_source"][source_tool] += 1
+        normalized.append(record)
+
+    filtered = filter_by_source(normalized, source_filter)
+    data_quality["records_filtered_out"] = len(normalized) - len(filtered)
+    if source_filter == "mdi":
+        data_quality["records_non_mdi_skipped"] = data_quality["records_filtered_out"]
 
     if not hist_path.exists():
         data_quality["notes"].append("Usage history file not found; historical windows are empty.")
-    elif data_quality["records_missing_triage_fields"] == 0 and parsed:
-        # Will be updated during aggregation
-        pass
+    elif data_quality["records_by_source"]["legacy"] > 0 and source_filter == "all":
+        legacy_n = data_quality["records_by_source"]["legacy"]
+        data_quality["notes"].append(
+            f"Includes {legacy_n} Legacy / Unattributed record(s) without tool_name."
+        )
 
-    mdi_records = parsed
     windows_quality = {"records_missing_triage_fields": 0, "records_missing_duration_fields": 0}
 
     def _agg(days: Optional[int]) -> Dict[str, Any]:
         nonlocal windows_quality
-        subset = window_filter(mdi_records, now, days)
+        subset = window_filter(filtered, now, days)
         summary, q = aggregate_window(subset)
         windows_quality["records_missing_triage_fields"] += q["records_missing_triage_fields"]
         windows_quality["records_missing_duration_fields"] += q["records_missing_duration_fields"]
@@ -476,6 +606,10 @@ def build_dashboard_summary(
         data_quality["notes"].append(
             f"Skipped {data_quality['records_skipped']} malformed JSONL line(s)."
         )
+    if source_filter != "mdi" and data_quality["records_filtered_out"] > 0:
+        data_quality["notes"].append(
+            f"Excluded {data_quality['records_filtered_out']} record(s) by source filter."
+        )
 
     current = build_current_job_summary(current_job)
     if current.get("available"):
@@ -492,6 +626,7 @@ def build_dashboard_summary(
 
     payload = {
         "generated_at": now.isoformat(),
+        "source_filter": source_filter,
         "windows": {
             "current": current,
             "last_7_days": last_7,

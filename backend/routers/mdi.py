@@ -44,7 +44,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from models import (
@@ -792,7 +792,12 @@ async def job_status(job_id: str) -> JobStatusResponse:
 # ── Operational dashboard (MDI-17) ─────────────────────────────────────────────
 
 @router.get("/dashboard", tags=["Dashboard"], response_model=DashboardResponse)
-async def operational_dashboard() -> DashboardResponse:
+async def operational_dashboard(
+    source: str = Query(
+        "mdi",
+        description="Source filter: all (All VT Tools), mdi (MDI Only), vt_bulk_check (VT Bulk Check Only). Default mdi preserves prior behavior.",
+    ),
+) -> DashboardResponse:
     """
     Return metadata-only operational dashboard for all time windows.
 
@@ -807,7 +812,7 @@ async def operational_dashboard() -> DashboardResponse:
             register_recovered_job(recovered)
             job = recovered
 
-    summary = dashboard.build_dashboard_summary(current_job=job)
+    summary = dashboard.build_dashboard_summary(current_job=job, source_filter=source)
     return DashboardResponse(**summary)
 
 

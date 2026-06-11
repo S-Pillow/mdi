@@ -787,6 +787,12 @@ const DASHBOARD_WINDOWS = [
   { key: 'all_time', label: 'All Time' },
 ]
 
+const DASHBOARD_SOURCE_FILTERS = [
+  { key: 'mdi', label: 'MDI' },
+  { key: 'all', label: 'All VT Tools' },
+  { key: 'vt_bulk_check', label: 'VT Bulk Check' },
+]
+
 function dashFmt(value, suffix = '') {
   if (value == null || value === '') return '—'
   return `${value}${suffix}`
@@ -823,7 +829,7 @@ function dashPct(value) {
   return `${value}%`
 }
 
-function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindowChange, onRefresh, onClose }) {
+function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindowChange, sourceFilter, onSourceFilterChange, onRefresh, onClose }) {
   if (!open) return null
   const win = data?.windows?.[activeWindow] ?? {}
   const isCurrent = activeWindow === 'current'
@@ -849,6 +855,18 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
         </div>
       </div>
       <div className="dashboard-panel-body">
+        <div className="dashboard-window-tabs dashboard-source-tabs">
+          {DASHBOARD_SOURCE_FILTERS.map(f => (
+            <button
+              key={f.key}
+              type="button"
+              className={`dashboard-window-tab${sourceFilter === f.key ? ' active' : ''}`}
+              onClick={() => onSourceFilterChange(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
         <div className="dashboard-window-tabs">
           {DASHBOARD_WINDOWS.map(w => (
             <button
@@ -2780,6 +2798,7 @@ export default function App() {
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [dashboardError, setDashboardError] = useState(null)
   const [dashboardWindow, setDashboardWindow] = useState('current')
+  const [dashboardSourceFilter, setDashboardSourceFilter] = useState('mdi')
 
   // Detail drawer — client-side only, no external calls
   const [selectedItem, setSelectedItem] = useState(null)
@@ -2788,11 +2807,11 @@ export default function App() {
   // Input tabs
   const [activeInputTab, setActiveInputTab] = useState('paste')
 
-  async function fetchDashboard() {
+  async function fetchDashboard(source = dashboardSourceFilter) {
     setDashboardLoading(true)
     setDashboardError(null)
     try {
-      const resp = await fetch(`${API_BASE}/api/mdi/dashboard`)
+      const resp = await fetch(`${API_BASE}/api/mdi/dashboard?source=${encodeURIComponent(source)}`)
       if (!resp.ok) {
         const t = await resp.text()
         setDashboardError(`HTTP ${resp.status}: ${t}`)
@@ -3249,8 +3268,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (dashboardOpen) fetchDashboard()
-  }, [dashboardOpen])  // eslint-disable-line react-hooks/exhaustive-deps
+    if (dashboardOpen) fetchDashboard(dashboardSourceFilter)
+  }, [dashboardOpen, dashboardSourceFilter])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!dashboardOpen) return undefined
@@ -3320,7 +3339,9 @@ export default function App() {
             error={dashboardError}
             activeWindow={dashboardWindow}
             onWindowChange={setDashboardWindow}
-            onRefresh={fetchDashboard}
+            sourceFilter={dashboardSourceFilter}
+            onSourceFilterChange={setDashboardSourceFilter}
+            onRefresh={() => fetchDashboard(dashboardSourceFilter)}
             onClose={closeDashboard}
           />
         </div>
