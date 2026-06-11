@@ -43,13 +43,14 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-48: `95f3e752d3135bcdd7c100ab50bf407555ff54bd` | Static bundle: `index-CgklAazL.js`, `index-5Tt7Lr8D.css` |
-| Backend | MDI-34: `719e40521de566331628f0683f2755e8bf31f691` | `/api/mdi/version` build marker |
+| Frontend | VTFIX-02C UI: `fbef931481501f42e104009100ce41f1c402718e` | Static bundle: `index-QhEGJa8t.js`, `index-CZdxqujH.css` at `/var/www/html/tools/mdi/` |
+| Backend | VTFIX-02C: `a3286491f2429af6bd7ecbd4ba48f9e4bb2f4a3e` | `/opt/mdi/backend`; `/api/mdi/version` build marker |
 
-The frontend/backend split is expected. MDI-40A, MDI-40B, MDI-40C, MDI-41, and
-the subsequent frontend-only fixes through MDI-48 do not change backend behavior,
-so backend `build_info.commit` intentionally remains at MDI-34 until a backend
-deploy occurs. MDI-48 is the current accepted production frontend.
+The frontend/backend split is expected after frontend-only deploys. VTFIX-02C
+backend (source attribution + metric ownership) deployed 2026-06-11; the UI layout
+revision (`fbef931`) deployed frontend-only with **no backend restart** and **no
+nginx reload**. Backend `build_info.commit` remains at `a328649` until the next
+backend deploy.
 
 ## 3. Stabilization Sequence
 
@@ -79,7 +80,19 @@ deploy occurs. MDI-48 is the current accepted production frontend.
 | MDI-45 | Setup detail rail cleanup accepted and deployed |
 | MDI-46 | Input page layout cohesion pass accepted and deployed |
 | MDI-47 | Type floor / readability pass accepted and deployed |
-| MDI-48 | Input workflow guidance and placeholder clarity accepted and deployed (current production frontend) |
+| MDI-48 | Input workflow guidance and placeholder clarity accepted and deployed |
+
+### VTFIX-02 shared VT quota / dashboard attribution series
+
+| Ticket | Outcome |
+|---|---|
+| VTFIX-02A | Discovery — architecture and schema mismatch report |
+| VTFIX-02E | `vt_usage_history.jsonl` permission hardening — merged, deployed (docs/script) |
+| VTFIX-02B | VT Bulk Check JSONL contract (`tool_name`, `timestamp`, `quota_units_consumed`) — deployed to VT Bulk backend |
+| VTFIX-02C | MDI dashboard shared attribution, metric ownership, and horizontal card layout — **merged, deployed, operator-smoked, visually confirmed** |
+
+VTFIX-02C commits on `main`: `6ff4811` (source attribution), `a328649` (metric
+ownership, backend), `fbef931` (dashboard card layout, frontend).
 
 ### MDI-FABLE-01 external UI/UX review intake
 
@@ -125,7 +138,8 @@ MDI currently supports:
 - Request New Scan
 - bulk actions
 - CSV / JSON evidence exports
-- operational dashboard (metadata-only)
+- operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
+- dashboard metric ownership: shared VT operational metrics vs MDI-only triage/enrichment
 - Run Options and Advanced Settings
 - latest job recovery
 - results mode
@@ -174,6 +188,33 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-46 input page layout cohesion | Accepted |
 | MDI-47 type floor / readability pass | Accepted |
 | MDI-48 input workflow guidance and placeholder clarity | Accepted |
+| VTFIX-02C dashboard source attribution | Accepted |
+| VTFIX-02C dashboard metric ownership | Accepted |
+| VTFIX-02C dashboard horizontal card layout | Accepted |
+
+**VTFIX-02C production deploy and smoke (2026-06-11):**
+
+Backend deploy (`a328649`): `/opt/mdi/backend` files updated; `mdi-backend.service`
+restarted. Backup: `/opt/mdi/backups/vtfix-02c-20260611-061442/`. Frontend at
+that point: `index-BglVtk-f.js`, `index-5Tt7Lr8D.css`. Backup:
+`/var/www/html/tools/mdi.bak-20260611-061442/`.
+
+Operator source-attribution smoke (read-only): source tabs MDI / All VT Tools /
+VT Bulk Check visible; MDI triage applicable under MDI; All VT Tools shows shared
+metrics plus **MDI only** triage label; VT Bulk Check shows MDI triage **Not
+Applicable** with no misleading Flagged/Clean/Held percentages. Evidence:
+`/tmp/vtfix-02c-smoke/{mdi,all,vt_bulk_check,all-alltime}.png`.
+
+UI layout revision (`fbef931`, frontend-only): no backend restart; no nginx
+reload; no runtime file changes; no quota consumed. Backup:
+`/var/www/html/tools/mdi.bak-20260611-065336/`. Bundles after deploy:
+`index-QhEGJa8t.js`, `index-CZdxqujH.css`.
+
+Layout production smoke (read-only): Shared VT metrics and MDI triage/enrichment
+each display as organized **7-card horizontal rows** on desktop; no unnecessary
+vertical scroll at 1280×800 or 1920×1080; source-tab regression passed; console
+errors none; network safe GETs only; no job/scan POSTs; no VT calls. Evidence:
+`/tmp/vtfix-02c-layout-prod-smoke/{1280x800,1920x1080}.png`.
 
 **MDI-48 production smoke (2026-06-10):** frontend-only deploy from
 `95f3e752d3135bcdd7c100ab50bf407555ff54bd`; no backend restart; no nginx
@@ -241,7 +282,7 @@ consume shared VT quota.
 | Auto-rescan | OFF by default; quota-impacting when enabled |
 | Open in VirusTotal | Opens public VT GUI; no VT API quota |
 | Export actions | No VT quota |
-| Dashboard | No VT quota |
+| Dashboard | No VT quota; read-only; source filter does not consume quota |
 | Start New Scan | No VT quota; clears displayed frontend results only |
 
 Daily quota is UTC-based. A recovered job may show VT lookups from a previous UTC
@@ -306,6 +347,12 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Frontend/backend version split after frontend-only deploys | Acceptable |
 | No persistent searchable historical domain database | Acceptable |
 | Dashboard history is metadata-focused | Acceptable |
+| Dashboard default source filter is **MDI**; operators must select **All VT Tools** to see shared VT Bulk usage | Acceptable — by design |
+| VT Bulk Check **Current** window may reflect in-memory/recovered MDI job shared metrics while MDI triage is Not Applicable | Acceptable — known |
+| No tagged `vt_bulk_check` history until future VTFIX-02B-tagged jobs append records | Acceptable — pending new jobs |
+| Five legacy/unattributed JSONL lines (no `tool_name`) appear under **All VT Tools** only as Legacy / Unattributed | Acceptable |
+| MDI triage percentages require MDI-tagged history with triage aggregate fields | Acceptable |
+| Data-heavy dashboard breakdown tables may still add vertical scroll when present | Acceptable |
 | Older dashboard records may lack full triage aggregates | Acceptable |
 | Open in VirusTotal depends on saved `vt_report_url` | Acceptable |
 | Refresh/Scan consume quota when confirmed | Acceptable |
@@ -336,6 +383,14 @@ copy, and placeholder clarity (no backend/quota/runtime/results-mode behavior
 change). MDI-47 addressed only typography/readability (type floor,
 `--text-faint` brighten). MDI-45 addressed only the empty setup-mode detail
 rail; MDI-46 addressed only setup-mode layout cohesion and subtle visual polish.
+
+### VTFIX follow-on (not started)
+
+| Ticket | Scope | Status |
+|---|---|---|
+| VTFIX-02D | Daily-history schema unification | **Not started** |
+| VTFIX-02G | Dashboard UI polish / quota trend / cards | **Not started** |
+| VTFIX-02H | Jun 10 metadata backfill (optional) | **Not started** |
 
 ### Other non-blocking items
 
