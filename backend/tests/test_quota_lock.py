@@ -239,6 +239,57 @@ def test_cross_service_mdi_and_vt_writers(tmp_path):
 
 # ── Job path integration with mocks ───────────────────────────────────────────
 
+def test_sequential_mdi_then_vt_style_increment(tmp_path, monkeypatch):
+    """MDI increment then VT-style increment on same day reaches 2."""
+    usage = tmp_path / "vt_usage.json"
+    lock_path = tmp_path / "vt_usage.lock"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage.write_text(json.dumps({"date_utc": today, "daily_lookups_used": 0}))
+    lock_path.touch()
+    monkeypatch.setenv("VT_USAGE_FILE", str(usage))
+    monkeypatch.setenv("VT_QUOTA_LOCK_FILE", str(lock_path))
+
+    with quota_lock("exclusive", lock_path=lock_path):
+        _do_increment_unlocked(usage, 1)
+    _vt_style_increment(usage, lock_path)
+
+    assert json.loads(usage.read_text())["daily_lookups_used"] == 2
+
+
+def test_sequential_vt_then_mdi_increment(tmp_path, monkeypatch):
+    """VT-style increment then MDI increment on same day reaches 2."""
+    usage = tmp_path / "vt_usage.json"
+    lock_path = tmp_path / "vt_usage.lock"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage.write_text(json.dumps({"date_utc": today, "daily_lookups_used": 0}))
+    lock_path.touch()
+    monkeypatch.setenv("VT_USAGE_FILE", str(usage))
+    monkeypatch.setenv("VT_QUOTA_LOCK_FILE", str(lock_path))
+
+    _vt_style_increment(usage, lock_path)
+    with quota_lock("exclusive", lock_path=lock_path):
+        _do_increment_unlocked(usage, 1)
+
+    assert json.loads(usage.read_text())["daily_lookups_used"] == 2
+
+
+def test_mdi_increment_after_external_vt_write_not_lost(tmp_path, monkeypatch):
+    """MDI must not overwrite a newer VT-style counter with stale reads."""
+    usage = tmp_path / "vt_usage.json"
+    lock_path = tmp_path / "vt_usage.lock"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    usage.write_text(json.dumps({"date_utc": today, "daily_lookups_used": 0}))
+    lock_path.touch()
+    monkeypatch.setenv("VT_USAGE_FILE", str(usage))
+    monkeypatch.setenv("VT_QUOTA_LOCK_FILE", str(lock_path))
+
+    _vt_style_increment(usage, lock_path)
+    import asyncio
+    asyncio.run(quota_writer.increment_quota(1, usage))
+
+    assert json.loads(usage.read_text())["daily_lookups_used"] == 2
+
+
 def test_async_increment_quota_under_lock(tmp_path, monkeypatch):
     """increment_quota uses exclusive flock and updates counter."""
     import asyncio

@@ -217,6 +217,17 @@ accounting. Treat mismatched versions as an incident.
 | Historical note | First failed run consumed 2 calls but recorded 1; not hand-corrected |
 | Scope | Controlled validation only — **not** a stress or load test |
 
+### VTFIX-02F — shared live counter regression (pending deploy)
+
+| Item | Detail |
+|---|---|
+| Trigger | VTFIX-02D deploy overwrote VT Bulk `vt_bulk_check.py` without MDI-21A flock coordination |
+| Smoke symptom | `vt_daily_history.json` `total_quota_units: 2` but `vt_usage.json` `daily_lookups_used: 1` |
+| Root cause | VT Bulk in-memory `_USAGE_STATE` + non-flocked write clobbered MDI increment |
+| Fix | Restore MDI-21A read-modify-write under `vt_usage.lock`; keep VTFIX-02D daily-history v2 side-effects |
+| Coordinated deploy | **Both** `mdi-backend` and `dns-tool-backend` when VT Bulk fix ships (MDI writer unchanged) |
+| Do not | Hand-edit `vt_usage.json` to reconcile live counter vs daily-history totals |
+
 ---
 
 ## 8. MDI-only backend deployment

@@ -115,6 +115,12 @@ Both services must deploy locking together. Partial rollout leaves the lost-upda
 
 Production validation: MDI-21 rerun passed after MDI-21A (see runbook). Not a load test.
 
+**VTFIX-02F (pending deploy):** VTFIX-02D redeploy regressed VT Bulk live-counter
+coordination — daily-history v2 remained correct but `vt_usage.json` could
+undercount when both tools wrote same-day. Fix restores flock read-modify-write
+in VT Bulk while keeping VTFIX-02D additive daily-history writes. Coordinated
+VT Bulk deploy required; MDI writer already uses flock. See runbook §7.
+
 ### `vt_usage.json` — Shared daily VT quota counter
 
 | Field | Value |
