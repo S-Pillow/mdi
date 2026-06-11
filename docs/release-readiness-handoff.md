@@ -43,9 +43,15 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | VTFIX-02C UI: `fbef931481501f42e104009100ce41f1c402718e` | Static bundle: `index-QhEGJa8t.js`, `index-CZdxqujH.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | VTFIX-02D: `cf3c5ec9603c4f3d078095dcf2f8f218062a04b1` | `/opt/mdi/backend`; unified daily-history v2 writers; `build_info` ticket VTFIX-02D |
+| Frontend | VTFIX-02G: `ea103fe06129674485cb1c26ca30e3dc3e5ab200` | Static bundle: `index-UBWBOg5l.js`, `index-BoqbTN7t.css` at `/var/www/html/tools/mdi/` |
+| MDI backend | VTFIX-02G: `ea103fe06129674485cb1c26ca30e3dc3e5ab200` | `/opt/mdi/backend`; `live_quota` snapshot; per-tool quota trend fields; `build_info` ticket VTFIX-02G |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+VTFIX-02G (2026-06-11) deployed coordinated MDI backend + frontend; `mdi-backend.service`
+restarted. VT Bulk backend was **not** redeployed; nginx was **not** reloaded.
+Backups: `/opt/mdi/backups/vtfix-02g-20260611-090410/`,
+`/var/www/html/tools/mdi.bak-20260611-090410/`. Prior bundles before 02G:
+`index-QhEGJa8t.js`, `index-CZdxqujH.css`.
 
 The frontend/backend split is expected after frontend-only deploys. VTFIX-02C UI
 (`fbef931`) deployed frontend-only with **no backend restart** and **no nginx
@@ -94,6 +100,7 @@ flock-correct).
 | VTFIX-02C | MDI dashboard shared attribution, metric ownership, and horizontal card layout — **merged, deployed, operator-smoked, visually confirmed** |
 | VTFIX-02D | Unified daily-history schema v2 (`tools.mdi`, `tools.vt_bulk_check`) — **merged, deployed, production-smoked** |
 | VTFIX-02F | Shared live `vt_usage.json` flock coordination (VT Bulk regression fix) — **merged, deployed, production-smoked** |
+| VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend — **merged, deployed, API-verified, visually confirmed** |
 
 VTFIX-02C commits on `main`: `6ff4811` (source attribution), `a328649` (metric
 ownership, backend), `fbef931` (dashboard card layout, frontend).
@@ -101,6 +108,8 @@ ownership, backend), `fbef931` (dashboard card layout, frontend).
 VTFIX-02D commits on `main`: MDI `cf3c5ec`, VT Bulk `9f18607`.
 
 VTFIX-02F commits on `main`: MDI `92d7086` (tests/docs), VT Bulk `413d633` (fix).
+
+VTFIX-02G commit on `main`: MDI `ea103fe` (dashboard VT attribution visibility).
 
 ### MDI-FABLE-01 external UI/UX review intake
 
@@ -201,6 +210,53 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02C dashboard horizontal card layout | Accepted |
 | VTFIX-02D unified daily-history schema v2 | Accepted |
 | VTFIX-02F shared live counter coordination | Accepted |
+| VTFIX-02G dashboard live quota cards and per-tool quota trend | Accepted |
+| VTFIX-02G dashboard source banner and helper text | Accepted |
+| VTFIX-02G VT Bulk Check MDI triage Not Applicable messaging | Accepted |
+
+**VTFIX-02G production deploy and visual smoke (2026-06-11 09:04 UTC):**
+
+Coordinated MDI deploy: `ea103fe` → `/opt/mdi/backend` and `/var/www/html/tools/mdi/`.
+`mdi-backend.service` restarted. VT Bulk backend **not** redeployed; nginx **not**
+reloaded. Backups: `/opt/mdi/backups/vtfix-02g-20260611-090410/`,
+`/var/www/html/tools/mdi.bak-20260611-090410/`. Bundles after deploy:
+`index-UBWBOg5l.js`, `index-BoqbTN7t.css`.
+
+Safe API verification (read-only): `/api/mdi/health` and `/api/mdi/version` → 200,
+commit `ea103fe06129`; `/api/mdi/dashboard?source=mdi|all|vt_bulk_check` → 200;
+`/api/mdi/usage` → used 3, remaining 497; `live_quota` present; per-tool quota
+trend fields present (`mdi_quota_units`, `vt_bulk_check_quota_units`,
+`legacy_quota_units`, `schema_version`). Today row (2026-06-11): Total 4, MDI 2,
+VT Bulk 2, Legacy 0.
+
+Production visual confirmation (read-only, headless Playwright with screenshots):
+**PASS** at `https://forgeforward.app/tools/mdi/` on 1280×800 and 1920×1080.
+Source tabs MDI / All VT Tools / VT Bulk Check visible and selectable; source
+banner `Viewing: {source} · {window}` confirmed; source helper text confirmed
+for all three filters; usage attribution line `MDI 2 · VT Bulk 2 · Legacy /
+Unattributed 5` visible; live quota cards (Live used today 3, Remaining 497,
+Daily limit 500); 7-day daily-history trend table with columns Date (UTC), Total,
+MDI, VT Bulk, Legacy; today row highlighted `2026-06-11 (today)`; shared VT
+metrics and MDI triage/enrichment cards preserve horizontal 7-card layout; VT
+Bulk Check tab shows structured **Not Applicable** message for MDI
+triage/enrichment; no misleading unavailable zeros; no clipping/overlap in
+screenshots; panel scroll at 1280×800 content-driven and acceptable; console
+errors none; no job/scan POSTs; no VT calls; quota unchanged (3/497); runtime
+metadata unchanged.
+
+Evidence:
+`/tmp/vtfix-02g-visual-smoke/1280x800-mdi.png`,
+`/tmp/vtfix-02g-visual-smoke/1280x800-all.png`,
+`/tmp/vtfix-02g-visual-smoke/1280x800-vt-bulk.png`,
+`/tmp/vtfix-02g-visual-smoke/1920x1080-mdi.png`,
+`/tmp/vtfix-02g-visual-smoke/1920x1080-all.png`,
+`/tmp/vtfix-02g-visual-smoke/1920x1080-vt-bulk.png`,
+`/tmp/vtfix-02g-visual-smoke/1280x800-mdi-scrolled.png`.
+
+Known remaining notes: at 1280×800, today row and lower metric sections require
+panel scroll; verification used headless Playwright with screenshots (not a live
+operator browser session); historical pre-v2 days may show 0 or blank where no
+per-tool attribution existed.
 
 **VTFIX-02D production deploy and smoke (2026-06-11):**
 
@@ -433,16 +489,18 @@ rail; MDI-46 addressed only setup-mode layout cohesion and subtle visual polish.
 |---|---|---|
 | VTFIX-02D | Daily-history schema unification | **Closed** — merged, deployed, production-smoked (2026-06-11) |
 | VTFIX-02F | Shared live `vt_usage.json` flock coordination | **Closed** — merged, deployed, production-smoked (2026-06-11) |
-| VTFIX-02G | Dashboard UI polish / quota trend / cards | **Not started** |
-| VTFIX-02H | Jun 10 metadata backfill (optional) | **Not started** |
+| VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend | **Closed** — merged, deployed, API-verified, visually confirmed (2026-06-11) |
+| VTFIX-02H | Jun 10 metadata backfill (optional) | **Not started** — requires explicit operator approval |
 
 MDI-43 remains **documented backlog only — not started**.
+VTFIX-02H remains **not started** — optional historical backfill; requires explicit
+operator approval before any quota/runtime work.
 
 ### Other non-blocking items
 
 - Add quota-cost hint parity for Request New Scan tooltip.
 - Add backup-pruning routine or runbook note.
-- Surface dashboard quota trends if still desired.
+- ~~Surface dashboard quota trends if still desired.~~ Addressed by VTFIX-02G.
 - Add searchable historical job/domain history if approved.
 - Add additional export scopes if needed.
 - Add more complete automated frontend tests if the project expands.
