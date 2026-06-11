@@ -941,12 +941,23 @@ class DashboardQuotaTrend(BaseModel):
     last_7_days: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class DashboardLiveQuota(BaseModel):
+    """Read-only shared live VT counter snapshot for dashboard display."""
+    available: bool = False
+    date_utc: Optional[str] = None
+    daily_lookups_used: Optional[int] = None
+    daily_limit: int = 500
+    remaining: Optional[int] = None
+    error: Optional[str] = None
+
+
 class DashboardResponse(BaseModel):
     """Operational dashboard summary — aggregate metadata only."""
     generated_at: str
     source_filter: str = "mdi"
     windows: Dict[str, Any]
     quota_trend: DashboardQuotaTrend
+    live_quota: DashboardLiveQuota = Field(default_factory=DashboardLiveQuota)
     data_quality: DashboardDataQuality
 
 

@@ -793,6 +793,100 @@ const DASHBOARD_SOURCE_FILTERS = [
   { key: 'vt_bulk_check', label: 'VT Bulk Check' },
 ]
 
+const DASHBOARD_SOURCE_HELP = {
+  mdi: 'MDI jobs only — shared operational metrics and MDI triage/enrichment for the selected time window.',
+  all: 'Shared VT operational metrics across MDI and VT Bulk Check. MDI triage and enrichment remain MDI-only.',
+  vt_bulk_check: 'VT Bulk Check jobs only — shared operational metrics for that source. MDI triage is not applicable.',
+}
+
+const DASHBOARD_WINDOW_HELP = {
+  current: 'Metrics for the current in-memory or recovered MDI job.',
+  last_7_days: 'Aggregated metrics from usage history for the last 7 UTC days.',
+  last_30_days: 'Aggregated metrics from usage history for the last 30 UTC days.',
+  all_time: 'Aggregated metrics from all available usage history.',
+}
+
+function dashboardSourceLabel(key) {
+  return DASHBOARD_SOURCE_FILTERS.find(f => f.key === key)?.label || key
+}
+
+function formatRecordsBySource(recordsBySource) {
+  if (!recordsBySource) return null
+  const parts = []
+  if (recordsBySource.mdi) parts.push(`MDI ${recordsBySource.mdi}`)
+  if (recordsBySource.vt_bulk_check) parts.push(`VT Bulk ${recordsBySource.vt_bulk_check}`)
+  if (recordsBySource.legacy) parts.push(`Legacy / Unattributed ${recordsBySource.legacy}`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+function DashboardQuotaSection({ liveQuota, quotaTrend }) {
+  const rows = quotaTrend?.available ? (quotaTrend.last_7_days || []) : []
+  const todayUtc = new Date().toISOString().slice(0, 10)
+  const showPerTool = rows.some(r =>
+    (r.mdi_quota_units ?? 0) > 0
+    || (r.vt_bulk_check_quota_units ?? 0) > 0
+    || (r.legacy_quota_units ?? 0) > 0,
+  )
+
+  return (
+    <section className="dashboard-metric-section" aria-label="Shared VT quota visibility">
+      <div className="dashboard-section-label">Shared VT quota</div>
+      <p className="dashboard-metric-scope">
+        Live counter reflects combined MDI + VT Bulk Check usage today. Daily trend uses
+        unified daily-history totals; per-tool columns appear when schema v2 data exists.
+      </p>
+      {liveQuota?.available && (
+        <div className="dashboard-cards dashboard-cards-quota-live">
+          <div className="dashboard-card">
+            <span className="dashboard-card-label">Live used today</span>
+            <span className="dashboard-card-value">{dashFmt(liveQuota.daily_lookups_used)}</span>
+          </div>
+          <div className="dashboard-card">
+            <span className="dashboard-card-label">Remaining</span>
+            <span className="dashboard-card-value">{dashFmt(liveQuota.remaining)}</span>
+          </div>
+          <div className="dashboard-card">
+            <span className="dashboard-card-label">Daily limit</span>
+            <span className="dashboard-card-value">{dashFmt(liveQuota.daily_limit)}</span>
+          </div>
+        </div>
+      )}
+      {!liveQuota?.available && liveQuota?.error && (
+        <p className="dashboard-quality-note">Live quota counter unavailable ({liveQuota.error}).</p>
+      )}
+      {rows.length > 0 ? (
+        <div className="dashboard-table-section">
+          <div className="dashboard-section-label dashboard-section-label-inline">7-day daily-history trend</div>
+          <table className="dashboard-table dashboard-quota-trend-table">
+            <thead>
+              <tr>
+                <th>Date (UTC)</th>
+                <th>Total</th>
+                {showPerTool && <th>MDI</th>}
+                {showPerTool && <th>VT Bulk</th>}
+                {showPerTool && <th>Legacy</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.date} className={row.date === todayUtc ? 'dashboard-quota-trend-today' : undefined}>
+                  <td>{row.date}{row.date === todayUtc ? ' (today)' : ''}</td>
+                  <td>{dashFmt(row.quota_units)}</td>
+                  {showPerTool && <td>{dashFmt(row.mdi_quota_units)}</td>}
+                  {showPerTool && <td>{dashFmt(row.vt_bulk_check_quota_units)}</td>}
+                  {showPerTool && <td>{dashFmt(row.legacy_quota_units)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="dashboard-empty-msg">Daily quota trend unavailable.</p>
+      )}
+    </section>
+  )
+}
+
 function dashFmt(value, suffix = '') {
   if (value == null || value === '') return '—'
   return `${value}${suffix}`
@@ -833,6 +927,9 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
   if (!open) return null
   const win = data?.windows?.[activeWindow] ?? {}
   const isCurrent = activeWindow === 'current'
+  const sourceHelp = DASHBOARD_SOURCE_HELP[sourceFilter] || ''
+  const windowHelp = DASHBOARD_WINDOW_HELP[activeWindow] || ''
+  const recordsSummary = formatRecordsBySource(data?.data_quality?.records_by_source)
   const mdiTriageApplicable = win.triage_metrics_applicable !== false
   const triageRows = mdiTriageApplicable && win.triage_bucket_counts
     ? Object.entries(win.triage_bucket_counts).sort((a, b) => b[1] - a[1])
@@ -857,17 +954,30 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
         </div>
       </div>
       <div className="dashboard-panel-body">
-        <div className="dashboard-window-tabs dashboard-source-tabs">
+        <div className="dashboard-window-tabs dashboard-source-tabs" role="tablist" aria-label="Dashboard source filter">
           {DASHBOARD_SOURCE_FILTERS.map(f => (
             <button
               key={f.key}
               type="button"
+              role="tab"
+              aria-selected={sourceFilter === f.key}
               className={`dashboard-window-tab${sourceFilter === f.key ? ' active' : ''}`}
               onClick={() => onSourceFilterChange(f.key)}
             >
               {f.label}
             </button>
           ))}
+        </div>
+        <div className="dashboard-source-banner">
+          <div className="dashboard-source-banner-title">
+            Viewing: <strong>{dashboardSourceLabel(sourceFilter)}</strong>
+            <span className="dashboard-source-banner-window"> · {DASHBOARD_WINDOWS.find(w => w.key === activeWindow)?.label}</span>
+          </div>
+          <p className="dashboard-source-banner-help">{sourceHelp}</p>
+          {windowHelp && <p className="dashboard-source-banner-help dashboard-source-banner-window-help">{windowHelp}</p>}
+          {recordsSummary && (
+            <p className="dashboard-source-banner-records">Usage history records on disk: {recordsSummary}</p>
+          )}
         </div>
         <div className="dashboard-window-tabs">
           {DASHBOARD_WINDOWS.map(w => (
@@ -887,13 +997,18 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
 
         {data && (
           <>
+            <DashboardQuotaSection liveQuota={data.live_quota} quotaTrend={data.quota_trend} />
+
             {isCurrent && !win.available && (
               <p className="dashboard-empty-msg">No current job available.</p>
             )}
             {(!isCurrent || win.available) && (
               <>
                 <section className="dashboard-metric-section" aria-label="Shared VT metrics">
-                  <div className="dashboard-section-label">Shared VT metrics</div>
+                  <div className="dashboard-section-label">
+                    Shared VT metrics
+                    <span className="dashboard-section-scope"> ({dashboardSourceLabel(sourceFilter)} · {DASHBOARD_WINDOWS.find(w => w.key === activeWindow)?.label})</span>
+                  </div>
                   <div className="dashboard-cards dashboard-cards-shared">
                     <div className="dashboard-card"><span className="dashboard-card-label">Jobs</span><span className="dashboard-card-value">{dashFmt(isCurrent ? (win.available ? 1 : 0) : win.jobs_run)}</span></div>
                     <div className="dashboard-card"><span className="dashboard-card-label">Items processed</span><span className="dashboard-card-value">{dashFmt(win.processed ?? win.items_completed)}</span></div>
@@ -925,7 +1040,10 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
                     </div>
                   </section>
                 ) : (
-                  <p className="dashboard-quality-note">MDI triage metrics are not applicable for the VT Bulk Check source filter.</p>
+                  <p className="dashboard-quality-note dashboard-na-note">
+                    <strong>MDI triage &amp; enrichment: Not Applicable</strong> for the VT Bulk Check source
+                    filter. Shared operational metrics above still reflect VT Bulk Check jobs only.
+                  </p>
                 )}
 
                 {triageRows.length > 0 && (

@@ -583,8 +583,16 @@ def _contains_leaked_domain(text: str, needle: str) -> bool:
     return needle.lower() in text.lower()
 
 
+def _tool_quota_units(normalized_day: Dict[str, Any], tool: str) -> int:
+    tools = normalized_day.get("tools") or {}
+    stats = tools.get(tool)
+    if isinstance(stats, dict):
+        return int(safe_number(stats.get("quota_units"), 0))
+    return 0
+
+
 def build_quota_trend(daily_file: Optional[Path] = None, days: int = 7) -> Dict[str, Any]:
-    """Read-only quota trend from vt_daily_history.json."""
+    """Read-only quota trend from vt_daily_history.json (VTFIX-02G per-tool visibility)."""
     from services import daily_history
 
     path = daily_file or _default_daily_file()
@@ -599,13 +607,47 @@ def build_quota_trend(daily_file: Optional[Path] = None, days: int = 7) -> Dict[
     for offset in range(days - 1, -1, -1):
         day = (today - timedelta(days=offset)).isoformat()
         entry = data.get(day)
+        normalized = daily_history.normalize_day_entry(entry)
         units = daily_history.extract_day_quota_units(entry)
-        rows.append({"date": day, "quota_units": units})
+        rows.append({
+            "date": day,
+            "quota_units": units,
+            "mdi_quota_units": _tool_quota_units(normalized, "mdi"),
+            "vt_bulk_check_quota_units": _tool_quota_units(normalized, "vt_bulk_check"),
+            "legacy_quota_units": _tool_quota_units(normalized, "legacy"),
+            "schema_version": normalized.get("schema_version"),
+        })
 
     return {
         "available": True,
         "source": "vt_daily_history.json",
         "last_7_days": rows,
+    }
+
+
+def _read_live_quota_summary() -> Dict[str, Any]:
+    """Read-only shared live counter for dashboard display (no writes)."""
+    from services.vt_quota import get_usage_summary
+
+    try:
+        usage = get_usage_summary()
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+    if usage.get("error"):
+        return {
+            "available": False,
+            "error": usage.get("error"),
+            "date_utc": usage.get("date_utc"),
+        }
+
+    return {
+        "available": True,
+        "date_utc": usage.get("date_utc"),
+        "daily_lookups_used": int(safe_number(usage.get("daily_lookups_used"), 0)),
+        "daily_limit": int(safe_number(usage.get("daily_limit"), 500)),
+        "remaining": int(safe_number(usage.get("remaining"), 0)),
+        "error": None,
     }
 
 
@@ -743,6 +785,7 @@ def build_dashboard_summary(
             "all_time": all_time,
         },
         "quota_trend": build_quota_trend(daily_file),
+        "live_quota": _read_live_quota_summary(),
         "data_quality": data_quality,
     }
     return payload

@@ -109,4 +109,9 @@ class TestDashboardReader:
         monkeypatch.setenv("VT_DAILY_HISTORY_FILE", str(path))
         trend = dashboard.build_quota_trend(path, days=1)
         assert trend["available"] is True
-        assert trend["last_7_days"][-1]["quota_units"] == 9
+        row = trend["last_7_days"][-1]
+        assert row["quota_units"] == 9
+        assert row["mdi_quota_units"] == 4
+        assert row["vt_bulk_check_quota_units"] == 5
+        assert row["legacy_quota_units"] == 0
+        assert row["schema_version"] == 2
