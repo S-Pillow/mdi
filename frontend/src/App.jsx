@@ -892,40 +892,38 @@ function DashboardPanel({ open, id, data, loading, error, activeWindow, onWindow
             )}
             {(!isCurrent || win.available) && (
               <>
-                <div className="dashboard-cards">
-                  <div className="dashboard-card"><span className="dashboard-card-label">Jobs</span><span className="dashboard-card-value">{dashFmt(isCurrent ? (win.available ? 1 : 0) : win.jobs_run)}</span></div>
-                  <div className="dashboard-card"><span className="dashboard-card-label">Items processed</span><span className="dashboard-card-value">{dashFmt(win.processed ?? win.items_completed)}</span></div>
-                  <div className="dashboard-card"><span className="dashboard-card-label">VT quota used</span><span className="dashboard-card-value">{dashFmt(win.lookups_used ?? win.quota_units_consumed)}</span></div>
-                  <div className="dashboard-card"><span className="dashboard-card-label">Quota blocked</span><span className="dashboard-card-value">{dashFmt(win.quota_blocked_count)}</span></div>
-                </div>
-
-                <div className="dashboard-cards dashboard-cards-secondary">
-                  <div className="dashboard-card"><span className="dashboard-card-label">Avg runtime</span><span className="dashboard-card-value">{formatDashboardRuntime(win.job_duration_seconds ?? win.avg_runtime_seconds)}</span></div>
-                  <div className="dashboard-card"><span className="dashboard-card-label">Avg items/job</span><span className="dashboard-card-value">{dashFmt(win.avg_items_per_job)}</span></div>
-                  <div className="dashboard-card"><span className="dashboard-card-label">VT scans requested</span><span className="dashboard-card-value">{dashFmt(win.scan_requested_count)}</span></div>
-                </div>
+                <section className="dashboard-metric-section" aria-label="Shared VT metrics">
+                  <div className="dashboard-section-label">Shared VT metrics</div>
+                  <div className="dashboard-cards dashboard-cards-shared">
+                    <div className="dashboard-card"><span className="dashboard-card-label">Jobs</span><span className="dashboard-card-value">{dashFmt(isCurrent ? (win.available ? 1 : 0) : win.jobs_run)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">Items processed</span><span className="dashboard-card-value">{dashFmt(win.processed ?? win.items_completed)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">VT quota used</span><span className="dashboard-card-value">{dashFmt(win.lookups_used ?? win.quota_units_consumed)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">Quota blocked</span><span className="dashboard-card-value">{dashFmt(win.quota_blocked_count)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">Avg runtime</span><span className="dashboard-card-value">{formatDashboardRuntime(win.job_duration_seconds ?? win.avg_runtime_seconds)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">Avg items/job</span><span className="dashboard-card-value">{dashFmt(win.avg_items_per_job)}</span></div>
+                    <div className="dashboard-card"><span className="dashboard-card-label">VT scans requested</span><span className="dashboard-card-value">{dashFmt(win.scan_requested_count)}</span></div>
+                  </div>
+                </section>
 
                 {mdiTriageApplicable ? (
-                  <>
+                  <section className="dashboard-metric-section" aria-label="MDI triage and enrichment metrics">
                     {mdiTriageLabel && !isCurrent && (
                       <p className="dashboard-metric-scope">{mdiTriageLabel} — triage and enrichment metrics</p>
                     )}
                     {isCurrent && sourceFilter === 'all' && (
                       <p className="dashboard-metric-scope">MDI only — current job triage metrics</p>
                     )}
-                    <div className="dashboard-cards">
+                    <div className="dashboard-section-label">MDI triage &amp; enrichment</div>
+                    <div className="dashboard-cards dashboard-cards-triage">
                       <div className="dashboard-card"><span className="dashboard-card-label">Flagged %</span><span className="dashboard-card-value">{dashPct(win.flagged_percent)}</span></div>
                       <div className="dashboard-card"><span className="dashboard-card-label">Clean %</span><span className="dashboard-card-value">{dashPct(win.clean_percent)}</span></div>
                       <div className="dashboard-card"><span className="dashboard-card-label">Unknown/Error %</span><span className="dashboard-card-value">{dashPct(win.unknown_error_percent)}</span></div>
                       <div className="dashboard-card"><span className="dashboard-card-label">Held %</span><span className="dashboard-card-value">{dashPct(win.held_percent)}</span></div>
-                    </div>
-
-                    <div className="dashboard-cards dashboard-cards-secondary">
                       <div className="dashboard-card"><span className="dashboard-card-label">Live checks</span><span className="dashboard-card-value">{dashFmt(win.live_check_count)}</span></div>
                       <div className="dashboard-card"><span className="dashboard-card-label">RDAP/WHOIS</span><span className="dashboard-card-value">{dashFmt((win.rdap_enriched_count ?? 0) + (win.whois_fallback_count ?? 0))}</span></div>
                       <div className="dashboard-card"><span className="dashboard-card-label">Auto-rescan attempts</span><span className="dashboard-card-value">{dashFmt(win.auto_rescan_attempted_count)}</span></div>
                     </div>
-                  </>
+                  </section>
                 ) : (
                   <p className="dashboard-quality-note">MDI triage metrics are not applicable for the VT Bulk Check source filter.</p>
                 )}
