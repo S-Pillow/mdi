@@ -3,20 +3,25 @@
 VTFIX-02H — Daily-history metadata backfill dry-run (read-only by default).
 
 Analyzes vt_daily_history.json against vt_usage_history.jsonl and proposes a
-per-date schema v2 normalization plan. Does NOT write runtime files unless a
-future explicit --write flag is added in a separately approved ticket.
+per-date schema v2 normalization plan. Approved runtime write is available only
+via --write-approved-normalization (operator-approved dates only).
 
 Usage:
   python3 scripts/vtfix-02h-daily-history-backfill-dry-run.py
   python3 scripts/vtfix-02h-daily-history-backfill-dry-run.py \\
       --daily-file /path/to/vt_daily_history.json \\
       --jsonl-file /path/to/vt_usage_history.jsonl
+  python3 scripts/vtfix-02h-daily-history-backfill-dry-run.py \\
+      --write-approved-normalization
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
+import shutil
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -37,6 +42,28 @@ DEFAULT_JSONL = Path("/var/lib/dns-tool/vt_usage_history.jsonl")
 DATE_FIELDS = ("timestamp", "submitted_at", "completed_at", "ts")
 QUOTA_FIELDS = ("quota_units_consumed", "actual_lookups")
 KNOWN_TOOLS = frozenset({"mdi", "vt_bulk_check"})
+
+# Operator-approved normalization targets (VTFIX-02H-RUNTIME).
+APPROVED_WRITE_DATES: Dict[str, Dict[str, int]] = {
+    "2026-06-05": {"total": 1, "proposed_mdi": 0, "proposed_legacy": 1},
+    "2026-06-06": {"total": 1478, "proposed_mdi": 1478, "proposed_legacy": 0},
+    "2026-06-08": {"total": 89, "proposed_mdi": 89, "proposed_legacy": 0},
+    "2026-06-09": {"total": 4, "proposed_mdi": 4, "proposed_legacy": 0},
+    "2026-06-10": {"total": 242, "proposed_mdi": 0, "proposed_legacy": 242},
+}
+
+MANUAL_REVIEW_DATES: Dict[str, Dict[str, int]] = {
+    "2026-06-03": {"total": 138},
+    "2026-06-07": {"total": 5},
+}
+
+PRESERVE_V2_DATE = "2026-06-11"
+PRESERVE_V2_EXPECTED = {
+    "total": 4,
+    "proposed_mdi": 2,
+    "proposed_vt_bulk_check": 2,
+    "proposed_legacy": 0,
+}
 
 
 def classify_day_shape(raw: Any) -> str:
@@ -348,17 +375,202 @@ def format_report(result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _plan_row_for_date(plans: List[Dict[str, Any]], date: str) -> Optional[Dict[str, Any]]:
+    for row in plans:
+        if row["date"] == date:
+            return row
+    return None
+
+
+def validate_approved_write_preconditions(
+    data: Dict[str, Any],
+    plans: List[Dict[str, Any]],
+) -> List[str]:
+    """Return validation errors; empty list means safe to proceed."""
+    errors: List[str] = []
+
+    required_dates = set(APPROVED_WRITE_DATES) | set(MANUAL_REVIEW_DATES) | {PRESERVE_V2_DATE}
+    missing = required_dates - set(data.keys())
+    if missing:
+        errors.append(f"Missing expected dates: {sorted(missing)}")
+
+    for date, expected in APPROVED_WRITE_DATES.items():
+        row = _plan_row_for_date(plans, date)
+        if row is None:
+            errors.append(f"Approved date missing from plan: {date}")
+            continue
+        if row["current_total"] != expected["total"]:
+            errors.append(
+                f"{date}: current total {row['current_total']} != expected {expected['total']}"
+            )
+        if row["proposed_total"] != expected["total"]:
+            errors.append(
+                f"{date}: proposed total {row['proposed_total']} != expected {expected['total']}"
+            )
+        if row["proposed_mdi"] != expected["proposed_mdi"]:
+            errors.append(
+                f"{date}: proposed mdi {row['proposed_mdi']} != expected {expected['proposed_mdi']}"
+            )
+        if row["proposed_legacy"] != expected["proposed_legacy"]:
+            errors.append(
+                f"{date}: proposed legacy {row['proposed_legacy']} != expected {expected['proposed_legacy']}"
+            )
+        if row["confidence"] != "high" or not row["write_recommended"]:
+            errors.append(f"{date}: dry-run no longer high-confidence write candidate")
+
+    for date, expected in MANUAL_REVIEW_DATES.items():
+        raw = data.get(date)
+        if raw is None:
+            errors.append(f"Manual-review date missing: {date}")
+            continue
+        if current_day_total(raw) != expected["total"]:
+            errors.append(
+                f"{date}: manual-review total {current_day_total(raw)} != expected {expected['total']}"
+            )
+
+    v2_raw = data.get(PRESERVE_V2_DATE)
+    if v2_raw is None:
+        errors.append(f"Preserve date missing: {PRESERVE_V2_DATE}")
+    else:
+        if classify_day_shape(v2_raw) != "v2_tools":
+            errors.append(f"{PRESERVE_V2_DATE}: expected v2_tools shape")
+        row = _plan_row_for_date(plans, PRESERVE_V2_DATE)
+        if row:
+            exp = PRESERVE_V2_EXPECTED
+            for key in ("total", "proposed_mdi", "proposed_vt_bulk_check", "proposed_legacy"):
+                field = "current_total" if key == "total" else key
+                if row.get(field) != exp[key if key != "total" else "total"]:
+                    errors.append(f"{PRESERVE_V2_DATE}: {field} mismatch vs expected v2 state")
+
+    return errors
+
+
+def create_daily_history_backup(daily_file: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    backup_dir = daily_file.parent / "backups" / f"vtfix-02h-runtime-{stamp}"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_dir / daily_file.name
+    shutil.copy2(daily_file, backup_path)
+    return backup_path
+
+
+def execute_approved_normalization(
+    daily_file: Path,
+    jsonl_file: Path,
+    *,
+    require_production_path: bool = False,
+) -> Dict[str, Any]:
+    """Normalize approved dates only; refuse on validation failure."""
+    if require_production_path and daily_file.resolve() != DEFAULT_DAILY.resolve():
+        raise ValueError("Approved write mode only supports the production daily-history path")
+
+    data = daily_history.load_history_file(daily_file)
+    plan = build_plan(daily_file, jsonl_file)
+    errors = validate_approved_write_preconditions(data, plan["plans"])
+    if errors:
+        raise RuntimeError("Pre-write validation failed: " + "; ".join(errors))
+
+    preserve_dates = list(MANUAL_REVIEW_DATES.keys()) + [PRESERVE_V2_DATE]
+    preserved: Dict[str, Any] = {d: copy.deepcopy(data[d]) for d in preserve_dates if d in data}
+
+    totals_before = {d: current_day_total(data[d]) for d in data}
+    shapes_before = {d: classify_day_shape(data[d]) for d in data}
+
+    new_data = copy.deepcopy(data)
+    written: List[str] = []
+    for date in sorted(APPROVED_WRITE_DATES.keys()):
+        normalized = proposed_from_daily_only(new_data[date])
+        new_data[date] = normalized
+        written.append(date)
+
+    for date, original in preserved.items():
+        if new_data.get(date) != original:
+            raise RuntimeError(f"Preserve invariant violated for {date}")
+
+    totals_after = {d: current_day_total(new_data[d]) for d in new_data}
+    if totals_before != totals_after:
+        raise RuntimeError("Total preservation check failed")
+
+    # Validate serialized JSON before touching runtime file.
+    payload = json.dumps(new_data, indent=2, sort_keys=True)
+    json.loads(payload)
+
+    backup_path = create_daily_history_backup(daily_file)
+    mode = daily_file.stat().st_mode
+    daily_history.save_history_file(daily_file, new_data, indent=2)
+    os.chmod(daily_file, mode)
+
+    shapes_after = {d: classify_day_shape(new_data[d]) for d in new_data}
+    return {
+        "status": "written",
+        "daily_file": str(daily_file),
+        "backup_path": str(backup_path),
+        "dates_written": written,
+        "dates_preserved": preserve_dates,
+        "totals_before": totals_before,
+        "totals_after": totals_after,
+        "shapes_before": shapes_before,
+        "shapes_after": shapes_after,
+        "daily_shape_summary_after": summarize_daily_shapes(new_data),
+    }
+
+
+def format_write_summary(result: Dict[str, Any]) -> str:
+    lines = [
+        "VTFIX-02H approved normalization write complete",
+        f"daily_file: {result['daily_file']}",
+        f"backup_path: {result['backup_path']}",
+        f"dates_written: {result['dates_written']}",
+        f"dates_preserved: {result['dates_preserved']}",
+        f"daily_shape_summary_after: {json.dumps(result['daily_shape_summary_after'], sort_keys=True)}",
+        "totals preserved: yes",
+    ]
+    for date in result["dates_written"]:
+        lines.append(
+            f"  {date}: {result['shapes_before'][date]} -> {result['shapes_after'][date]} "
+            f"total={result['totals_after'][date]}"
+        )
+    return "\n".join(lines)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     cli = argv if argv is not None else sys.argv[1:]
     if "--write" in cli or "--apply" in cli:
-        print("ERROR: Runtime write is not supported. Dry-run only.", file=sys.stderr)
+        print("ERROR: Use --write-approved-normalization for approved runtime write.", file=sys.stderr)
         return 2
 
     parser = argparse.ArgumentParser(description="VTFIX-02H daily-history backfill dry-run")
     parser.add_argument("--daily-file", type=Path, default=DEFAULT_DAILY)
     parser.add_argument("--jsonl-file", type=Path, default=DEFAULT_JSONL)
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON summary")
+    parser.add_argument(
+        "--write-approved-normalization",
+        action="store_true",
+        help="Write operator-approved high-confidence schema v2 normalization only",
+    )
     args = parser.parse_args(cli)
+
+    if args.write_approved_normalization:
+        if args.daily_file.resolve() != DEFAULT_DAILY.resolve():
+            print(
+                "ERROR: Approved write requires production daily-history path "
+                f"({DEFAULT_DAILY}) without --daily-file override.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            result = execute_approved_normalization(
+                args.daily_file,
+                args.jsonl_file,
+            )
+        except (RuntimeError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(format_write_summary(result))
+        return 0
 
     result = build_plan(args.daily_file, args.jsonl_file)
     if args.json:

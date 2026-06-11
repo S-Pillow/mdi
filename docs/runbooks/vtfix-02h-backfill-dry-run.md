@@ -67,6 +67,21 @@ python3 -m pytest tests/test_vtfix_02h_backfill_dry_run.py -v
 
 ## Actual backfill execution
 
+**Approved runtime normalization (VTFIX-02H-RUNTIME):** operator-approved write
+mode normalizes five high-confidence dates only:
+
+```bash
+python3 /root/mdi/scripts/vtfix-02h-daily-history-backfill-dry-run.py --write-approved-normalization
+```
+
+Requires production path `/var/lib/dns-tool/vt_daily_history.json` (no
+`--daily-file` override). Creates timestamped backup under
+`/var/lib/dns-tool/backups/vtfix-02h-runtime-*`. Does **not** modify
+`vt_usage.json` or `vt_usage_history.jsonl`.
+
+Manual-review dates (`2026-06-03`, `2026-06-07`) and existing v2 date
+(`2026-06-11`) are preserved unchanged.
+
 **Not in scope for dry-run ticket.** Requires:
 
 - Operator review of dry-run report
