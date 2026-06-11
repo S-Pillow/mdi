@@ -99,7 +99,7 @@ sudo systemctl status mdi-backend.service
 |---|---|---|---|
 | `/var/lib/dns-tool/` | root:dns-tool | 2770 | MDI + VT Bulk (via `dns-tool` group) |
 | `vt_usage.json` | *:dns-tool | 660 | Shared quota counter; owner = last writer |
-| `vt_usage_history.jsonl` | *:dns-tool | 660 | Shared metadata history (append) |
+| `vt_usage_history.jsonl` | www-data:dns-tool | **664** | Shared metadata history (append); run `scripts/fix-vt-usage-history-perms.sh` after any root cleanup |
 | `vt_daily_history.json` | *:dns-tool | 660 | Shared daily history |
 | `mdi_latest_job.json` | mdi:mdi | 600 | MDI-only job recovery |
 | `vt_latest_job.json` | www-data:www-data | 600 | VT Bulk only |

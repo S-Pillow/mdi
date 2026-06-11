@@ -19,7 +19,7 @@ Shared quota files use **group `dns-tool` and mode `660`**. Owner may be
 |---|---|---|---|
 | `/var/lib/dns-tool/` | root:dns-tool | 2770 | Yes |
 | `vt_usage.json` | *:dns-tool | 660 | Yes — MDI + VT Bulk |
-| `vt_usage_history.jsonl` | *:dns-tool | 660 | Yes — metadata append |
+| `vt_usage_history.jsonl` | www-data:dns-tool | **664** | Yes — metadata append; group **must** have write |
 | `vt_daily_history.json` | *:dns-tool | 660 | Yes |
 | `vt_usage.lock` | root:dns-tool | 660 | Yes — flock coordination |
 | `mdi_latest_job.json` | mdi:mdi | 600 | **No** — MDI only |
@@ -56,6 +56,23 @@ Operators and admins may use `stat` and `ls -l` on runtime paths. **Do not**
 | `POST /api/mdi/jobs/estimate` | Read-only (`vt_usage.json` read) |
 | `POST /api/mdi/jobs/{id}/export` | No writes; in-memory download only |
 | Safe GET smoke tests | No writes |
+
+### Usage history append permissions (VTFIX-02E)
+
+Both MDI (`mdi` user) and VT Bulk Check (`www-data`) append to
+`vt_usage_history.jsonl`. Required mode: **`0664`** with group **`dns-tool`**
+(preferred owner **`www-data`**). Mode **`0644`** breaks appends for both
+backends even though they are in group `dns-tool`.
+
+After any manual JSONL cleanup or replacement, run:
+
+```bash
+sudo bash scripts/fix-vt-usage-history-perms.sh
+```
+
+See [Production Runbook — JSONL permission hardening](runbooks/mdi-production-runbook.md#vt_usage_historyjsonl-permission-hardening-vtfix-02e).
+
+---
 
 ### Usage history privacy
 

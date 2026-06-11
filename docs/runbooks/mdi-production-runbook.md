@@ -133,7 +133,7 @@ compromised.
 |---|---|---|---|
 | `/var/lib/dns-tool/` | root:dns-tool | 2770 | setgid; both services via `dns-tool` group |
 | `vt_usage.json` | *:dns-tool | 660 | Shared quota counter; owner = last writer |
-| `vt_usage_history.jsonl` | *:dns-tool | 660 | Shared metadata history (append-only) |
+| `vt_usage_history.jsonl` | www-data:dns-tool | **664** | Shared metadata history (append-only); **group must have write** |
 | `vt_daily_history.json` | *:dns-tool | 660 | Shared daily totals |
 | `vt_usage.lock` | root:dns-tool | 660 | Shared POSIX flock (MDI-19) |
 | `mdi_latest_job.json` | mdi:mdi | 600 | MDI-only job recovery |
@@ -141,6 +141,39 @@ compromised.
 | `/etc/dns-tool/secrets.env` | root:dns-tool | 640 | Read via `dns-tool` group |
 
 Verify with `stat` (metadata only). See [Runtime Data](../runtime-data.md).
+
+### `vt_usage_history.jsonl` permission hardening (VTFIX-02E)
+
+Both backends append to this file (`mdi` and `www-data`, via group `dns-tool`).
+If a manual cleanup runs as **root** and recreates the file (e.g. filter/replace,
+`cp`, or restore from backup), the default umask often yields **`root:dns-tool
+0644`**. Group `dns-tool` then has **read-only** access — appends fail silently
+(logged as `Permission denied`) while shared quota still advances.
+
+**Required after any JSONL replacement or cleanup:**
+
+```bash
+sudo bash /opt/mdi/scripts/fix-vt-usage-history-perms.sh
+# or from the git clone before deploy:
+sudo bash /root/mdi/scripts/fix-vt-usage-history-perms.sh
+```
+
+Target: `www-data:dns-tool` mode **0664** (never `0644`, never `777`).
+
+**Verify (metadata + append-open only; do not write test rows):**
+
+```bash
+sudo stat /var/lib/dns-tool/vt_usage_history.jsonl
+sudo -u www-data test -w /var/lib/dns-tool/vt_usage_history.jsonl && echo "www-data: writable"
+sudo -u mdi test -w /var/lib/dns-tool/vt_usage_history.jsonl && echo "mdi: writable"
+```
+
+**Optional boot-time enforcement:** see
+[vt-usage-history-perms.example.tmpfiles.conf](../deployment/vt-usage-history-perms.example.tmpfiles.conf)
+(type `z` — adjusts mode/ownership on existing file only; does not truncate).
+
+There is **no automated cleanup script** in either repo; JSONL maintenance is
+manual ops. Always run the fix script immediately after any replacement.
 
 ---
 
@@ -499,6 +532,7 @@ code-level table and test matrix. Quick admin/operator cues:
 |---|---|
 | Manually edit `vt_usage.json` | Breaks shared accounting |
 | Delete or truncate `vt_usage_history.jsonl` | Loses audit trail |
+| Replace JSONL without running `fix-vt-usage-history-perms.sh` | Recreates root:644; silent append failures |
 | `cat /etc/dns-tool/secrets.env` | Exposes API keys |
 | `cat` `mdi_latest_job.json` or `vt_latest_job.json` in reports | Contains operator-submitted domains |
 | Deploy only one side of quota-lock changes | Restores lost-update race |
