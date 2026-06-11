@@ -155,15 +155,42 @@ until a future column-addition ticket updates that exporter.
 | Field | Value |
 |---|---|
 | **Full path** | `/var/lib/dns-tool/vt_daily_history.json` |
-| **Format** | JSON: `{"YYYY-MM-DD": N, ...}` — up to 90 day entries |
+| **Format** | Unified JSON (VTFIX-02D): per-day `total_quota_units` + `tools` buckets |
 | **Owner** | `root:dns-tool` |
 | **Permissions** | `660` |
 | **MDI reads** | Yes — dashboard quota trend (optional) |
-| **MDI writes** | Yes — `quota_writer.update_daily_history()` on job completion |
-| **Contains item data** | No — daily totals only |
+| **MDI writes** | Yes — `quota_writer.update_daily_history()` on job completion (`tool: mdi`) |
+| **VT Bulk writes** | Yes — additive `vt_bulk_check` bucket per quota increment / job completion |
+| **Contains item data** | No — aggregate daily counts only |
 | **Source-control** | Excluded by `.gitignore` |
 | **Cleanup rule** | Pruned automatically to last 90 days on each write |
 | **MDI-03 touches** | NOT touched |
+
+**Unified per-day shape (future writes, VTFIX-02D):**
+
+```json
+{
+  "YYYY-MM-DD": {
+    "schema_version": 2,
+    "total_quota_units": 0,
+    "tools": {
+      "mdi": {"quota_units": 0, "jobs": 0, "items_processed": 0},
+      "vt_bulk_check": {"quota_units": 0, "jobs": 0, "items_processed": 0},
+      "legacy": {"quota_units": 0, "jobs": 0, "items_processed": 0}
+    }
+  }
+}
+```
+
+**Backward read compatibility (no production migration):**
+
+| Legacy shape | Reader/writer behavior |
+|---|---|
+| Integer day value | Normalized to `tools.legacy` — **not** counted as MDI |
+| `{"quota_units": N, "tool": "mdi"}` | Normalized to `tools.mdi` |
+| Unified dict | Merged additively per tool; same-day writes do not overwrite other tools |
+
+Existing production file contents are **not** rewritten or backfilled by deploy.
 
 ### `vt_latest_job.json` — VT Bulk Check job recovery snapshot
 

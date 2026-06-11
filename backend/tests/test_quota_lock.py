@@ -134,7 +134,9 @@ def test_update_daily_history_under_lock(tmp_path, monkeypatch):
     quota_writer.update_daily_history(2, daily)
     data = json.loads(daily.read_text())
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    assert data[today]["quota_units"] == 5
+    day = data[today]
+    assert day["total_quota_units"] == 5
+    assert day["tools"]["mdi"]["quota_units"] == 5
 
 
 def test_append_usage_history_valid_jsonl(tmp_path, monkeypatch):

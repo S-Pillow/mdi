@@ -585,14 +585,13 @@ def _contains_leaked_domain(text: str, needle: str) -> bool:
 
 def build_quota_trend(daily_file: Optional[Path] = None, days: int = 7) -> Dict[str, Any]:
     """Read-only quota trend from vt_daily_history.json."""
+    from services import daily_history
+
     path = daily_file or _default_daily_file()
     if not path.exists():
         return {"available": False, "source": "vt_daily_history.json", "last_7_days": []}
-    try:
-        data = json.loads(path.read_text())
-        if not isinstance(data, dict):
-            return {"available": False, "source": "vt_daily_history.json", "last_7_days": []}
-    except Exception:
+    data = daily_history.load_history_file(path)
+    if not data:
         return {"available": False, "source": "vt_daily_history.json", "last_7_days": []}
 
     today = datetime.now(timezone.utc).date()
@@ -600,11 +599,7 @@ def build_quota_trend(daily_file: Optional[Path] = None, days: int = 7) -> Dict[
     for offset in range(days - 1, -1, -1):
         day = (today - timedelta(days=offset)).isoformat()
         entry = data.get(day)
-        units = 0
-        if isinstance(entry, dict):
-            units = int(safe_number(entry.get("quota_units"), 0))
-        elif entry is not None:
-            units = int(safe_number(entry, 0))
+        units = daily_history.extract_day_quota_units(entry)
         rows.append({"date": day, "quota_units": units})
 
     return {

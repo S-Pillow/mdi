@@ -631,4 +631,8 @@ def _write_history(
     quota_writer.append_usage_history(record, history_file)
 
     if job.lookups_used > 0:
-        quota_writer.update_daily_history(job.lookups_used, daily_file)
+        quota_writer.update_daily_history(
+            job.lookups_used,
+            daily_file,
+            items_processed=job.processed or len(job.results),
+        )

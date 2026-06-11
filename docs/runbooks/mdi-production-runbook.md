@@ -549,7 +549,7 @@ code-level table and test matrix. Quick admin/operator cues:
 
 - Shared quota race mitigated by flock, not a full reservation model; MDI-21
   passed controlled sequential and light concurrent validation (not a load test)
-- `vt_daily_history.json` schema differs between MDI and VT Bulk (documented, not unified)
+- `vt_daily_history.json` uses unified VTFIX-02D schema for **future** writes; legacy integer/MDI-dict days remain readable without migration
 - Dashboard old records may lack triage/runtime aggregate fields
 - Large exports are in-memory only
 - Open in VirusTotal requires a saved `vt_report_url` on the row

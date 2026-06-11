@@ -167,23 +167,33 @@ def append_usage_history(
 def update_daily_history(
     quota_units: int,
     daily_file: Optional[Path] = None,
+    *,
+    tool: str = "mdi",
+    jobs_delta: int = 1,
+    items_processed: Optional[int] = None,
 ) -> None:
     """
-    Update the daily history JSON with today's incremental quota spend.
+    Additively update unified daily history for one tool (VTFIX-02D).
 
     Uses exclusive flock. Failure is logged and swallowed.
     """
+    from services import daily_history
+
     path = daily_file or _default_daily_file()
     today = _utc_date_str()
+    items_delta = int(items_processed or 0)
     try:
         with quota_lock("exclusive"):
-            data = _read_json_safe(path) or {}
-            prev = int((data.get(today) or {}).get("quota_units", 0))
-            data[today] = {"quota_units": prev + quota_units, "tool": "mdi"}
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2))
-            os.replace(tmp, path)
+            data = daily_history.load_history_file(path)
+            daily_history.record_tool_usage(
+                data,
+                today,
+                tool,
+                quota_delta=int(quota_units),
+                jobs_delta=int(jobs_delta),
+                items_delta=items_delta,
+            )
+            daily_history.save_history_file(path, data)
     except QuotaLockTimeout:
         logger.warning("Quota lock timeout updating daily history %s", path)
     except Exception as exc:

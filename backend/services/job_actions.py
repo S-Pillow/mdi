@@ -486,7 +486,11 @@ def _append_action_history(
     )
     quota_writer.append_usage_history(record, history_file)
     if stats.quota_units > 0:
-        quota_writer.update_daily_history(stats.quota_units, daily_file)
+        quota_writer.update_daily_history(
+            stats.quota_units,
+            daily_file,
+            items_processed=stats.items_completed,
+        )
 
 
 async def run_refresh_action(job_id: str, request: JobActionRequest) -> None:
