@@ -490,7 +490,7 @@ rail; MDI-46 addressed only setup-mode layout cohesion and subtle visual polish.
 | VTFIX-02D | Daily-history schema unification | **Closed** — merged, deployed, production-smoked (2026-06-11) |
 | VTFIX-02F | Shared live `vt_usage.json` flock coordination | **Closed** — merged, deployed, production-smoked (2026-06-11) |
 | VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend | **Closed** — merged, deployed, API-verified, visually confirmed (2026-06-11) |
-| VTFIX-02H | Jun 10 metadata backfill (optional) | **Not started** — requires explicit operator approval |
+| VTFIX-02H | Historical daily-history metadata backfill (optional) | **Dry-run only** — see [VTFIX-02H runbook](runbooks/vtfix-02h-backfill-dry-run.md); runtime write not approved |
 
 MDI-43 remains **documented backlog only — not started**.
 VTFIX-02H remains **not started** — optional historical backfill; requires explicit
