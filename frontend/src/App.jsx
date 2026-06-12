@@ -822,11 +822,6 @@ function formatRecordsBySource(recordsBySource) {
 function DashboardQuotaSection({ liveQuota, quotaTrend }) {
   const rows = quotaTrend?.available ? (quotaTrend.last_7_days || []) : []
   const todayUtc = new Date().toISOString().slice(0, 10)
-  const showPerTool = rows.some(r =>
-    (r.mdi_quota_units ?? 0) > 0
-    || (r.vt_bulk_check_quota_units ?? 0) > 0
-    || (r.legacy_quota_units ?? 0) > 0,
-  )
 
   return (
     <section className="dashboard-metric-section" aria-label="Shared VT quota visibility">
@@ -858,13 +853,20 @@ function DashboardQuotaSection({ liveQuota, quotaTrend }) {
         <div className="dashboard-table-section">
           <div className="dashboard-section-label dashboard-section-label-inline">7-day daily-history trend</div>
           <table className="dashboard-table dashboard-quota-trend-table">
+            <colgroup>
+              <col className="dashboard-quota-trend-col-date" />
+              <col className="dashboard-quota-trend-col-num" />
+              <col className="dashboard-quota-trend-col-num" />
+              <col className="dashboard-quota-trend-col-num" />
+              <col className="dashboard-quota-trend-col-num" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Date (UTC)</th>
                 <th>Total</th>
-                {showPerTool && <th>MDI</th>}
-                {showPerTool && <th>VT Bulk</th>}
-                {showPerTool && <th>Legacy</th>}
+                <th>MDI</th>
+                <th>VT Bulk</th>
+                <th>Legacy</th>
               </tr>
             </thead>
             <tbody>
@@ -872,9 +874,9 @@ function DashboardQuotaSection({ liveQuota, quotaTrend }) {
                 <tr key={row.date} className={row.date === todayUtc ? 'dashboard-quota-trend-today' : undefined}>
                   <td>{row.date}{row.date === todayUtc ? ' (today)' : ''}</td>
                   <td>{dashFmt(row.quota_units)}</td>
-                  {showPerTool && <td>{dashFmt(row.mdi_quota_units)}</td>}
-                  {showPerTool && <td>{dashFmt(row.vt_bulk_check_quota_units)}</td>}
-                  {showPerTool && <td>{dashFmt(row.legacy_quota_units)}</td>}
+                  <td>{dashFmt(row.mdi_quota_units)}</td>
+                  <td>{dashFmt(row.vt_bulk_check_quota_units)}</td>
+                  <td>{dashFmt(row.legacy_quota_units)}</td>
                 </tr>
               ))}
             </tbody>

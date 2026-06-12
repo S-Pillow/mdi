@@ -481,6 +481,15 @@ body {
 .dashboard-cards-quota-live {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.dashboard-quota-trend-table {
+  table-layout: fixed;
+}
+.dashboard-quota-trend-table .dashboard-quota-trend-col-date {
+  width: 34%;
+}
+.dashboard-quota-trend-table .dashboard-quota-trend-col-num {
+  width: 16.5%;
+}
 .dashboard-quota-trend-table th {
   font-size: 10px;
   font-weight: 700;
@@ -491,8 +500,14 @@ body {
   padding: 4px 6px;
   border-bottom: 1px solid var(--border-soft);
 }
-.dashboard-quota-trend-table th:not(:first-child) {
+.dashboard-quota-trend-table th:not(:first-child),
+.dashboard-quota-trend-table td:not(:first-child) {
   text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard-quota-trend-table td:not(:first-child) {
+  font-weight: 600;
+  color: var(--text-main);
 }
 .dashboard-quota-trend-today td {
   color: var(--text-main);
