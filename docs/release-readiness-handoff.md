@@ -101,6 +101,8 @@ flock-correct).
 | VTFIX-02D | Unified daily-history schema v2 (`tools.mdi`, `tools.vt_bulk_check`) — **merged, deployed, production-smoked** |
 | VTFIX-02F | Shared live `vt_usage.json` flock coordination (VT Bulk regression fix) — **merged, deployed, production-smoked** |
 | VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend — **merged, deployed, API-verified, visually confirmed** |
+| VTFIX-02H | Historical daily-history metadata backfill dry-run tooling — **merged, dry-run complete** |
+| VTFIX-02H-RUNTIME | Approved high-confidence daily-history schema v2 normalization on disk — **completed, verified** |
 
 VTFIX-02C commits on `main`: `6ff4811` (source attribution), `a328649` (metric
 ownership, backend), `fbef931` (dashboard card layout, frontend).
@@ -110,6 +112,9 @@ VTFIX-02D commits on `main`: MDI `cf3c5ec`, VT Bulk `9f18607`.
 VTFIX-02F commits on `main`: MDI `92d7086` (tests/docs), VT Bulk `413d633` (fix).
 
 VTFIX-02G commit on `main`: MDI `ea103fe` (dashboard VT attribution visibility).
+
+VTFIX-02H commits on `main`: `a100be9` (dry-run script/tests/runbook),
+`5591d5e` (approved write mode).
 
 ### MDI-FABLE-01 external UI/UX review intake
 
@@ -213,6 +218,46 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02G dashboard live quota cards and per-tool quota trend | Accepted |
 | VTFIX-02G dashboard source banner and helper text | Accepted |
 | VTFIX-02G VT Bulk Check MDI triage Not Applicable messaging | Accepted |
+| VTFIX-02H daily-history backfill dry-run tooling | Accepted |
+| VTFIX-02H-RUNTIME approved daily-history schema normalization | Accepted |
+
+**VTFIX-02H-RUNTIME approved normalization (2026-06-11 22:11 UTC):**
+
+Operator-approved runtime write to `/var/lib/dns-tool/vt_daily_history.json` only.
+Script: `scripts/vtfix-02h-daily-history-backfill-dry-run.py`
+(`--write-approved-normalization`). Tooling on `main` at `5591d5e`. Backup:
+`/var/lib/dns-tool/backups/vtfix-02h-runtime-20260611-221110/vt_daily_history.json`.
+No deploy; no service restart/reload; `vt_usage.json` and
+`vt_usage_history.jsonl` **not** modified.
+
+Five high-confidence dates normalized to schema v2 on disk (totals preserved):
+
+| Date | Before | After | Total | MDI | VT Bulk | Legacy |
+|---|---|---|---:|---:|---:|---:|
+| 2026-06-05 | legacy_int | v2 | 1 | 0 | 0 | 1 |
+| 2026-06-06 | legacy_dict (`tool=mdi`) | v2 | 1478 | 1478 | 0 | 0 |
+| 2026-06-08 | legacy_dict (`tool=mdi`) | v2 | 89 | 89 | 0 | 0 |
+| 2026-06-09 | legacy_dict (`tool=mdi`) | v2 | 4 | 4 | 0 | 0 |
+| 2026-06-10 | legacy_int | v2 | 242 | 0 | 0 | 242 |
+
+Preserved unchanged:
+
+- Manual-review dates (not written): `2026-06-03` (legacy_int, total 138, JSONL
+  sum 2); `2026-06-07` (legacy_int, total 5, JSONL sum 3).
+- Existing v2 date: `2026-06-11` (total 4, MDI 2, VT Bulk 2, Legacy 0).
+
+Post-write verification: all eight day totals preserved; post-write dry-run showed
+zero high-confidence write candidates; `/api/mdi/dashboard?source=all` → 200;
+`/api/mdi/usage` → 3 used / 497 remaining at verification time; no jobs; no VT
+calls; no quota consumed by the backfill operation.
+
+**VTFIX-02H dry-run tooling (2026-06-11):**
+
+Dry-run script, tests, and runbook merged on `main` (`a100be9`, then write mode
+`5591d5e`). See [VTFIX-02H runbook](runbooks/vtfix-02h-backfill-dry-run.md).
+Dry-run identified five high-confidence schema-normalization candidates and two
+manual-review dates. Runtime write executed only after explicit operator approval
+(VTFIX-02H-RUNTIME).
 
 **VTFIX-02G production deploy and visual smoke (2026-06-11 09:04 UTC):**
 
@@ -447,6 +492,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Dashboard history is metadata-focused | Acceptable |
 | Dashboard default source filter is **MDI**; operators must select **All VT Tools** to see shared VT Bulk usage | Acceptable — by design |
 | VT Bulk Check **Current** window may reflect in-memory/recovered MDI job shared metrics while MDI triage is Not Applicable | Acceptable — known |
+| Pre–VTFIX-02H-RUNTIME: legacy daily-history shapes on disk for dates before v2 forward writes | **Partially resolved** — five approved dates normalized on disk (2026-06-11); two manual-review dates remain legacy_int |
 | Pre–VTFIX-02F smoke: live `vt_usage.json` could undercount vs daily-history when VT Bulk regressed flock coordination | **Resolved** by VTFIX-02F — historical 1-vs-2 mismatch not hand-edited |
 | No tagged `vt_bulk_check` history until VTFIX-02B-tagged jobs append records | Acceptable — legacy lines remain under All VT Tools / Legacy |
 | Five legacy/unattributed JSONL lines (no `tool_name`) appear under **All VT Tools** only as Legacy / Unattributed | Acceptable |
@@ -490,11 +536,14 @@ rail; MDI-46 addressed only setup-mode layout cohesion and subtle visual polish.
 | VTFIX-02D | Daily-history schema unification | **Closed** — merged, deployed, production-smoked (2026-06-11) |
 | VTFIX-02F | Shared live `vt_usage.json` flock coordination | **Closed** — merged, deployed, production-smoked (2026-06-11) |
 | VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend | **Closed** — merged, deployed, API-verified, visually confirmed (2026-06-11) |
-| VTFIX-02H | Historical daily-history metadata backfill (optional) | **Dry-run only** — see [VTFIX-02H runbook](runbooks/vtfix-02h-backfill-dry-run.md); runtime write not approved |
+| VTFIX-02H | Historical daily-history metadata backfill dry-run | **Closed** — merged on `main` (`a100be9`, `5591d5e`); see [runbook](runbooks/vtfix-02h-backfill-dry-run.md) |
+| VTFIX-02H-RUNTIME | Approved high-confidence daily-history schema v2 normalization | **Closed** — production write completed and verified (2026-06-11 22:11 UTC) |
 
 MDI-43 remains **documented backlog only — not started**.
-VTFIX-02H remains **not started** — optional historical backfill; requires explicit
-operator approval before any quota/runtime work.
+
+Manual-review daily-history dates still open (not written): `2026-06-03` (total 138,
+JSONL sum 2) and `2026-06-07` (total 5, JSONL sum 3). Further backfill requires
+operator review and separate approval.
 
 ### Other non-blocking items
 
