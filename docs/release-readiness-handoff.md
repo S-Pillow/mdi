@@ -43,12 +43,15 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | VTFIX-02G: `ea103fe06129674485cb1c26ca30e3dc3e5ab200` | Static bundle: `index-UBWBOg5l.js`, `index-BoqbTN7t.css` at `/var/www/html/tools/mdi/` |
+| Frontend | VTFIX-02I: `5b504e346450e57ed402932b2de32ead80083ab0` | Static bundle: `index-9Cqf9ev9.js`, `index-DseIq5wp.css` at `/var/www/html/tools/mdi/` |
 | MDI backend | VTFIX-02G: `ea103fe06129674485cb1c26ca30e3dc3e5ab200` | `/opt/mdi/backend`; `live_quota` snapshot; per-tool quota trend fields; `build_info` ticket VTFIX-02G |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
 
 VTFIX-02G (2026-06-11) deployed coordinated MDI backend + frontend; `mdi-backend.service`
-restarted. VT Bulk backend was **not** redeployed; nginx was **not** reloaded.
+restarted. VTFIX-02I (2026-06-12) deployed frontend-only trend-table alignment fix;
+`mdi-backend.service` **not** restarted; nginx **not** reloaded. Frontend backup:
+`/var/www/html/tools/mdi.bak-20260612-011810/`. Bundles before 02I:
+`index-UBWBOg5l.js`, `index-BoqbTN7t.css`.
 Backups: `/opt/mdi/backups/vtfix-02g-20260611-090410/`,
 `/var/www/html/tools/mdi.bak-20260611-090410/`. Prior bundles before 02G:
 `index-QhEGJa8t.js`, `index-CZdxqujH.css`.
@@ -103,6 +106,7 @@ flock-correct).
 | VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend — **merged, deployed, API-verified, visually confirmed** |
 | VTFIX-02H | Historical daily-history metadata backfill dry-run tooling — **merged, dry-run complete** |
 | VTFIX-02H-RUNTIME | Approved high-confidence daily-history schema v2 normalization on disk — **completed, verified** |
+| VTFIX-02I | Dashboard 7-day quota trend table column alignment — **merged, deployed, visually confirmed** |
 
 VTFIX-02C commits on `main`: `6ff4811` (source attribution), `a328649` (metric
 ownership, backend), `fbef931` (dashboard card layout, frontend).
@@ -115,6 +119,8 @@ VTFIX-02G commit on `main`: MDI `ea103fe` (dashboard VT attribution visibility).
 
 VTFIX-02H commits on `main`: `a100be9` (dry-run script/tests/runbook),
 `5591d5e` (approved write mode).
+
+VTFIX-02I commit on `main`: `5b504e3` (dashboard 7-day quota trend table alignment).
 
 ### MDI-FABLE-01 external UI/UX review intake
 
@@ -220,6 +226,42 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02G VT Bulk Check MDI triage Not Applicable messaging | Accepted |
 | VTFIX-02H daily-history backfill dry-run tooling | Accepted |
 | VTFIX-02H-RUNTIME approved daily-history schema normalization | Accepted |
+| VTFIX-02I dashboard quota trend table column alignment | Accepted |
+
+**VTFIX-02I production deploy and visual smoke (2026-06-12 01:18 UTC):**
+
+Frontend-only deploy: `5b504e3` → `/var/www/html/tools/mdi/` via
+`rsync -a --delete`. No backend deploy; no VT Bulk deploy; `mdi-backend.service`
+**not** restarted; nginx **not** reloaded. Backup:
+`/var/www/html/tools/mdi.bak-20260612-011810/`. Bundles before:
+`index-UBWBOg5l.js`, `index-BoqbTN7t.css`. Bundles after:
+`index-9Cqf9ev9.js`, `index-DseIq5wp.css`.
+
+Root cause: numeric trend table headers were right-aligned while body cells for
+Total/MDI/VT Bulk were left-aligned (only Legacy used right-align via generic
+`.dashboard-table td:last-child`), producing a phantom-column appearance after
+VTFIX-02H-RUNTIME on-disk normalization exposed all five per-tool columns.
+
+Fix: always render five columns (Date, Total, MDI, VT Bulk, Legacy); use
+`table-layout: fixed` with shared `<colgroup>`; right-align all numeric header
+and body cells consistently.
+
+Production visual confirmation (read-only, headless Playwright with screenshots):
+**PASS** at `https://forgeforward.app/tools/mdi/` on 1280×800 and 1920×1080 for
+source tabs MDI / All VT Tools / VT Bulk Check. Five headers and five body
+columns per row; header/body column boxes align; numeric columns right-aligned; no
+phantom/unlabeled column; today row highlight preserved (`2026-06-12 (today)`);
+live quota cards visible; source-tab switching does not break layout; console
+errors none; no job/scan POSTs; no VT calls; quota unchanged (0/500); runtime
+metadata unchanged.
+
+Evidence:
+`/tmp/vtfix-02i-prod-smoke/1280x800-mdi.png`,
+`/tmp/vtfix-02i-prod-smoke/1280x800-all.png`,
+`/tmp/vtfix-02i-prod-smoke/1280x800-vt-bulk.png`,
+`/tmp/vtfix-02i-prod-smoke/1920x1080-mdi.png`,
+`/tmp/vtfix-02i-prod-smoke/1920x1080-all.png`,
+`/tmp/vtfix-02i-prod-smoke/1920x1080-vt-bulk.png`.
 
 **VTFIX-02H-RUNTIME approved normalization (2026-06-11 22:11 UTC):**
 
@@ -492,6 +534,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Dashboard history is metadata-focused | Acceptable |
 | Dashboard default source filter is **MDI**; operators must select **All VT Tools** to see shared VT Bulk usage | Acceptable — by design |
 | VT Bulk Check **Current** window may reflect in-memory/recovered MDI job shared metrics while MDI triage is Not Applicable | Acceptable — known |
+| Pre–VTFIX-02I: dashboard 7-day quota trend table header/body column misalignment | **Resolved** by VTFIX-02I (2026-06-12) |
 | Pre–VTFIX-02H-RUNTIME: legacy daily-history shapes on disk for dates before v2 forward writes | **Partially resolved** — five approved dates normalized on disk (2026-06-11); two manual-review dates remain legacy_int |
 | Pre–VTFIX-02F smoke: live `vt_usage.json` could undercount vs daily-history when VT Bulk regressed flock coordination | **Resolved** by VTFIX-02F — historical 1-vs-2 mismatch not hand-edited |
 | No tagged `vt_bulk_check` history until VTFIX-02B-tagged jobs append records | Acceptable — legacy lines remain under All VT Tools / Legacy |
@@ -538,6 +581,7 @@ rail; MDI-46 addressed only setup-mode layout cohesion and subtle visual polish.
 | VTFIX-02G | Dashboard attribution visibility, live quota cards, 7-day per-tool quota trend | **Closed** — merged, deployed, API-verified, visually confirmed (2026-06-11) |
 | VTFIX-02H | Historical daily-history metadata backfill dry-run | **Closed** — merged on `main` (`a100be9`, `5591d5e`); see [runbook](runbooks/vtfix-02h-backfill-dry-run.md) |
 | VTFIX-02H-RUNTIME | Approved high-confidence daily-history schema v2 normalization | **Closed** — production write completed and verified (2026-06-11 22:11 UTC) |
+| VTFIX-02I | Dashboard 7-day quota trend table column alignment | **Closed** — merged, deployed, visually confirmed (2026-06-12) |
 
 MDI-43 remains **documented backlog only — not started**.
 
