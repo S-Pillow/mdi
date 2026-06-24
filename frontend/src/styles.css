@@ -2045,6 +2045,14 @@ body {
 .badge-skip    { background: rgba(148,163,184,0.16); color: #CBD5E1; border-color: rgba(148,163,184,0.30); }
 .badge-info    { background: rgba(100,116,139,0.14); color: #94A3B8; border-color: rgba(100,116,139,0.28); }
 
+/* Hold-impact guidance badges (MDI-50C-A) — compact table/drawer labels */
+.badge-hi-critical { background: rgba(239,68,68,0.18);   color: #FCA5A5; border-color: rgba(239,68,68,0.35); }
+.badge-hi-high     { background: rgba(249,115,22,0.18);  color: #FDBA74; border-color: rgba(249,115,22,0.35); }
+.badge-hi-medium   { background: rgba(245,158,11,0.16);  color: #FCD34D; border-color: rgba(245,158,11,0.32); }
+.badge-hi-low      { background: rgba(34,197,94,0.14);   color: #86EFAC; border-color: rgba(34,197,94,0.28); }
+.badge-hi-none     { background: rgba(148,163,184,0.12); color: #94A3B8; border-color: rgba(148,163,184,0.25); }
+.badge-hi-unknown  { background: rgba(100,116,139,0.12); color: #94A3B8; border-color: rgba(100,116,139,0.24); }
+
 /* Structured error notices */
 .error-notice-list {
   display: flex;

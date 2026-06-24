@@ -167,6 +167,62 @@ function formatHoldImpactLevel(level) {
   return String(level).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+const HOLD_IMPACT_UNKNOWN_REASON =
+  'Cloudflare Radar rank impact is unavailable or unknown; do not use rank as hold-impact evidence.'
+
+const BUCKET_TO_HOLD_IMPACT_LEVEL = {
+  TOP_100: 'critical',
+  TOP_1K: 'critical',
+  TOP_5K: 'high',
+  TOP_10K: 'high',
+  TOP_100K: 'medium',
+  TOP_1M: 'low',
+  UNRANKED: 'none',
+  UNKNOWN: 'unknown',
+}
+
+const HOLD_IMPACT_REASON_BY_LEVEL = {
+  critical:
+    'Domain is highly ranked by Cloudflare Radar popularity data; review potential blast radius before any hold action.',
+  high:
+    'Domain is within a high-popularity Cloudflare Radar bucket; escalate or review blast radius before any hold action.',
+  medium:
+    'Domain has measurable Cloudflare Radar popularity; consider business or customer impact before hold action.',
+  low:
+    'Domain appears in a lower Cloudflare Radar popularity bucket; hold-impact risk appears lower but still requires analyst review.',
+  none:
+    'Domain is not ranked in the Cloudflare Radar popularity bucket used by MDI; no rank-based hold-impact warning.',
+  unknown: HOLD_IMPACT_UNKNOWN_REASON,
+}
+
+/** Display-only hold-impact resolution for table/drawer (MDI-50C-A). */
+function resolveHoldImpact(row) {
+  let level = row?.hold_impact_level ?? null
+  let reason = row?.hold_impact_reason ?? null
+
+  if (!level && row?.cloudflare_rank_bucket) {
+    level = BUCKET_TO_HOLD_IMPACT_LEVEL[row.cloudflare_rank_bucket] ?? 'unknown'
+  }
+  if (!level) {
+    level = 'unknown'
+  }
+  if (!reason) {
+    reason = HOLD_IMPACT_REASON_BY_LEVEL[level] ?? HOLD_IMPACT_UNKNOWN_REASON
+  }
+  return { level, reason }
+}
+
+function holdImpactBadgeClass(level) {
+  return {
+    critical: 'badge-hi-critical',
+    high: 'badge-hi-high',
+    medium: 'badge-hi-medium',
+    low: 'badge-hi-low',
+    none: 'badge-hi-none',
+    unknown: 'badge-hi-unknown',
+  }[level] ?? 'badge-hi-unknown'
+}
+
 const LIVE_ACTIVE_SET  = new Set(['active', 'redirect', 'forbidden'])
 const LIVE_NO_SET      = new Set(['not_found', 'gone', 'dns_failure', 'connection_refused', 'timeout'])
 const RECENT_AGE_SET   = new Set(['very_new', 'new'])
@@ -2390,6 +2446,7 @@ function ResultsTable({
             <th scope="col" style={{ minWidth: 140 }}>Triage Bucket</th>
             <th scope="col">Confidence</th>
             <th scope="col" style={{ minWidth: 130 }}>Recommended Action</th>
+            <th scope="col" style={{ minWidth: 88 }}>Hold Impact</th>
             <th scope="col">VT Ratio</th>
             <th scope="col">Freshness</th>
             <th scope="col">Live</th>
@@ -2450,6 +2507,19 @@ function ResultsTable({
                 </td>
                 <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   {formatRecommendedAction(r.recommended_action)}
+                </td>
+                <td>
+                  {(() => {
+                    const hi = resolveHoldImpact(r)
+                    return (
+                      <span
+                        className={`badge ${holdImpactBadgeClass(hi.level)}`}
+                        title="Popularity-based hold-impact guidance only"
+                      >
+                        {formatHoldImpactLevel(hi.level)}
+                      </span>
+                    )
+                  })()}
                 </td>
                 <td style={{ fontFamily: 'Menlo,Consolas,monospace', color: (r.vt_hits ?? 0) > 0 ? '#FCA5A5' : 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                   {formatVtRatio(r)}
@@ -2972,13 +3042,21 @@ function DetailDrawer({
         {/* 5c. HOLD IMPACT GUIDANCE */}
         <div className="detail-section">
           <div className="detail-section-label">Hold Impact Guidance</div>
-          <div className="detail-kv-grid">
-            <span>Level</span>
-            <span>{formatHoldImpactLevel(r.hold_impact_level)}</span>
-            {r.hold_impact_reason && (
-              <><span>Guidance</span><span>{r.hold_impact_reason}</span></>
-            )}
-          </div>
+          {(() => {
+            const hi = resolveHoldImpact(r)
+            return (
+              <div className="detail-kv-grid">
+                <span>Level</span>
+                <span>
+                  <span className={`badge ${holdImpactBadgeClass(hi.level)}`}>
+                    {formatHoldImpactLevel(hi.level)}
+                  </span>
+                </span>
+                <span>Guidance</span>
+                <span>{hi.reason}</span>
+              </div>
+            )
+          })()}
           <p className="detail-empty-note">
             Hold impact guidance is based on Cloudflare Radar popularity context only.
             It does not change VT verdicts and does not perform enforcement.
