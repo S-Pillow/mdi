@@ -96,7 +96,7 @@ const DEFAULT_SETTINGS = {
   stale_threshold_days: 7,
   auto_rescan_stale: false,
   max_auto_rescans: 3,
-  cloudflare_rank_lookup_enabled: false,
+  cloudflare_rank_lookup_enabled: true,
 }
 
 function resetSettingsToDefaults(setters) {
@@ -1323,8 +1323,8 @@ function CollapsibleSettingsPanel({
             </label>
             <p style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4 }}>
               Popularity / blast-radius context from Cloudflare 1.1.1.1 DNS data only.
-              Does not change VT verdict or triage. Does not consume VT quota. Default off.
-              Hold-impact guidance is planned for a later release (MDI-50C).
+              Does not change VT verdict or triage. Does not consume VT quota.
+              Operators may turn this off when needed.
             </p>
           </div>
         </div>
