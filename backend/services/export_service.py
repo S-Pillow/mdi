@@ -58,6 +58,8 @@ CSV_HEADERS: List[str] = [
     "cloudflare_rank_source",
     "cloudflare_rank_checked_at",
     "cloudflare_rank_error",
+    "hold_impact_level",
+    "hold_impact_reason",
 ]
 
 _INJECTION_FIRST_CHARS = frozenset("=+-@")
@@ -233,6 +235,8 @@ def _result_csv_row(result: MdiResultItem) -> List[str]:
         sanitize_csv_cell(result.cloudflare_rank_source),
         sanitize_csv_cell(result.cloudflare_rank_checked_at),
         sanitize_csv_cell(result.cloudflare_rank_error),
+        sanitize_csv_cell(result.hold_impact_level),
+        sanitize_csv_cell(result.hold_impact_reason),
     ]
 
 
@@ -343,6 +347,8 @@ def _result_json(result: MdiResultItem) -> Dict[str, Any]:
             else None
         ),
         "cloudflare_rank_error": result.cloudflare_rank_error,
+        "hold_impact_level": result.hold_impact_level,
+        "hold_impact_reason": result.hold_impact_reason,
     }
 
 

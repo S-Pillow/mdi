@@ -162,6 +162,11 @@ function formatCloudflareRank(row) {
   return '—'
 }
 
+function formatHoldImpactLevel(level) {
+  if (!level) return 'Unknown'
+  return String(level).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 const LIVE_ACTIVE_SET  = new Set(['active', 'redirect', 'forbidden'])
 const LIVE_NO_SET      = new Set(['not_found', 'gone', 'dns_failure', 'connection_refused', 'timeout'])
 const RECENT_AGE_SET   = new Set(['very_new', 'new'])
@@ -2961,6 +2966,22 @@ function DetailDrawer({
           </div>
           <p className="detail-empty-note">
             DNS popularity context only — not maliciousness evidence. Does not change triage.
+          </p>
+        </div>
+
+        {/* 5c. HOLD IMPACT GUIDANCE */}
+        <div className="detail-section">
+          <div className="detail-section-label">Hold Impact Guidance</div>
+          <div className="detail-kv-grid">
+            <span>Level</span>
+            <span>{formatHoldImpactLevel(r.hold_impact_level)}</span>
+            {r.hold_impact_reason && (
+              <><span>Guidance</span><span>{r.hold_impact_reason}</span></>
+            )}
+          </div>
+          <p className="detail-empty-note">
+            Hold impact guidance is based on Cloudflare Radar popularity context only.
+            It does not change VT verdicts and does not perform enforcement.
           </p>
         </div>
 

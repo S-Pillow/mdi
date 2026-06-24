@@ -439,6 +439,16 @@ class MdiResultItem(BaseModel):
         description="[display, audit] Sanitized Cloudflare lookup error code, if any.",
     )
 
+    # ── Hold-impact guidance (MDI-50C) — analyst context only ─────────────────
+    hold_impact_level: Optional[str] = Field(
+        None,
+        description="[display] Derived hold-impact level from Cloudflare rank bucket.",
+    )
+    hold_impact_reason: Optional[str] = Field(
+        None,
+        description="[display] Operator-facing hold-impact guidance text.",
+    )
+
     # ── Errors ───────────────────────────────────────────────────────────────
     errors: List[MdiError] = Field(
         default_factory=list,

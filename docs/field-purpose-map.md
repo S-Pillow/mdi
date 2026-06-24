@@ -83,7 +83,7 @@ UI control / feature status (MDI-32):
 
 ### Cloudflare Radar rank (MDI-50B)
 
-Popularity / blast-radius context from Cloudflare Radar 1.1.1.1 DNS data. **Not maliciousness evidence.** Does not change VT flagged logic, `triage_bucket`, or `recommended_action`. Does not consume VT quota. Default off (`cloudflare_rank_lookup_enabled=false`). Hold-impact guidance is **MDI-50C** (not implemented here).
+Popularity / blast-radius context from Cloudflare Radar 1.1.1.1 DNS data. **Not maliciousness evidence.** Does not change VT flagged logic, `triage_bucket`, or `recommended_action`. Does not consume VT quota. Default off (`cloudflare_rank_lookup_enabled=false`).
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
@@ -96,6 +96,25 @@ Popularity / blast-radius context from Cloudflare Radar 1.1.1.1 DNS data. **Not 
 | `cloudflare_rank_error` | `Optional[str]` | display, audit | Sanitized error code (`auth_failed`, `rate_limited`, …). |
 
 Job option: `cloudflare_rank_lookup_enabled` (default `false`). Token: `CLOUDFLARE_RADAR_API_TOKEN` in `/etc/dns-tool/secrets.env` (server-side only).
+
+### Hold-impact guidance (MDI-50C)
+
+Analyst guidance derived from `cloudflare_rank_bucket` only. **Not maliciousness evidence.** Does not change VT flagged logic, `triage_bucket`, `recommended_action`, or enforcement. Does not trigger automated holds, registrar actions, or Salesforce workflows. No additional Cloudflare API calls.
+
+| `cloudflare_rank_bucket` | `hold_impact_level` |
+|---|---|
+| `TOP_100`, `TOP_1K` | `critical` |
+| `TOP_5K`, `TOP_10K` | `high` |
+| `TOP_100K` | `medium` |
+| `TOP_1M` | `low` |
+| `UNRANKED` | `none` |
+| `UNKNOWN` | `unknown` |
+| `null` / unavailable / lookup disabled | `unknown` |
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `hold_impact_level` | `Optional[str]` | display | `critical`, `high`, `medium`, `low`, `none`, `unknown`. |
+| `hold_impact_reason` | `Optional[str]` | display | Operator-facing guidance text for the level. |
 
 ### Triage
 

@@ -32,6 +32,9 @@ Processing flow for each eligible item:
      a. Only when cloudflare_rank_lookup_enabled and token configured.
      b. Skip held/skipped and non-DONE items.
      c. Non-fatal; never affects VT triage or quota.
+  9. Post-job hold-impact guidance (MDI-50C): derive from stored rank bucket.
+     a. No Cloudflare HTTP; uses cloudflare_rank_bucket only.
+     b. Does not change triage, VT verdicts, or recommended_action.
 
 On completion, append a metadata-only record to the usage JSONL.
 Usage JSONL records NEVER contain raw domains, URLs, or item-level result data.
@@ -63,6 +66,7 @@ from services import (
     cloudflare_radar,
     dashboard,
     domain_enrichment,
+    hold_impact,
     job_persistence,
     job_store,
     live_check,
@@ -141,6 +145,7 @@ async def process_job(
         # MDI-12: live HTTP check for flagged/suspicious items after VT
         await _live_check_items(job)
         await _cloudflare_rank_items(job)
+        _apply_hold_impact_guidance(job)
     except Exception as exc:  # noqa: BLE001
         logger.exception("process_job: unexpected error in job %s: %s", job_id, exc)
         job.status = "error"
@@ -605,6 +610,21 @@ async def _cloudflare_rank_items(job: job_store.InMemoryJob) -> None:
 
         job.results[normalized] = result.model_copy(
             update=cloudflare_radar.result_to_item_update(cf_result),
+        )
+
+
+def _apply_hold_impact_guidance(job: job_store.InMemoryJob) -> None:
+    """
+    Derive hold-impact guidance from stored Cloudflare rank bucket (MDI-50C).
+
+    Runs for every item; no HTTP. Does not change triage or enforcement.
+    """
+    for normalized in job.item_order:
+        result = job.results.get(normalized)
+        if result is None:
+            continue
+        job.results[normalized] = result.model_copy(
+            update=hold_impact.hold_impact_item_update(result.cloudflare_rank_bucket),
         )
 
 
