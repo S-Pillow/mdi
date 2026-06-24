@@ -1,7 +1,7 @@
 # MDI-50B — Cloudflare Radar Rank Lookup Live Validation + Integration Plan
 
-**Status:** Live validation **blocked** — token not on server filesystem (rerun 2026-06-24)  
-**Date:** 2026-06-24 (initial), 2026-06-24 (rerun)  
+**Status:** Live validation **complete** (2026-06-24T07:42:36Z UTC)  
+**Date:** 2026-06-24 (initial blocked), 2026-06-24 (rerun blocked), 2026-06-24 (live success)  
 **Parent:** [MDI-50A Cloudflare Radar API Contract](./mdi-50a-cloudflare-radar-api-contract.md)  
 **Main baseline:** `a8bf7dc429120d05177eb6087710c8a9fc990fc5`
 
@@ -9,25 +9,19 @@
 
 ## 1. Summary verdict
 
-**LIVE VALIDATION BLOCKED — TOKEN NOT ON SERVER (RERUN)**
+**LIVE VALIDATION COMPLETE**
 
-A validation rerun was performed after operator reported token installation. On the validation host, `CLOUDFLARE_RADAR_API_TOKEN` is **still not present** in `/etc/dns-tool/secrets.env`. No Cloudflare API calls were made in either attempt. Token was not exposed, printed, or committed.
+After operator saved `CLOUDFLARE_RADAR_API_TOKEN` to `/etc/dns-tool/secrets.env`, three Cloudflare Radar domain lookups succeeded. Token was not exposed, printed, or committed.
 
-**Rerun findings (2026-06-24):**
+| Attempt | Date | Calls | Outcome |
+|---------|------|-------|---------|
+| Initial | 2026-06-24 | 0 | Token missing |
+| Rerun (unsaved token) | 2026-06-24 | 0 | Token not on disk |
+| **Live success** | 2026-06-24T07:42:36Z | **3** | Auth OK; response shape confirmed |
 
-| Check | Result |
-|-------|--------|
-| `/etc/dns-tool/secrets.env` exists | Yes (`640`, `root:dns-tool`) |
-| File line count on disk | **1** (not updated since 2026-05-24) |
-| Variable names on disk (keys only) | `VT_API_KEY` only — **no** `CLOUDFLARE_RADAR_API_TOKEN` |
-| Token loadable in subshell without echo | **No** (empty after sourcing secrets file) |
-| Cloudflare API calls (rerun) | **0** |
+**MDI-50B implementation readiness:** **Ready to proceed** — endpoint, auth, and normalization rules validated live with one MDI-50A deviation (unranked domains may return HTTP 200 with bucket `>N` instead of 404).
 
-**Likely cause:** Token may exist in an unsaved editor buffer but has **not been written** to the server path `/etc/dns-tool/secrets.env`. Operator must save the file on the server (requires root / `dns-tool` group write access).
-
-**MDI-50B implementation readiness:** **Not ready** — live response shape still unvalidated. Proceed with implementation only after a successful rerun with token on disk.
-
-**Implementation plan:** Retained below from MDI-50A + Cloudflare documentation.
+**Implementation plan:** Retained and updated in §5–§8 based on live results.
 
 ---
 
@@ -40,10 +34,10 @@ A validation rerun was performed after operator reported token installation. On 
 | Token committed | No |
 | Token in docs | No |
 | Env file contents printed | No |
-| Variable name checked only | Yes — `CLOUDFLARE_RADAR_API_TOKEN` **missing** (initial + rerun) |
+| Variable name checked only | Yes — `CLOUDFLARE_RADAR_API_TOKEN` **present** (live run) |
 | `/etc/dns-tool/secrets.env` exists | Yes (mode `640`, `root:dns-tool`) |
-| Rerun date | 2026-06-24 |
-| Keys found on disk (rerun) | `VT_API_KEY` only |
+| Token loadable without echo | **Yes** |
+| Live validation timestamp | 2026-06-24T07:42:36Z UTC |
 
 ### Operator installation required (server-side only)
 
@@ -72,59 +66,66 @@ Then re-run validation with the same three domains before MDI-50B implementation
 
 ---
 
-## 3. Live validation (not performed — initial and rerun)
+## 3. Live validation results
 
-### Planned domains (unchanged)
+### Endpoint
+
+```
+GET https://api.cloudflare.com/client/v4/radar/ranking/domain/{domain}?rankingType=POPULAR&format=JSON
+Authorization: Bearer <CLOUDFLARE_RADAR_API_TOKEN>
+```
+
+### Domains tested
 
 | # | Domain | Purpose |
 |---|--------|---------|
 | 1 | `google.com` | High rank / top bucket |
-| 2 | `example.com` | Well-known; rank vs bucket vs 404 |
-| 3 | `definitely-not-real-mdi-radar-validation-20260624.example` | Unranked / no-data behavior |
-
-### Planned endpoint
-
-```
-GET https://api.cloudflare.com/client/v4/radar/ranking/domain/{domain}
-Authorization: Bearer <CLOUDFLARE_RADAR_API_TOKEN>
-```
-
-Query: `rankingType=POPULAR` (default), `format=JSON`.
+| 2 | `example.com` | Well-known; bucket without exact rank |
+| 3 | `definitely-not-real-mdi-radar-validation-20260624.example` | Low/unranked behavior |
 
 ### API calls made
 
 | Attempt | Calls |
 |---------|-------|
-| Initial (2026-06-24) | **0** — token missing |
-| Rerun (2026-06-24) | **0** — token still not on server filesystem |
-| **Total** | **0** |
+| Initial / blocked reruns | 0 |
+| **Live success (2026-06-24T07:42:36Z)** | **3** |
+| Retries | 0 |
+| **Total live** | **3** |
 
 ### Sanitized result table
 
-| Domain | HTTP | success | rank | bucket | MDI status | Notes |
-|--------|------|---------|------|--------|------------|-------|
-| `google.com` | — | — | — | — | — | Not called |
-| `example.com` | — | — | — | — | — | Not called |
-| `definitely-not-real-mdi-radar-validation-20260624.example` | — | — | — | — | — | Not called |
+| Domain | HTTP | success | details_0 | rank | bucket | dateRange | Normalized bucket | MDI status | Notes |
+|--------|------|---------|-----------|------|--------|-----------|-------------------|------------|-------|
+| `google.com` | 200 | true | yes | **1** | `"200"` | yes | `TOP_100` | **ranked** | Rank + bucket both returned; rank drives normalization |
+| `example.com` | 200 | true | yes | — | `"200"` | yes | `TOP_1K` | **ranked** | Bucket only (not in ordered top 100) |
+| `definitely-not-real-mdi-radar-validation-20260624.example` | 200 | true | yes | — | `">200000"` | yes | `UNRANKED` | **unranked** | Not 404; inequality bucket means beyond top 200K |
+
+**Unexpected keys:** None on top-level, `result`, or `details_0` for all three calls.
+
+**Errors:** None. No 401/403/429 observed.
 
 ---
 
-## 4. Response-shape findings (documentation baseline — unvalidated live)
+## 4. Response-shape findings (live confirmed 2026-06-24)
 
-From MDI-50A and [Cloudflare Ranking API docs](https://developers.cloudflare.com/api/resources/radar/subresources/ranking/) (pending live confirm):
+| Finding | Expected (MDI-50A / docs) | Live confirmed |
+|---------|---------------------------|----------------|
+| Endpoint path | `/client/v4/radar/ranking/domain/{domain}` | **Yes** |
+| Auth Account → Radar → Read | Bearer token | **Yes** — all 3 calls HTTP 200 |
+| Top-level shape | `success`, `errors[]`, `result` | **Yes** — no unexpected top keys |
+| Result body | `result.details_0`, `result.meta` | **Yes** |
+| `details_0.rank` | Optional number; top ~100 | **Yes** — `google.com` rank `1`; absent on others |
+| `details_0.bucket` | Optional string | **Yes** — numeric strings (`"200"`) and inequality (`">200000"`) |
+| `details_0.categories` | Often empty outside top 100 | Not inspected (ignore for MDI) |
+| `meta.dateRange` | `startTime`, `endTime` | **Yes** — present on all 3 |
+| Unranked domain | HTTP 404 / error **7003** | **Deviation** — synthetic domain returned **200** with bucket `">200000"` |
+| Rate limit / auth | 429 / 401 | **Not observed** |
 
-| Finding | Expected (docs) | Live confirmed |
-|---------|-----------------|----------------|
-| Endpoint path | `/client/v4/radar/ranking/domain/{domain}` | Pending |
-| Auth | Account → Radar → Read Bearer token | Pending |
-| Top-level shape | `success`, `errors[]`, `result` | Pending |
-| Result body | `result.details_0`, `result.meta` | Pending |
-| `details_0.rank` | Optional number; top ~100 | Pending |
-| `details_0.bucket` | Optional string (e.g. `"2000"`, `"1000000"`) | Pending |
-| `details_0.categories` | Often empty outside top 100 — **ignore for MDI** | Pending |
-| `meta.dateRange` | `startTime`, `endTime` — use as rank as-of window | Pending |
-| Unranked domain | HTTP 404, error code **7003** (Radar error codes doc) | Pending |
-| Rate limit | HTTP 429, error 1015 | Pending |
+### Deviations from MDI-50A assumptions
+
+1. **Unranked ≠ always 404.** Domains outside tracked buckets may return `success: true` with `bucket: ">200000"` (beyond top 200K). MDI must treat inequality buckets as **UNRANKED**, not API error.
+2. **Rank and bucket can coexist.** `google.com` returned `rank: 1` and `bucket: "200"`. Prefer **exact rank** when `1 ≤ rank ≤ 100` for normalization.
+3. **Bucket `"200"`** means top-200 bucket (not rank 200). Map via numeric parse to `TOP_1K` when rank absent.
 
 ---
 
@@ -150,7 +151,7 @@ From MDI-50A and [Cloudflare Ranking API docs](https://developers.cloudflare.com
 
 `TOP_100` | `TOP_1K` | `TOP_5K` | `TOP_10K` | `TOP_100K` | `TOP_1M` | `UNRANKED` | `UNKNOWN`
 
-### Mapping algorithm (implement in MDI-50B)
+### Mapping algorithm (validated live — implement in MDI-50B)
 
 ```
 function normalize_bucket(rank, raw_bucket, http_status, cf_success, errors):
@@ -159,36 +160,48 @@ function normalize_bucket(rank, raw_bucket, http_status, cf_success, errors):
   if 5xx or timeout: return UNKNOWN, error=api_unavailable|timeout
   if malformed JSON: return UNKNOWN, error=invalid_response
 
-  if http 404 or cf error 7003 or success with no rank/bucket:
+  if http 404 or cf error 7003:
     return UNRANKED, error=null
 
   if rank is int and 1 <= rank <= 100:
     return TOP_100
 
+  if raw_bucket is string matching /^>(\d+)$/:
+    return UNRANKED, error=null   # live: ">200000" = beyond tracked buckets
+
   if raw_bucket present:
-    n = parse_int(raw_bucket)  # API docs show string e.g. "2000"
+    n = parse_int(raw_bucket)     # e.g. "200", "2000", "1000000"
     if n <= 1000: return TOP_1K
     if n <= 5000: return TOP_5K
     if n <= 10000: return TOP_10K
     if n <= 100000: return TOP_100K
     if n <= 1000000: return TOP_1M
 
-  if rank present but > 100 and no bucket:
-    return UNKNOWN, error=ambiguous_rank  # live validation must confirm
+  if success and no rank and no bucket:
+    return UNRANKED, error=null
 
   return UNKNOWN, error=no_rank_signal
 ```
+
+**Live fixtures for tests** (sanitized):
+
+| Fixture | rank | raw_bucket | normalized |
+|---------|------|------------|------------|
+| `google.com` | 1 | `"200"` | `TOP_100` |
+| `example.com` | null | `"200"` | `TOP_1K` |
+| synthetic unranked | null | `">200000"` | `UNRANKED` |
 
 **Tightest bucket wins:** store both `cloudflare_rank_raw_bucket` and normalized `cloudflare_rank_bucket`.
 
 ---
 
-## 6. Failure behavior (proposed — confirm on live re-run)
+## 6. Failure behavior (live-informed)
 
 | Condition | `cloudflare_rank_available` | `cloudflare_rank_bucket` | `cloudflare_rank_error` |
 |-----------|----------------------------|--------------------------|-------------------------|
-| 200 + rank/bucket | true | normalized | null |
-| 404 / 7003 / no data | false | UNRANKED | null |
+| 200 + rank and/or numeric bucket | true | normalized | null |
+| 200 + bucket `>N` | false | UNRANKED | null |
+| 404 / 7003 | false | UNRANKED | null |
 | 401 / 403 | false | UNKNOWN | `auth_failed` |
 | 429 | false | UNKNOWN | `rate_limited` |
 | 5xx | false | UNKNOWN | `api_unavailable` |
@@ -276,16 +289,17 @@ Persist in job results and exports as optional columns / nested JSON.
 
 ### 8.7 Tests required (MDI-50B implementation ticket)
 
-1. Mock 200 with rank only → `TOP_100`
-2. Mock 200 with bucket `"10000"` → `TOP_10K`
-3. Mock 404 / error 7003 → `UNRANKED`, no error string
-4. Mock 401 → `UNKNOWN`, `auth_failed`
-5. Mock 429 → `UNKNOWN`, `rate_limited`; cap stops further calls
-6. Feature disabled → no HTTP calls (assert mock not called)
-7. Missing token → no HTTP calls, `not_configured`
-8. Cache hit → no second HTTP call within TTL
-9. Job completion succeeds when Cloudflare fails
-10. VT triage fields unchanged (regression)
+1. Mock 200 with rank `1` + bucket `"200"` → `TOP_100` (live `google.com` shape)
+2. Mock 200 with bucket `"200"` only → `TOP_1K` (live `example.com` shape)
+3. Mock 200 with bucket `">200000"` → `UNRANKED` (live synthetic shape)
+4. Mock 404 / error 7003 → `UNRANKED`, no error string
+5. Mock 401 → `UNKNOWN`, `auth_failed`
+6. Mock 429 → `UNKNOWN`, `rate_limited`; cap stops further calls
+7. Feature disabled → no HTTP calls (assert mock not called)
+8. Missing token → no HTTP calls, `not_configured`
+9. Cache hit → no second HTTP call within TTL
+10. Job completion succeeds when Cloudflare fails
+11. VT triage fields unchanged (regression)
 
 ### 8.8 Live smoke (MDI-50B implementation ticket, post-deploy)
 
@@ -303,26 +317,25 @@ Persist in job results and exports as optional columns / nested JSON.
 
 | # | Question | Status |
 |---|----------|--------|
-| 1 | Account → Radar → Read works? | **Pending** (no token) |
-| 2 | Path `/client/v4/radar/ranking/domain/{domain}` exact? | Docs yes; live pending |
-| 3 | `google.com` rank vs bucket? | Pending |
-| 4 | `example.com` behavior? | Pending |
-| 5 | Unranked domain behavior? | Pending |
-| 6 | 404 vs 7003 vs empty? | Docs say 7003/404; live pending |
-| 7 | Bucket numeric strings? | Docs say string; live pending |
-| 8 | `meta.dateRange` useful? | Expected yes; live pending |
-| 9 | Response stable for implementation? | Likely yes; live pending |
-| 10 | Rate-limit/auth issues? | None observed (no calls) |
+| 1 | Account → Radar → Read works? | **Yes** — 3/3 HTTP 200 |
+| 2 | Path exact? | **Yes** |
+| 3 | `google.com`? | **rank=1**, bucket=`"200"` → `TOP_100` |
+| 4 | `example.com`? | **rank absent**, bucket=`"200"` → `TOP_1K` |
+| 5 | Unranked synthetic domain? | **HTTP 200**, bucket=`">200000"` → `UNRANKED` |
+| 6 | 404 vs 7003 vs other? | **Not 404** for synthetic; inequality bucket used |
+| 7 | Bucket format? | **Numeric strings** and **`>N` inequality labels** |
+| 8 | `meta.dateRange`? | **Yes** on all 3 |
+| 9 | Stable for MDI-50B? | **Yes** with `>N` handling added |
+| 10 | Rate-limit/auth issues? | **None** in this run |
 
 ---
 
 ## 10. Recommended next step
 
-1. **Operator:** **Save** `CLOUDFLARE_RADAR_API_TOKEN` to `/etc/dns-tool/secrets.env` **on the server** (not only in IDE buffer). Use root/sudo; keep mode `640`, group `dns-tool`.
-2. **Verify** key name appears via `awk -F= '/^[A-Za-z0-9_]+=/ {print $1}' /etc/dns-tool/secrets.env` (must list `CLOUDFLARE_RADAR_API_TOKEN`).
-3. **Re-run MDI-50B live validation** — max 3 API calls; update §3–§6 with sanitized live results.
-4. **Approve MDI-50B implementation** only after live validation passes.
-5. Implement MDI-50B per §8; deploy; live smoke; then plan MDI-50C.
+1. **Approve MDI-50B implementation** using live fixtures in §5 and §8.7.
+2. Implement `backend/services/cloudflare_radar.py` with `>N` bucket handling.
+3. Merge docs branch when ready; implement on feature branch; do **not** start MDI-50C until MDI-50B deployed.
+4. Post-deploy live smoke: same 3 domains, setting enabled, confirm no VT quota change.
 
 ---
 
