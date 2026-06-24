@@ -296,7 +296,7 @@ def _flagged_decision(inp: TriageInput, is_suspicious: bool) -> TriageDecision:
         return TriageDecision(
             triage_bucket=bucket,
             triage_confidence=TriageConfidence.HIGH,
-            recommended_action=RecommendedAction.INVESTIGATE,
+            recommended_action=RecommendedAction.INVESTIGATE_HOLD,
             evidence_status=evidence,
             triage_reason=reason_wrap(inp, _live_recent_sub(inp)),
         )
@@ -306,7 +306,7 @@ def _flagged_decision(inp: TriageInput, is_suspicious: bool) -> TriageDecision:
         return TriageDecision(
             triage_bucket=bucket,
             triage_confidence=TriageConfidence.HIGH,
-            recommended_action=RecommendedAction.INVESTIGATE,
+            recommended_action=RecommendedAction.INVESTIGATE_HOLD,
             evidence_status=evidence,
             triage_reason=reason_wrap(inp, _live_sub(inp)),
         )
@@ -317,7 +317,7 @@ def _flagged_decision(inp: TriageInput, is_suspicious: bool) -> TriageDecision:
         return TriageDecision(
             triage_bucket=bucket,
             triage_confidence=conf,
-            recommended_action=RecommendedAction.REVIEW_FOR_ACTION,
+            recommended_action=RecommendedAction.INVESTIGATE_HOLD,
             evidence_status=evidence,
             triage_reason=reason_wrap(inp, _recent_sub(inp)),
         )
@@ -327,7 +327,7 @@ def _flagged_decision(inp: TriageInput, is_suspicious: bool) -> TriageDecision:
         return TriageDecision(
             triage_bucket=bucket,
             triage_confidence=TriageConfidence.MEDIUM,
-            recommended_action=RecommendedAction.REFRESH_REPORT,
+            recommended_action=RecommendedAction.REQUEST_NEW_SCAN,
             evidence_status=evidence,
             triage_reason=reason_wrap(inp, _stale_sub(inp)),
         )
@@ -347,7 +347,7 @@ def _flagged_decision(inp: TriageInput, is_suspicious: bool) -> TriageDecision:
         return TriageDecision(
             triage_bucket=bucket,
             triage_confidence=TriageConfidence.MEDIUM,
-            recommended_action=RecommendedAction.NO_ACTION_BASED_ON_VT,
+            recommended_action=RecommendedAction.VERIFY_INVESTIGATE,
             evidence_status=evidence,
             triage_reason=reason_wrap(inp, _no_live_sub(inp)),
         )
@@ -415,7 +415,7 @@ def decide(inp: TriageInput) -> TriageDecision:
             return TriageDecision(
                 triage_bucket=TriageBucket.CLEAN,
                 triage_confidence=TriageConfidence.MEDIUM,
-                recommended_action=RecommendedAction.REFRESH_REPORT,
+                recommended_action=RecommendedAction.REQUEST_NEW_SCAN,
                 evidence_status=EvidenceStatus.COMPLETE,
                 triage_reason=_clean_sub(inp),
             )

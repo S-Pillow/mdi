@@ -627,10 +627,11 @@ These dimensions are **independent**. A domain can be recently registered AND ha
 
 | Value | When used |
 |---|---|
-| `review_for_action` | Flagged + recently-registered domain; review before actioning |
+| `investigate_hold` | Flagged + active/recent; investigate and review hold options (analyst guidance only) |
+| `review_for_action` | Legacy; flagged + recently-registered domain |
 | `verify_investigate` | Ambiguous signals (unknown age/live/freshness); verify then investigate |
-| `refresh_report` | VT report is STALE; refresh evidence before actioning |
-| `request_new_scan` | VT report is VERY_STALE; request a new VT scan |
+| `refresh_report` | Legacy; VT report is STALE |
+| `request_new_scan` | VT report is STALE or VERY_STALE; request a new VT scan |
 | `retry_lookup` | Processing error or quota block; retry when resources allow |
 | `no_action_based_on_vt` | VT clean (FRESH), or flagged but domain appears down |
 
@@ -642,16 +643,16 @@ Legacy values (`investigate`, `clear`, `manual_review`, `none`, etc.) are **pres
 |---|---|---|---|
 | 1 | `domain_hold.has_hold == True` | HELD | ACTION_ALREADY_TAKEN |
 | 2 | `processing_status == ERROR` or errors non-empty | ERROR | RETRY_LOOKUP |
-| 3 | Flagged + ACTIVE + Recent | MALICIOUS | INVESTIGATE |
-| 4 | Flagged + ACTIVE | MALICIOUS | INVESTIGATE |
-| 5 | Flagged + Recent | MALICIOUS | REVIEW_FOR_ACTION |
-| 6 | Flagged + STALE | MALICIOUS | REFRESH_REPORT |
+| 3 | Flagged + ACTIVE + Recent | MALICIOUS | INVESTIGATE_HOLD |
+| 4 | Flagged + ACTIVE | MALICIOUS | INVESTIGATE_HOLD |
+| 5 | Flagged + Recent | MALICIOUS | INVESTIGATE_HOLD |
+| 6 | Flagged + STALE | MALICIOUS | REQUEST_NEW_SCAN |
 | 7 | Flagged + VERY_STALE | MALICIOUS | REQUEST_NEW_SCAN |
-| 8 | Flagged + No-Live | MALICIOUS | NO_ACTION_BASED_ON_VT |
+| 8 | Flagged + No-Live | MALICIOUS | VERIFY_INVESTIGATE |
 | 9 | Flagged (catch-all) | MALICIOUS | VERIFY_INVESTIGATE |
 | 10 | Suspicious (same sub-rules 3–9) | SUSPICIOUS | *(mirrors malicious)* |
 | 11 | Clean + FRESH | CLEAN | NO_ACTION_BASED_ON_VT |
-| 12 | Clean + STALE | CLEAN | REFRESH_REPORT |
+| 12 | Clean + STALE | CLEAN | REQUEST_NEW_SCAN |
 | 13 | Clean + VERY_STALE | CLEAN | REQUEST_NEW_SCAN |
 | 14 | Clean + UNKNOWN freshness | CLEAN | VERIFY_INVESTIGATE |
 | 15 | No engines, or PENDING | PENDING | RETRY_LOOKUP |
@@ -791,7 +792,7 @@ After MDI-11: `age_bucket` is populated from RDAP `created_at` for all
 paste/text inputs that successfully resolve via RDAP or WHOIS.
 
 This activates the "Flagged + Recent" triage rule in `triage_rules.py`:
-a freshly registered domain flagged by VT now routes to `REVIEW_FOR_ACTION`
+a freshly registered domain flagged by VT now routes to `INVESTIGATE_HOLD`
 instead of the catch-all `VERIFY_INVESTIGATE`.
 
 ### Estimate / runtime update (MDI-11 / MDI-11A)

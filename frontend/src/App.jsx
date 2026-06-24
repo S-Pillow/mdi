@@ -125,6 +125,24 @@ function nv(value, fallback = '—') {
   return value == null || value === '' ? fallback : value
 }
 
+const RECOMMENDED_ACTION_LABELS = {
+  investigate_hold: 'Investigate / Hold Review',
+  action_already_taken: 'Action Already Taken',
+  retry_lookup: 'Retry Lookup',
+  verify_investigate: 'Verify / Investigate',
+  request_new_scan: 'Request New Scan',
+  no_action_based_on_vt: 'No Action Based on VT',
+  review_for_action: 'Review for Action',
+  refresh_report: 'Refresh Report',
+}
+
+function formatRecommendedAction(value) {
+  if (!value) return '—'
+  const key = String(value).toLowerCase()
+  if (RECOMMENDED_ACTION_LABELS[key]) return RECOMMENDED_ACTION_LABELS[key]
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 const LIVE_ACTIVE_SET  = new Set(['active', 'redirect', 'forbidden'])
 const LIVE_NO_SET      = new Set(['not_found', 'gone', 'dns_failure', 'connection_refused', 'timeout'])
 const RECENT_AGE_SET   = new Set(['very_new', 'new'])
@@ -1806,7 +1824,7 @@ function UploadPreviewResultsSection({ preview, error }) {
                     <td style={{ padding: '4px 8px', color: '#818cf8' }}>{r.domain_hold?.hold_types?.join(', ') || '—'}</td>
                     <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{r.registrar ?? '—'}</td>
                     <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{formatDate(r.created_at)}</td>
-                    <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{r.recommended_action ?? '—'}</td>
+                    <td style={{ padding: '4px 8px', color: 'var(--text-muted)' }}>{formatRecommendedAction(r.recommended_action)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2386,7 +2404,7 @@ function ResultsTable({
                   </span>
                 </td>
                 <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {r.recommended_action ? r.recommended_action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—'}
+                  {formatRecommendedAction(r.recommended_action)}
                 </td>
                 <td style={{ fontFamily: 'Menlo,Consolas,monospace', color: (r.vt_hits ?? 0) > 0 ? '#FCA5A5' : 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                   {formatVtRatio(r)}

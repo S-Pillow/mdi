@@ -134,10 +134,11 @@ class RecommendedAction(str, Enum):
     Used for operator decision support, not auto-execution.
 
     MDI-10 additions (new PRD-aligned values):
-      REVIEW_FOR_ACTION    — flagged but requires operator review before actioning
+      INVESTIGATE_HOLD     — flagged active/recent; analyst should investigate and review hold options
+      REVIEW_FOR_ACTION    — flagged but requires operator review before actioning (legacy)
       VERIFY_INVESTIGATE   — ambiguous signals; verify then investigate
-      REFRESH_REPORT       — VT report is stale; refresh before actioning
-      REQUEST_NEW_SCAN     — VT report is very stale; request a new VT scan
+      REFRESH_REPORT       — VT report is stale; refresh before actioning (legacy)
+      REQUEST_NEW_SCAN     — VT report is stale/very stale; request a new VT scan
       RETRY_LOOKUP         — processing error or quota block; retry when resources allow
       NO_ACTION_BASED_ON_VT — VT clean or domain appears down; no action warranted by VT alone
 
@@ -153,6 +154,7 @@ class RecommendedAction(str, Enum):
     MANUAL_REVIEW = "manual_review"
     NONE = "none"
     # MDI-10 additions
+    INVESTIGATE_HOLD = "investigate_hold"
     REVIEW_FOR_ACTION = "review_for_action"
     VERIFY_INVESTIGATE = "verify_investigate"
     REFRESH_REPORT = "refresh_report"

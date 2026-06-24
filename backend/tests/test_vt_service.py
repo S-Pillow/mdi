@@ -224,11 +224,11 @@ def test_classify_triage_error():
 
 
 def test_classify_triage_stale_degrades_confidence():
-    """MDI-10: STALE malicious → MEDIUM confidence, REFRESH_REPORT."""
+    """MDI-52: STALE malicious → MEDIUM confidence, REQUEST_NEW_SCAN."""
     r = VtLookupResult(vt_malicious=1, vt_total_engines=70, freshness=Freshness.STALE, error=None)
     _, conf, action, _ = classify_triage(r)
     assert conf == TriageConfidence.MEDIUM
-    assert action == RecommendedAction.REFRESH_REPORT
+    assert action == RecommendedAction.REQUEST_NEW_SCAN
 
 
 def test_classify_triage_very_stale_degrades_confidence():
