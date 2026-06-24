@@ -1,7 +1,7 @@
 # MDI-50B — Cloudflare Radar Rank Lookup Live Validation + Integration Plan
 
-**Status:** Live validation **blocked** — token not installed server-side  
-**Date:** 2026-06-24  
+**Status:** Live validation **blocked** — token not on server filesystem (rerun 2026-06-24)  
+**Date:** 2026-06-24 (initial), 2026-06-24 (rerun)  
 **Parent:** [MDI-50A Cloudflare Radar API Contract](./mdi-50a-cloudflare-radar-api-contract.md)  
 **Main baseline:** `a8bf7dc429120d05177eb6087710c8a9fc990fc5`
 
@@ -9,11 +9,25 @@
 
 ## 1. Summary verdict
 
-**LIVE VALIDATION BLOCKED — TOKEN NOT INSTALLED**
+**LIVE VALIDATION BLOCKED — TOKEN NOT ON SERVER (RERUN)**
 
-`CLOUDFLARE_RADAR_API_TOKEN` is **not present** in `/etc/dns-tool/secrets.env` on the validation host. No Cloudflare API calls were made. Token was not exposed, printed, or committed.
+A validation rerun was performed after operator reported token installation. On the validation host, `CLOUDFLARE_RADAR_API_TOKEN` is **still not present** in `/etc/dns-tool/secrets.env`. No Cloudflare API calls were made in either attempt. Token was not exposed, printed, or committed.
 
-**Implementation plan:** Produced below from MDI-50A contract + Cloudflare documentation. Live response-shape confirmation remains **pending** until the operator installs the token and re-runs validation (or approves a follow-up validation ticket).
+**Rerun findings (2026-06-24):**
+
+| Check | Result |
+|-------|--------|
+| `/etc/dns-tool/secrets.env` exists | Yes (`640`, `root:dns-tool`) |
+| File line count on disk | **1** (not updated since 2026-05-24) |
+| Variable names on disk (keys only) | `VT_API_KEY` only — **no** `CLOUDFLARE_RADAR_API_TOKEN` |
+| Token loadable in subshell without echo | **No** (empty after sourcing secrets file) |
+| Cloudflare API calls (rerun) | **0** |
+
+**Likely cause:** Token may exist in an unsaved editor buffer but has **not been written** to the server path `/etc/dns-tool/secrets.env`. Operator must save the file on the server (requires root / `dns-tool` group write access).
+
+**MDI-50B implementation readiness:** **Not ready** — live response shape still unvalidated. Proceed with implementation only after a successful rerun with token on disk.
+
+**Implementation plan:** Retained below from MDI-50A + Cloudflare documentation.
 
 ---
 
@@ -26,8 +40,10 @@
 | Token committed | No |
 | Token in docs | No |
 | Env file contents printed | No |
-| Variable name checked only | Yes — `CLOUDFLARE_RADAR_API_TOKEN` **missing** |
+| Variable name checked only | Yes — `CLOUDFLARE_RADAR_API_TOKEN` **missing** (initial + rerun) |
 | `/etc/dns-tool/secrets.env` exists | Yes (mode `640`, `root:dns-tool`) |
+| Rerun date | 2026-06-24 |
+| Keys found on disk (rerun) | `VT_API_KEY` only |
 
 ### Operator installation required (server-side only)
 
@@ -45,11 +61,18 @@ After installation:
 - `mdi` user reads via supplementary `dns-tool` group (existing MDI-18B pattern).
 - **No service restart required** for validation-only shell probes; `mdi-backend.service` restart only needed after MDI-50B code deploy reads the new variable.
 
-Re-run validation with the same three domains before MDI-50B implementation merge.
+**Verification after save (operator):**
+
+```bash
+# Keys only — must include CLOUDFLARE_RADAR_API_TOKEN; never print values
+awk -F= '/^[A-Za-z0-9_]+=/ {print $1}' /etc/dns-tool/secrets.env
+```
+
+Then re-run validation with the same three domains before MDI-50B implementation.
 
 ---
 
-## 3. Live validation (not performed)
+## 3. Live validation (not performed — initial and rerun)
 
 ### Planned domains (unchanged)
 
@@ -70,7 +93,11 @@ Query: `rankingType=POPULAR` (default), `format=JSON`.
 
 ### API calls made
 
-**0** — stopped per ticket rules when token missing.
+| Attempt | Calls |
+|---------|-------|
+| Initial (2026-06-24) | **0** — token missing |
+| Rerun (2026-06-24) | **0** — token still not on server filesystem |
+| **Total** | **0** |
 
 ### Sanitized result table
 
@@ -291,10 +318,11 @@ Persist in job results and exports as optional columns / nested JSON.
 
 ## 10. Recommended next step
 
-1. **Operator:** Install `CLOUDFLARE_RADAR_API_TOKEN` in `/etc/dns-tool/secrets.env` (server-side only).
-2. **Re-run MDI-50B live validation** (same ticket or MDI-50B-validate sub-ticket) — max 3 API calls, update §3–§6 with sanitized live results.
-3. **Approve MDI-50B implementation** after live validation passes.
-4. Implement MDI-50B per §8; deploy; live smoke; then plan MDI-50C.
+1. **Operator:** **Save** `CLOUDFLARE_RADAR_API_TOKEN` to `/etc/dns-tool/secrets.env` **on the server** (not only in IDE buffer). Use root/sudo; keep mode `640`, group `dns-tool`.
+2. **Verify** key name appears via `awk -F= '/^[A-Za-z0-9_]+=/ {print $1}' /etc/dns-tool/secrets.env` (must list `CLOUDFLARE_RADAR_API_TOKEN`).
+3. **Re-run MDI-50B live validation** — max 3 API calls; update §3–§6 with sanitized live results.
+4. **Approve MDI-50B implementation** only after live validation passes.
+5. Implement MDI-50B per §8; deploy; live smoke; then plan MDI-50C.
 
 ---
 
