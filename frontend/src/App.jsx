@@ -1715,6 +1715,8 @@ function UploadPreviewResultsSection({ preview, error }) {
   }
   if (!preview) return null
 
+  const heldSkippedCount = preview.held_skipped_count ?? preview.held_count ?? 0
+
   return (
     <div className="card">
       <div className="card-header">
@@ -1727,7 +1729,7 @@ function UploadPreviewResultsSection({ preview, error }) {
             { label: 'Accepted', value: preview.accepted_count, color: 'var(--ok)' },
             { label: 'Rejected', value: preview.rejected_count, color: preview.rejected_count > 0 ? 'var(--danger)' : 'var(--text-muted)' },
             { label: 'Duplicates', value: preview.duplicate_count, color: 'var(--text-muted)' },
-            { label: 'Hold-skipped', value: preview.held_skipped_count ?? 0, color: '#818cf8' },
+            { label: 'Hold-skipped', value: heldSkippedCount, color: '#818cf8' },
           ].map(t => (
             <div key={t.label} className="summary-tile">
               <span className="tile-label">{t.label}</span>
@@ -1769,9 +1771,9 @@ function UploadPreviewResultsSection({ preview, error }) {
               {showDupes ? 'Hide' : 'Show'} dupes
             </button>
           )}
-          {(preview.held_skipped_count ?? 0) > 0 && (
+          {heldSkippedCount > 0 && (
             <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => setShowHeld(v => !v)}>
-              {showHeld ? 'Hide' : 'Show'} held ({preview.held_skipped_count})
+              {showHeld ? 'Hide' : 'Show'} held ({heldSkippedCount})
             </button>
           )}
         </div>

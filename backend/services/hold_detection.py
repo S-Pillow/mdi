@@ -10,6 +10,7 @@ Supported status formats:
   - Single string:                 "clientHold"
   - Comma-separated:               "clientHold, serverHold"
   - Semicolon-separated:           "clientHold; serverHold"
+  - Pipe-separated (EPP exports):  "clientTransferProhibited|clientHold|inactive"
   - Whitespace/newline-separated:  "clientHold\\nserverHold"
   - Mixed delimiters
   - Status with URL suffixes:      "clientHold https://icann.org/epp#clientHold"
@@ -25,7 +26,7 @@ from models import DomainHold, DomainHoldType, DomainStatusSource
 
 
 # Tokens to discard when extracting individual status labels
-_TOKEN_SPLIT_RE = re.compile(r'[,;\s\n\r\t]+')
+_TOKEN_SPLIT_RE = re.compile(r'[,;|\s\n\r\t]+')
 
 # Strip trailing ICANN URL suffixes from individual tokens (common in RDAP/WHOIS exports)
 _ICANN_URL_RE = re.compile(r'https?://\S*', re.IGNORECASE)

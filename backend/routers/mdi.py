@@ -220,12 +220,14 @@ async def upload_preview(
         max_items=max_items,
     )
     held_items = [item for item in result.accepted if item.domain_hold.has_hold]
+    held_skipped_count = len(held_items)
 
     return UploadPreviewResponse(
         accepted_count=len(result.accepted),
         rejected_count=len(result.rejected),
         duplicate_count=len(result.duplicates),
-        held_count=len(held_items),
+        held_count=held_skipped_count,
+        held_skipped_count=held_skipped_count,
         items=result.accepted,
         rejected=result.rejected,
         duplicates=result.duplicates,

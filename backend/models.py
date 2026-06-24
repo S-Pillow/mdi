@@ -770,6 +770,10 @@ class UploadPreviewResponse(BaseModel):
     held_count: int = Field(
         ..., description="[display] Accepted rows with clientHold or serverHold detected."
     )
+    held_skipped_count: int = Field(
+        ...,
+        description="[display] Same as held_count; naming aligned with estimate endpoint.",
+    )
     items: List[UploadedInputItem] = Field(
         ..., description="[display] Accepted items in first-seen order."
     )

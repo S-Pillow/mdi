@@ -28,6 +28,7 @@ from models import (
 )
 from services.hold_detection import detect_hold, hold_type_display
 from services.upload_parser import parse_upload
+from pipe_delimited_fixture import pipe_delimited_production_style_csv
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -129,8 +130,39 @@ class TestHoldDetection:
         dh = detect_hold("clientHold", source=DomainStatusSource.UPLOADED_FILE)
         assert dh.source == DomainStatusSource.UPLOADED_FILE
 
+    @pytest.mark.parametrize("status,expect_client,expect_server", [
+        ("clientTransferProhibited|clientHold|inactive", True, False),
+        ("clientTransferProhibited|clientHold|serverTransferProhibited|inactive", True, False),
+        ("clientTransferProhibited|serverHold", False, True),
+        (
+            "clientTransferProhibited|serverTransferProhibited|clientHold|serverUpdateProhibited|inactive",
+            True,
+            False,
+        ),
+    ])
+    def test_pipe_delimited_hold_detected(self, status, expect_client, expect_server):
+        dh = detect_hold(status)
+        assert dh.has_hold is True
+        assert (DomainHoldType.CLIENT_HOLD in dh.hold_types) is expect_client
+        assert (DomainHoldType.SERVER_HOLD in dh.hold_types) is expect_server
 
-# ── upload_parser — CSV ────────────────────────────────────────────────────────
+    @pytest.mark.parametrize("status", [
+        "clientTransferProhibited",
+        "clientTransferProhibited|serverTransferProhibited",
+        "serverUpdateProhibited",
+    ])
+    def test_pipe_delimited_non_hold_statuses(self, status):
+        dh = detect_hold(status)
+        assert dh.has_hold is False
+
+
+class TestMdi51aPipeDelimiterUpload:
+    def test_production_style_csv_hold_counts(self):
+        result = parse_upload(pipe_delimited_production_style_csv(), "advanced-search-results.csv")
+        assert len(result.accepted) == 285
+        held = sum(1 for i in result.accepted if i.domain_hold.has_hold)
+        assert held == 67
+
 
 class TestUploadParserCSV:
 
@@ -493,6 +525,26 @@ class TestUploadPreviewEndpoint:
         body = r.json()
         assert body["accepted_count"] == 2
         assert body["held_count"] == 1
+        assert body["held_skipped_count"] == 1
+
+    def test_upload_preview_pipe_delimited_held_counts(self, client):
+        r = client.post(
+            "/api/mdi/jobs/upload-preview",
+            files={
+                "file": (
+                    "pipe.csv",
+                    pipe_delimited_production_style_csv(),
+                    "text/csv",
+                ),
+            },
+            data={"default_scheme": "http", "max_items": "500"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["accepted_count"] == 285
+        assert body["held_count"] == 67
+        assert body["held_skipped_count"] == 67
+        assert len(body["held_items"]) == 67
 
     def test_upload_preview_held_items_count(self, client):
         data = FIXTURES / "sample_dns_form.csv"
@@ -504,6 +556,7 @@ class TestUploadPreviewEndpoint:
         body = r.json()
         # phishing.net (clientHold) and double-held.org (both holds) are held
         assert body["held_count"] >= 2
+        assert body["held_skipped_count"] == body["held_count"]
         held_norms = [h["input_normalized"] for h in body["held_items"]]
         assert "phishing.net" in held_norms
         assert "double-held.org" in held_norms

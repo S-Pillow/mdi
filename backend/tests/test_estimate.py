@@ -1186,3 +1186,15 @@ class TestMdi51UploadHoldAwareEstimate:
         body = _post_upload_estimate(parsed.accepted)
         assert body["held_skipped_count"] == 1
         assert body["eligible_vt_count"] == 0
+
+
+class TestMdi51aPipeDelimiterEstimate:
+    def test_pipe_delimited_upload_estimate_counts(self):
+        from pipe_delimited_fixture import pipe_delimited_production_style_csv
+
+        parsed = parse_upload(pipe_delimited_production_style_csv(), "pipe.csv")
+        body = _post_upload_estimate(parsed.accepted)
+        assert body["accepted_count"] == 285
+        assert body["held_skipped_count"] == 67
+        assert body["eligible_vt_count"] == 218
+        assert body["estimated_vt_calls_max"] == 654
