@@ -146,18 +146,31 @@ function formatRecommendedAction(value) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+const CLOUDFLARE_INEQUALITY_BUCKET_RE = /^\s*>\s*\d+\s*$/
+
 function formatCloudflareRank(row) {
-  if (row?.cloudflare_rank_available && row?.cloudflare_rank_bucket) {
-    const label = String(row.cloudflare_rank_bucket).replace(/_/g, ' ')
+  const bucket = row?.cloudflare_rank_bucket
+  const rawBucket = row?.cloudflare_rank_raw_bucket
+
+  if (
+    bucket === 'UNRANKED'
+    && rawBucket
+    && CLOUDFLARE_INEQUALITY_BUCKET_RE.test(String(rawBucket))
+  ) {
+    return `${String(rawBucket).trim()} / UNRANKED`
+  }
+
+  if (row?.cloudflare_rank_available && bucket) {
+    const label = String(bucket).replace(/_/g, ' ')
     if (row.cloudflare_rank != null && row.cloudflare_rank <= 100) {
       return `${label} (rank ${row.cloudflare_rank})`
     }
-    if (row.cloudflare_rank_raw_bucket) {
-      return `${label} (bucket ${row.cloudflare_rank_raw_bucket})`
+    if (rawBucket) {
+      return `${label} (bucket ${rawBucket})`
     }
     return label
   }
-  if (row?.cloudflare_rank_bucket === 'UNRANKED') return 'Unranked'
+  if (bucket === 'UNRANKED') return 'UNRANKED'
   if (row?.cloudflare_rank_error) return `Unavailable (${row.cloudflare_rank_error})`
   return '—'
 }
