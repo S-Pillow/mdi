@@ -198,7 +198,7 @@ def _stale_sub(inp: TriageInput) -> List[str]:
     if inp.freshness == Freshness.VERY_STALE:
         lines.append("A new VT scan is recommended before actioning.")
     else:
-        lines.append("Refreshing the VT report is recommended before actioning.")
+        lines.append("VT data is stale; request a new scan before relying on the result.")
     lines.append("Live check has not been performed.")
     return lines
 
@@ -236,7 +236,7 @@ def _clean_sub(inp: TriageInput) -> List[str]:
     if inp.freshness == Freshness.FRESH:
         lines.append("VT report is recent; no action required based on current VT data.")
     elif inp.freshness == Freshness.STALE:
-        lines.append(f"VT report is stale (older than {inp.stale_threshold_days} days); consider refreshing to confirm.")
+        lines.append("VT data is stale; request a new scan before treating this as current.")
     elif inp.freshness == Freshness.VERY_STALE:
         lines.append(f"VT report is very stale (older than {inp.stale_threshold_days} days); requesting a new scan is advised.")
     else:

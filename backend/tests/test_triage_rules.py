@@ -275,15 +275,23 @@ class TestMaliciousSubRules:
         d = decide(_flagged(live=LiveStatus.DNS_FAILURE))
         assert d.recommended_action == RecommendedAction.VERIFY_INVESTIGATE
 
-    def test_flagged_stale_refresh(self):
+    def test_flagged_stale_request_new_scan_reason(self):
         d = decide(_flagged(freshness=Freshness.STALE))
         assert d.recommended_action == RecommendedAction.REQUEST_NEW_SCAN
         assert d.triage_confidence == TriageConfidence.MEDIUM
+        reason_text = " ".join(d.triage_reason).lower()
+        assert "request a new scan" in reason_text
+        assert "refresh" not in reason_text
+        assert "refreshing" not in reason_text
 
     def test_flagged_very_stale_request_new_scan(self):
         d = decide(_flagged(freshness=Freshness.VERY_STALE))
         assert d.recommended_action == RecommendedAction.REQUEST_NEW_SCAN
         assert d.triage_confidence == TriageConfidence.LOW
+        reason_text = " ".join(d.triage_reason).lower()
+        assert "vt scan" in reason_text or "new scan" in reason_text
+        assert "refresh" not in reason_text
+        assert "refreshing" not in reason_text
 
     def test_flagged_catchall_verify_investigate(self):
         """Flagged + NOT_CHECKED live + UNKNOWN age + UNKNOWN freshness → VERIFY_INVESTIGATE."""
@@ -350,11 +358,15 @@ class TestCleanSubRules:
         assert d.triage_confidence == TriageConfidence.CLEAN
         assert d.evidence_status == EvidenceStatus.COMPLETE
 
-    def test_clean_stale_refresh(self):
+    def test_clean_stale_request_new_scan_reason(self):
         d = decide(_clean(freshness=Freshness.STALE))
         assert d.triage_bucket == TriageBucket.CLEAN
         assert d.recommended_action == RecommendedAction.REQUEST_NEW_SCAN
         assert d.triage_confidence == TriageConfidence.MEDIUM
+        reason_text = " ".join(d.triage_reason).lower()
+        assert "request a new scan" in reason_text
+        assert "refresh" not in reason_text
+        assert "refreshing" not in reason_text
 
     def test_clean_very_stale_request_new_scan(self):
         d = decide(_clean(freshness=Freshness.VERY_STALE))
