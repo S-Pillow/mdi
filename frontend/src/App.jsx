@@ -96,6 +96,7 @@ const DEFAULT_SETTINGS = {
   stale_threshold_days: 7,
   auto_rescan_stale: false,
   max_auto_rescans: 3,
+  cloudflare_rank_lookup_enabled: false,
 }
 
 function resetSettingsToDefaults(setters) {
@@ -103,6 +104,7 @@ function resetSettingsToDefaults(setters) {
   setters.setStaleThresholdDays(DEFAULT_SETTINGS.stale_threshold_days)
   setters.setAutoRescanStale(DEFAULT_SETTINGS.auto_rescan_stale)
   setters.setMaxAutoRescans(DEFAULT_SETTINGS.max_auto_rescans)
+  setters.setCloudflareRankLookupEnabled(DEFAULT_SETTINGS.cloudflare_rank_lookup_enabled)
 }
 
 function formatJobOptionOnOff(value) {
@@ -116,6 +118,7 @@ function formatJobRanWithSummary(job) {
     `Auto-rescan ${formatJobOptionOnOff(job.auto_rescan_stale)}`,
     `Max auto-rescans ${job.max_auto_rescans ?? DEFAULT_SETTINGS.max_auto_rescans}`,
     `Stale after ${job.stale_threshold_days ?? DEFAULT_SETTINGS.stale_threshold_days} days`,
+    `CF rank ${formatJobOptionOnOff(job.cloudflare_rank_lookup_enabled)}`,
   ].join(' · ')
 }
 
@@ -141,6 +144,22 @@ function formatRecommendedAction(value) {
   const key = String(value).toLowerCase()
   if (RECOMMENDED_ACTION_LABELS[key]) return RECOMMENDED_ACTION_LABELS[key]
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatCloudflareRank(row) {
+  if (row?.cloudflare_rank_available && row?.cloudflare_rank_bucket) {
+    const label = String(row.cloudflare_rank_bucket).replace(/_/g, ' ')
+    if (row.cloudflare_rank != null && row.cloudflare_rank <= 100) {
+      return `${label} (rank ${row.cloudflare_rank})`
+    }
+    if (row.cloudflare_rank_raw_bucket) {
+      return `${label} (bucket ${row.cloudflare_rank_raw_bucket})`
+    }
+    return label
+  }
+  if (row?.cloudflare_rank_bucket === 'UNRANKED') return 'Unranked'
+  if (row?.cloudflare_rank_error) return `Unavailable (${row.cloudflare_rank_error})`
+  return '—'
 }
 
 const LIVE_ACTIVE_SET  = new Set(['active', 'redirect', 'forbidden'])
@@ -1133,6 +1152,7 @@ function CollapsibleSettingsPanel({
   staleThresholdDays, setStaleThresholdDays,
   autoRescanStale, setAutoRescanStale,
   maxAutoRescans, setMaxAutoRescans,
+  cloudflareRankLookupEnabled, setCloudflareRankLookupEnabled,
   locked,
 }) {
   if (!open) return null
@@ -1211,6 +1231,26 @@ function CollapsibleSettingsPanel({
               Available and off by default. When enabled, auto-rescan runs only during initial job submission
               (not on recovered jobs) and may consume additional VirusTotal quota — use cautiously on large batches.
               It may request URL scans and domain reanalysis for stale flagged items.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <p className="settings-section-label">Cloudflare Radar (experimental)</p>
+          <div style={{ ...ctrlStyle, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label className="settings-checkbox-row">
+              <input
+                type="checkbox"
+                checked={cloudflareRankLookupEnabled}
+                onChange={e => setCloudflareRankLookupEnabled(e.target.checked)}
+                disabled={locked}
+              />
+              <span>Cloudflare Radar rank lookup</span>
+            </label>
+            <p style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4 }}>
+              Popularity / blast-radius context from Cloudflare 1.1.1.1 DNS data only.
+              Does not change VT verdict or triage. Does not consume VT quota. Default off.
+              Hold-impact guidance is planned for a later release (MDI-50C).
             </p>
           </div>
         </div>
@@ -2906,6 +2946,24 @@ function DetailDrawer({
           ) : null}
         </div>
 
+        {/* 5b. CLOUDFLARE RADAR RANK */}
+        <div className="detail-section">
+          <div className="detail-section-label">Cloudflare Radar Rank</div>
+          <div className="detail-kv-grid">
+            <span>Popularity bucket</span>
+            <span>{formatCloudflareRank(r)}</span>
+            {r.cloudflare_rank_source && (
+              <><span>Source</span><span>{r.cloudflare_rank_source}</span></>
+            )}
+            {r.cloudflare_rank_checked_at && (
+              <><span>Checked</span><span>{formatDate(r.cloudflare_rank_checked_at)}</span></>
+            )}
+          </div>
+          <p className="detail-empty-note">
+            DNS popularity context only — not maliciousness evidence. Does not change triage.
+          </p>
+        </div>
+
         {/* 6. TRIAGE REASONS */}
         {r.triage_reason?.length > 0 && (
           <div className="detail-section">
@@ -3039,6 +3097,7 @@ export default function App() {
   const [staleThresholdDays, setStaleThresholdDays] = useState(DEFAULT_SETTINGS.stale_threshold_days)
   const [autoRescanStale, setAutoRescanStale]       = useState(DEFAULT_SETTINGS.auto_rescan_stale)
   const [maxAutoRescans, setMaxAutoRescans]         = useState(DEFAULT_SETTINGS.max_auto_rescans)
+  const [cloudflareRankLookupEnabled, setCloudflareRankLookupEnabled] = useState(DEFAULT_SETTINGS.cloudflare_rank_lookup_enabled)
 
   // VT job state
   const [submitting, setSubmitting]                 = useState(false)
@@ -3071,6 +3130,7 @@ export default function App() {
     stale_threshold_days: staleThresholdDays,
     auto_rescan_stale: autoRescanStale,
     max_auto_rescans: maxAutoRescans,
+    cloudflare_rank_lookup_enabled: cloudflareRankLookupEnabled,
   }
 
   async function handleEstimate() {
@@ -3152,6 +3212,7 @@ export default function App() {
       setStaleThresholdDays,
       setAutoRescanStale,
       setMaxAutoRescans,
+      setCloudflareRankLookupEnabled,
     })
   }
 
@@ -3404,7 +3465,7 @@ export default function App() {
 
   useEffect(() => {
     if (estimateResult) setEstimateStale(true)
-  }, [useDomainReports, staleThresholdDays, autoRescanStale, maxAutoRescans, uploadPreview])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [useDomainReports, staleThresholdDays, autoRescanStale, maxAutoRescans, cloudflareRankLookupEnabled, uploadPreview])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refreshQuota() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -3531,6 +3592,8 @@ export default function App() {
             setAutoRescanStale={setAutoRescanStale}
             maxAutoRescans={maxAutoRescans}
             setMaxAutoRescans={setMaxAutoRescans}
+            cloudflareRankLookupEnabled={cloudflareRankLookupEnabled}
+            setCloudflareRankLookupEnabled={setCloudflareRankLookupEnabled}
             locked={settingsLocked}
           />
         </div>

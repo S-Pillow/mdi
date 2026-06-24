@@ -28,6 +28,10 @@ Processing flow for each eligible item:
      c. Set result.live_status from LiveCheckResult.
      d. Re-run triage_rules.decide() with updated live_status.
      e. Live-check failures are non-fatal: original VT triage is preserved on error.
+  8. Post-job Cloudflare Radar rank pass (MDI-50B): optional popularity context.
+     a. Only when cloudflare_rank_lookup_enabled and token configured.
+     b. Skip held/skipped and non-DONE items.
+     c. Non-fatal; never affects VT triage or quota.
 
 On completion, append a metadata-only record to the usage JSONL.
 Usage JSONL records NEVER contain raw domains, URLs, or item-level result data.
@@ -56,6 +60,7 @@ from models import (
 )
 from services import (
     auto_rescan,
+    cloudflare_radar,
     dashboard,
     domain_enrichment,
     job_persistence,
@@ -135,6 +140,7 @@ async def process_job(
         await _run_items(job, usage_file=usage_file)
         # MDI-12: live HTTP check for flagged/suspicious items after VT
         await _live_check_items(job)
+        await _cloudflare_rank_items(job)
     except Exception as exc:  # noqa: BLE001
         logger.exception("process_job: unexpected error in job %s: %s", job_id, exc)
         job.status = "error"
@@ -542,6 +548,64 @@ async def _live_check_items(job: job_store.InMemoryJob) -> None:
             "http_status_code": lc_result.http_status_code,
             "redirect_count": lc_result.redirect_count,
         })
+
+
+# ── MDI-50B Cloudflare Radar rank pass ───────────────────────────────────────
+
+
+def _should_cloudflare_rank_lookup(result: MdiResultItem) -> bool:
+    """Eligible for Cloudflare rank when VT processing completed successfully."""
+    if result.processing_status == MdiProcessingStatus.HOLD_SKIPPED:
+        return False
+    if result.processing_status != MdiProcessingStatus.DONE:
+        return False
+    return True
+
+
+async def _cloudflare_rank_items(job: job_store.InMemoryJob) -> None:
+    """
+    Optional Cloudflare Radar popularity lookup after VT + live check.
+
+    Never fails the job. Does not consume VT quota or change triage.
+    """
+    if not job.cloudflare_rank_lookup_enabled:
+        return
+
+    if cloudflare_radar.get_api_token() is None:
+        logger.info(
+            "Cloudflare rank lookup enabled for job %s but token not configured; skipping.",
+            job.job_id,
+        )
+        return
+
+    state = cloudflare_radar.CloudflareJobState()
+    domain_cache: Dict[str, cloudflare_radar.CloudflareRankResult] = {}
+
+    for normalized in job.item_order:
+        result = job.results.get(normalized)
+        if result is None or not _should_cloudflare_rank_lookup(result):
+            continue
+
+        reg_domain = domain_enrichment.extract_registered_domain(
+            result.input_normalized,
+            result.input_type,
+        )
+        if reg_domain is None:
+            continue
+
+        if reg_domain in domain_cache:
+            cf_result = domain_cache[reg_domain]
+        else:
+            cf_result = await cloudflare_radar.lookup_domain_rank(
+                reg_domain,
+                enabled=True,
+                job_state=state,
+            )
+            domain_cache[reg_domain] = cf_result
+
+        job.results[normalized] = result.model_copy(
+            update=cloudflare_radar.result_to_item_update(cf_result),
+        )
 
 
 # ── Persistence helpers ────────────────────────────────────────────────────────

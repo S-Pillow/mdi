@@ -51,6 +51,13 @@ CSV_HEADERS: List[str] = [
     "domain_hold_source",
     "triage_reason",
     "error_codes",
+    "cloudflare_rank_available",
+    "cloudflare_rank",
+    "cloudflare_rank_bucket",
+    "cloudflare_rank_raw_bucket",
+    "cloudflare_rank_source",
+    "cloudflare_rank_checked_at",
+    "cloudflare_rank_error",
 ]
 
 _INJECTION_FIRST_CHARS = frozenset("=+-@")
@@ -219,6 +226,13 @@ def _result_csv_row(result: MdiResultItem) -> List[str]:
         sanitize_csv_cell(hold_source),
         sanitize_csv_cell(" | ".join(result.triage_reason)),
         sanitize_csv_cell(" | ".join(err.code for err in result.errors)),
+        sanitize_csv_cell(result.cloudflare_rank_available),
+        sanitize_csv_cell(result.cloudflare_rank),
+        sanitize_csv_cell(result.cloudflare_rank_bucket),
+        sanitize_csv_cell(result.cloudflare_rank_raw_bucket),
+        sanitize_csv_cell(result.cloudflare_rank_source),
+        sanitize_csv_cell(result.cloudflare_rank_checked_at),
+        sanitize_csv_cell(result.cloudflare_rank_error),
     ]
 
 
@@ -318,6 +332,17 @@ def _result_json(result: MdiResultItem) -> Dict[str, Any]:
         "domain_hold": _domain_hold_json(result),
         "vt_mode_used": _enum_value(result.vt_mode_used),
         "vt_report_url": result.vt_report_url,
+        "cloudflare_rank_available": result.cloudflare_rank_available,
+        "cloudflare_rank": result.cloudflare_rank,
+        "cloudflare_rank_bucket": result.cloudflare_rank_bucket,
+        "cloudflare_rank_raw_bucket": result.cloudflare_rank_raw_bucket,
+        "cloudflare_rank_source": result.cloudflare_rank_source,
+        "cloudflare_rank_checked_at": (
+            result.cloudflare_rank_checked_at.isoformat()
+            if result.cloudflare_rank_checked_at
+            else None
+        ),
+        "cloudflare_rank_error": result.cloudflare_rank_error,
     }
 
 
@@ -335,6 +360,7 @@ def _job_metadata(job: InMemoryJob) -> Dict[str, Any]:
         "stale_threshold_days": job.stale_threshold_days,
         "auto_rescan_stale": job.auto_rescan_stale,
         "max_auto_rescans": job.max_auto_rescans,
+        "cloudflare_rank_lookup_enabled": job.cloudflare_rank_lookup_enabled,
         "lookups_used": job.lookups_used,
         "estimated_requests": job.estimated_requests,
         "rdap_enriched_count": job.rdap_enriched_count,

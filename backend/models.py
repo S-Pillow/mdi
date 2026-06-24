@@ -409,6 +409,36 @@ class MdiResultItem(BaseModel):
         description="[display, audit] Whether all expected checks completed."
     )
 
+    # ── Cloudflare Radar rank (MDI-50B) — popularity context only ─────────────
+    cloudflare_rank_available: bool = Field(
+        False,
+        description="[display] True when Cloudflare returned rank or bucket data.",
+    )
+    cloudflare_rank: Optional[int] = Field(
+        None,
+        description="[display] Exact Cloudflare rank when in global top 100.",
+    )
+    cloudflare_rank_bucket: Optional[str] = Field(
+        None,
+        description="[display, filtering] Normalized popularity bucket (TOP_100 … UNRANKED).",
+    )
+    cloudflare_rank_raw_bucket: Optional[str] = Field(
+        None,
+        description="[audit] Raw bucket string from Cloudflare Radar API.",
+    )
+    cloudflare_rank_source: Optional[str] = Field(
+        None,
+        description="[audit] Rank data source identifier.",
+    )
+    cloudflare_rank_checked_at: Optional[datetime] = Field(
+        None,
+        description="[display, audit] UTC timestamp of Cloudflare rank lookup.",
+    )
+    cloudflare_rank_error: Optional[str] = Field(
+        None,
+        description="[display, audit] Sanitized Cloudflare lookup error code, if any.",
+    )
+
     # ── Errors ───────────────────────────────────────────────────────────────
     errors: List[MdiError] = Field(
         default_factory=list,
@@ -471,6 +501,13 @@ class MdiJobOptions(BaseModel):
         ge=0,
         le=100,
         description="[workflow] Maximum stale items to auto-rescan per job run."
+    )
+    cloudflare_rank_lookup_enabled: bool = Field(
+        False,
+        description=(
+            "[workflow] When enabled, fetch Cloudflare Radar popularity rank per domain. "
+            "Popularity context only; does not affect VT triage."
+        ),
     )
 
 
@@ -1010,6 +1047,10 @@ class JobSubmitRequest(BaseModel):
         3, ge=0, le=25,
         description="[workflow] Max auto-rescans per job when auto_rescan_stale is enabled.",
     )
+    cloudflare_rank_lookup_enabled: bool = Field(
+        False,
+        description="[workflow] Fetch Cloudflare Radar rank (popularity context only).",
+    )
 
     @model_validator(mode="after")
     def _validate_input_source(self) -> "JobSubmitRequest":
@@ -1057,6 +1098,10 @@ class JobStatusResponse(BaseModel):
     error_message: Optional[str] = None
     use_domain_reports: bool
     stale_threshold_days: int
+    cloudflare_rank_lookup_enabled: bool = Field(
+        False,
+        description="[display] Whether Cloudflare Radar rank lookup was enabled for this job.",
+    )
     results: List[MdiResultItem] = Field(default_factory=list)
     # ── MDI-11 enrichment counters ─────────────────────────────────────────────
     rdap_enriched_count: int = Field(

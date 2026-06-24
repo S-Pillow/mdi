@@ -81,6 +81,22 @@ UI control / feature status (MDI-32):
 | `live_status` | `LiveStatus` | display, filtering, reporting | HEAD-request result: `active`, `redirect`, `not_found`, `timeout`, `dns_failure`, `blocked`, etc. |
 | `live_checked_at` | `Optional[datetime]` | display, audit | UTC timestamp when the live check ran. |
 
+### Cloudflare Radar rank (MDI-50B)
+
+Popularity / blast-radius context from Cloudflare Radar 1.1.1.1 DNS data. **Not maliciousness evidence.** Does not change VT flagged logic, `triage_bucket`, or `recommended_action`. Does not consume VT quota. Default off (`cloudflare_rank_lookup_enabled=false`). Hold-impact guidance is **MDI-50C** (not implemented here).
+
+| Field | Type | Primary Purpose | Notes |
+|---|---|---|---|
+| `cloudflare_rank_available` | `bool` | display | `true` when rank or bucket data obtained. |
+| `cloudflare_rank` | `Optional[int]` | display | Exact rank when in global top 100. |
+| `cloudflare_rank_bucket` | `Optional[str]` | display, filtering | `TOP_100` … `TOP_1M`, `UNRANKED`, `UNKNOWN`. |
+| `cloudflare_rank_raw_bucket` | `Optional[str]` | audit | Raw API bucket string (e.g. `200`, `>200000`). |
+| `cloudflare_rank_source` | `Optional[str]` | audit | `cloudflare_radar_popular`. |
+| `cloudflare_rank_checked_at` | `Optional[datetime]` | display, audit | UTC lookup timestamp. |
+| `cloudflare_rank_error` | `Optional[str]` | display, audit | Sanitized error code (`auth_failed`, `rate_limited`, …). |
+
+Job option: `cloudflare_rank_lookup_enabled` (default `false`). Token: `CLOUDFLARE_RADAR_API_TOKEN` in `/etc/dns-tool/secrets.env` (server-side only).
+
 ### Triage
 
 | Field | Type | Primary Purpose | Notes |

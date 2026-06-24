@@ -527,6 +527,7 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         auto_rescan_stale=req.auto_rescan_stale,
         max_auto_rescans=req.max_auto_rescans,
         input_mode=req.input_mode,
+        cloudflare_rank_lookup_enabled=req.cloudflare_rank_lookup_enabled,
     )
 
     for item in held_items:
@@ -579,6 +580,7 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         error_message=job.error_message,
         use_domain_reports=job.use_domain_reports,
         stale_threshold_days=job.stale_threshold_days,
+        cloudflare_rank_lookup_enabled=job.cloudflare_rank_lookup_enabled,
         results=results_ordered,
         rdap_enriched_count=job.rdap_enriched_count,
         rdap_failed_count=job.rdap_failed_count,
