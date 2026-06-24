@@ -104,6 +104,11 @@ class VtLookupResult:
     calls_made: int = 0     # how many VT API calls were consumed (for quota accounting)
     # MDI-14: malicious/suspicious engine detections only; [] for clean results
     engine_detections: "List[Dict[str, Any]]" = field(default_factory=list)
+    # MDI-49: limited URL evidence from VT URL report attributes (URL mode only)
+    vt_targeted_brand: Optional[str] = None
+    vt_targeted_brand_sources: List[str] = field(default_factory=list)
+    vt_redirection_chain: List[str] = field(default_factory=list)
+    vt_last_final_url: Optional[str] = None
 
 
 # ── Internal HTTP call ─────────────────────────────────────────────────────────
@@ -179,6 +184,59 @@ def _build_vt_target(
 
 # ── Response parsing ───────────────────────────────────────────────────────────
 
+def extract_vt_url_evidence(
+    attrs: Dict[str, Any],
+    vt_mode_used: VtModeUsed,
+) -> Tuple[Optional[str], List[str], List[str], Optional[str]]:
+    """
+    Extract limited VT URL evidence fields from report attributes.
+
+    Populated only for URL reports (not domain reports). Does not affect triage.
+    """
+    if vt_mode_used != VtModeUsed.URL_REPORT:
+        return None, [], [], None
+
+    brand_sources: List[str] = []
+    brand_values: List[str] = []
+    raw_brand = attrs.get("targeted_brand")
+    if isinstance(raw_brand, dict):
+        for engine, brand in raw_brand.items():
+            if brand is None:
+                continue
+            brand_str = str(brand).strip()
+            if not brand_str:
+                continue
+            brand_sources.append(str(engine))
+            brand_values.append(brand_str)
+
+    seen: set[str] = set()
+    unique_brands: List[str] = []
+    for brand in brand_values:
+        key = brand.casefold()
+        if key not in seen:
+            seen.add(key)
+            unique_brands.append(brand)
+
+    redirection_chain: List[str] = []
+    raw_chain = attrs.get("redirection_chain")
+    if isinstance(raw_chain, list):
+        redirection_chain = [
+            str(url).strip()
+            for url in raw_chain
+            if url is not None and str(url).strip()
+        ]
+
+    last_final_url: Optional[str] = None
+    raw_final = attrs.get("last_final_url")
+    if raw_final is not None:
+        final_str = str(raw_final).strip()
+        if final_str:
+            last_final_url = final_str
+
+    targeted_brand = "; ".join(unique_brands) if unique_brands else None
+    return targeted_brand, sorted(brand_sources), redirection_chain, last_final_url
+
+
 def parse_vt_response(
     report: Dict[str, Any],
     vt_mode_used: VtModeUsed,
@@ -234,6 +292,13 @@ def parse_vt_response(
                 "engine_update": details.get("engine_update") or None,
             })
 
+    (
+        vt_targeted_brand,
+        vt_targeted_brand_sources,
+        vt_redirection_chain,
+        vt_last_final_url,
+    ) = extract_vt_url_evidence(attrs, vt_mode_used)
+
     return VtLookupResult(
         vt_malicious=malicious,
         vt_suspicious=suspicious,
@@ -247,6 +312,10 @@ def parse_vt_response(
         error=None,
         calls_made=0,                   # filled in by fetch_report
         engine_detections=engine_detections,
+        vt_targeted_brand=vt_targeted_brand,
+        vt_targeted_brand_sources=vt_targeted_brand_sources,
+        vt_redirection_chain=vt_redirection_chain,
+        vt_last_final_url=vt_last_final_url,
     )
 
 

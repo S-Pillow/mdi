@@ -443,6 +443,11 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
             "errors": errors,
             # MDI-14: persist engine-level detections (malicious/suspicious only)
             "vt_engine_results": vt_result.engine_detections,
+            # MDI-49: limited VT URL evidence (URL reports only)
+            "vt_targeted_brand": vt_result.vt_targeted_brand,
+            "vt_targeted_brand_sources": vt_result.vt_targeted_brand_sources,
+            "vt_redirection_chain": vt_result.vt_redirection_chain,
+            "vt_last_final_url": vt_result.vt_last_final_url,
         })
         job.processed += 1
 

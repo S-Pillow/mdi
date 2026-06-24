@@ -360,6 +360,24 @@ class MdiResultItem(BaseModel):
         ),
     )
 
+    # ── VT URL evidence (MDI-49) — analyst context only ───────────────────────
+    vt_targeted_brand: Optional[str] = Field(
+        None,
+        description="[display] Targeted brand from VT URL report phishing engines.",
+    )
+    vt_targeted_brand_sources: List[str] = Field(
+        default_factory=list,
+        description="[display] VT engine names that reported targeted brand evidence.",
+    )
+    vt_redirection_chain: List[str] = Field(
+        default_factory=list,
+        description="[display] VT URL redirection chain (excludes last final URL).",
+    )
+    vt_last_final_url: Optional[str] = Field(
+        None,
+        description="[display] VT last final URL after redirects.",
+    )
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def vt_report_url(self) -> Optional[str]:

@@ -128,6 +128,20 @@ function nv(value, fallback = '—') {
   return value == null || value === '' ? fallback : value
 }
 
+function formatStringList(items, separator = ', ') {
+  if (!items || !items.length) return '—'
+  return items.join(separator)
+}
+
+function hasVtUrlEvidence(row) {
+  return !!(
+    row?.vt_targeted_brand
+    || (row?.vt_targeted_brand_sources && row.vt_targeted_brand_sources.length)
+    || (row?.vt_redirection_chain && row.vt_redirection_chain.length)
+    || row?.vt_last_final_url
+  )
+}
+
 const RECOMMENDED_ACTION_LABELS = {
   investigate_hold: 'Investigate / Hold Review',
   action_already_taken: 'Action Already Taken',
@@ -2969,6 +2983,29 @@ function DetailDrawer({
               </table>
             </div>
           )}
+        </div>
+
+        {/* 3b. VT URL EVIDENCE (MDI-49) */}
+        <div className="detail-section">
+          <div className="detail-section-label">VT URL Evidence</div>
+          {hasVtUrlEvidence(r) ? (
+            <div className="detail-kv-grid">
+              <span>Targeted brand</span>
+              <span>{nv(r.vt_targeted_brand)}</span>
+              <span>Brand evidence sources</span>
+              <span>{formatStringList(r.vt_targeted_brand_sources)}</span>
+              <span>Redirect chain</span>
+              <span style={{ wordBreak: 'break-all' }}>{formatStringList(r.vt_redirection_chain, ' → ')}</span>
+              <span>Last final URL</span>
+              <span style={{ wordBreak: 'break-all' }}>{nv(r.vt_last_final_url)}</span>
+            </div>
+          ) : (
+            <p className="detail-empty-note">VT URL evidence not available for this item.</p>
+          )}
+          <p className="detail-empty-note">
+            VT URL evidence is analyst context only. It does not change the VT verdict,
+            triage bucket, recommended action, or enforcement behavior.
+          </p>
         </div>
 
         {/* 4. DOMAIN AGE CONTEXT */}

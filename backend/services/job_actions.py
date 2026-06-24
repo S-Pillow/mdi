@@ -289,6 +289,10 @@ async def reprocess_item_after_vt(
         "vt_scan_date": vt_result.vt_scan_date,
         "freshness": vt_result.freshness,
         "vt_engine_results": vt_result.engine_detections,
+        "vt_targeted_brand": vt_result.vt_targeted_brand,
+        "vt_targeted_brand_sources": vt_result.vt_targeted_brand_sources,
+        "vt_redirection_chain": vt_result.vt_redirection_chain,
+        "vt_last_final_url": vt_result.vt_last_final_url,
         "errors": errors,
     })
 

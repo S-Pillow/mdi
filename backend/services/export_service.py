@@ -60,6 +60,10 @@ CSV_HEADERS: List[str] = [
     "cloudflare_rank_error",
     "hold_impact_level",
     "hold_impact_reason",
+    "vt_targeted_brand",
+    "vt_targeted_brand_sources",
+    "vt_redirection_chain",
+    "vt_last_final_url",
 ]
 
 _INJECTION_FIRST_CHARS = frozenset("=+-@")
@@ -237,6 +241,10 @@ def _result_csv_row(result: MdiResultItem) -> List[str]:
         sanitize_csv_cell(result.cloudflare_rank_error),
         sanitize_csv_cell(result.hold_impact_level),
         sanitize_csv_cell(result.hold_impact_reason),
+        sanitize_csv_cell(result.vt_targeted_brand),
+        sanitize_csv_cell(" | ".join(result.vt_targeted_brand_sources)),
+        sanitize_csv_cell(" | ".join(result.vt_redirection_chain)),
+        sanitize_csv_cell(result.vt_last_final_url),
     ]
 
 
@@ -349,6 +357,10 @@ def _result_json(result: MdiResultItem) -> Dict[str, Any]:
         "cloudflare_rank_error": result.cloudflare_rank_error,
         "hold_impact_level": result.hold_impact_level,
         "hold_impact_reason": result.hold_impact_reason,
+        "vt_targeted_brand": result.vt_targeted_brand,
+        "vt_targeted_brand_sources": list(result.vt_targeted_brand_sources),
+        "vt_redirection_chain": list(result.vt_redirection_chain),
+        "vt_last_final_url": result.vt_last_final_url,
     }
 
 
