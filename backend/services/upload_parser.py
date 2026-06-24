@@ -206,6 +206,46 @@ def _combine_status_fields(raw_epp: Optional[str], raw_domain_state: Optional[st
     return " ".join(parts)
 
 
+def _held_upload_preview_fields(domain_hold: DomainHold) -> dict:
+    """Preview/triage field updates when uploaded metadata confirms a hold."""
+    return {
+        "triage_bucket": TriageBucket.HELD,
+        "recommended_action": RecommendedAction.ACTION_ALREADY_TAKEN,
+        "triage_confidence": TriageConfidence.HIGH,
+        "evidence_status": EvidenceStatus.SKIPPED_HOLD,
+        "vt_mode_used": VtModeUsed.SKIPPED_HOLD,
+        "live_status": LiveStatus.NOT_CHECKED,
+        "domain_hold": domain_hold,
+        "domain_status_source": DomainStatusSource.UPLOADED_FILE,
+    }
+
+
+def _merge_epp_status(existing: List[str], incoming: List[str]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for token in [*existing, *incoming]:
+        key = token.lower()
+        if key not in seen:
+            seen.add(key)
+            merged.append(token)
+    return merged
+
+
+def _upgrade_accepted_item_hold(
+    existing: UploadedInputItem,
+    *,
+    domain_hold: DomainHold,
+    epp_list: List[str],
+) -> UploadedInputItem:
+    """Promote a deduped accepted row to held when a duplicate row carries hold metadata."""
+    if existing.domain_hold.has_hold:
+        return existing
+    return existing.model_copy(update={
+        **_held_upload_preview_fields(domain_hold),
+        "epp_status": _merge_epp_status(existing.epp_status, epp_list),
+    })
+
+
 # ── Row processing ────────────────────────────────────────────────────────────
 
 def _process_row(
@@ -263,14 +303,6 @@ def _process_row(
         ))
         return
 
-    if normalized in seen_normalized:
-        result.duplicates.append(DuplicateItemResponse(
-            input_original=raw_domain,
-            position=row_number,
-            duplicate_of=normalized,
-        ))
-        return
-
     raw_created = _get("created_at")
     raw_status = _combine_status_fields(_get("epp_status"), _get("domain_state"))
     raw_registrar = _get("registrar")
@@ -288,6 +320,21 @@ def _process_row(
         source=DomainStatusSource.UPLOADED_FILE if raw_status else DomainStatusSource.NOT_CHECKED,
     )
 
+    if normalized in seen_normalized:
+        result.duplicates.append(DuplicateItemResponse(
+            input_original=raw_domain,
+            position=row_number,
+            duplicate_of=normalized,
+        ))
+        if domain_hold.has_hold:
+            idx = seen_normalized[normalized] - 1
+            result.accepted[idx] = _upgrade_accepted_item_hold(
+                result.accepted[idx],
+                domain_hold=domain_hold,
+                epp_list=epp_list,
+            )
+        return
+
     age_bucket = AgeBucket.UNKNOWN
     if raw_created:
         parsed_date = parse_date_string(raw_created)
@@ -295,12 +342,13 @@ def _process_row(
             age_bucket = compute_age_bucket(parsed_date)
 
     if domain_hold.has_hold:
-        triage_bucket      = TriageBucket.HELD
-        recommended_action = RecommendedAction.ACTION_ALREADY_TAKEN
-        triage_confidence  = TriageConfidence.HIGH
-        evidence_status    = EvidenceStatus.SKIPPED_HOLD
-        vt_mode_used       = VtModeUsed.SKIPPED_HOLD
-        live_status        = LiveStatus.NOT_CHECKED
+        held_fields = _held_upload_preview_fields(domain_hold)
+        triage_bucket = held_fields["triage_bucket"]
+        recommended_action = held_fields["recommended_action"]
+        triage_confidence = held_fields["triage_confidence"]
+        evidence_status = held_fields["evidence_status"]
+        vt_mode_used = held_fields["vt_mode_used"]
+        live_status = held_fields["live_status"]
     else:
         triage_bucket      = TriageBucket.PENDING
         recommended_action = RecommendedAction.NONE

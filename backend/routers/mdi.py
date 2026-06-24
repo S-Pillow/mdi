@@ -100,7 +100,7 @@ from services import dashboard, export_service, job_actions, job_persistence, jo
 from services.job_store import InMemoryJob
 from services.quota_lock import QuotaLockTimeout
 from services.quota_writer import read_remaining_quota
-from services.estimate import estimate_job
+from services.estimate import estimate_job, partition_upload_items, upload_item_has_hold
 
 router = APIRouter(prefix="/api/mdi")
 
@@ -255,9 +255,7 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         accepted = list(req.items)
         rejected: list = []
         duplicates: list = []
-        held_items = [i for i in accepted if i.domain_hold.has_hold]
-        eligible_items = [i for i in accepted if not i.domain_hold.has_hold]
-        held_skipped_count = len(held_items)
+        eligible_items, held_skipped_count = partition_upload_items(accepted)
     else:
         parse_result = parse_raw_input(
             req.raw_input or "",
@@ -461,8 +459,8 @@ async def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
     if req.items:
         accepted = list(req.items)
         rejected_count = 0
-        held_items = [i for i in accepted if i.domain_hold.has_hold]
-        eligible_items = [i for i in accepted if not i.domain_hold.has_hold]
+        eligible_items, held_skipped_count = partition_upload_items(accepted)
+        held_items = [i for i in accepted if upload_item_has_hold(i)]
     else:
         if not req.raw_input or not req.raw_input.strip():
             raise HTTPException(

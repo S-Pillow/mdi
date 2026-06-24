@@ -1845,7 +1845,9 @@ function EstimatePanel({ estimate, error, stale, minimized }) {
       <div className="estimate-panel estimate-panel-minimal" role="status">
         <span className="estimate-panel-label">Last estimate</span>
         <span className="estimate-minimal-summary">
-          {accepted_count} items · {estimated_vt_calls_min}–{estimated_vt_calls_max} VT calls · {fmtDuration(estimated_duration_seconds_min)}–{fmtDuration(estimated_duration_seconds_max)}
+          {accepted_count} items
+          {held_skipped_count > 0 ? ` · ${held_skipped_count} on hold` : ''}
+          {' '}· {eligible_vt_count} eligible VT · {estimated_vt_calls_min}–{estimated_vt_calls_max} VT calls · {fmtDuration(estimated_duration_seconds_min)}–{fmtDuration(estimated_duration_seconds_max)}
         </span>
         {stale && <span className="estimate-stale-tag">Outdated</span>}
         <span className="estimate-no-quota-note">No quota consumed</span>
@@ -1870,6 +1872,12 @@ function EstimatePanel({ estimate, error, stale, minimized }) {
           <span className="estimate-stat-val">{accepted_count}</span>
           <span className="estimate-stat-lbl">Items</span>
         </div>
+        {held_skipped_count > 0 && (
+          <div className="estimate-stat">
+            <span className="estimate-stat-val">{held_skipped_count}</span>
+            <span className="estimate-stat-lbl">On hold / skipped</span>
+          </div>
+        )}
         <div className="estimate-stat">
           <span className="estimate-stat-val">{eligible_vt_count}</span>
           <span className="estimate-stat-lbl">Eligible VT</span>
@@ -1888,13 +1896,12 @@ function EstimatePanel({ estimate, error, stale, minimized }) {
             <span className="estimate-stat-lbl">Auto-rescan max</span>
           </div>
         )}
-        {held_skipped_count > 0 && (
-          <div className="estimate-stat">
-            <span className="estimate-stat-val">{held_skipped_count}</span>
-            <span className="estimate-stat-lbl">Hold-skipped</span>
-          </div>
-        )}
       </div>
+      {held_skipped_count > 0 && (
+        <p className="estimate-held-note">
+          {held_skipped_count} domain{held_skipped_count === 1 ? '' : 's'} on hold from uploaded metadata — excluded from VT estimate and quota blocking.
+        </p>
+      )}
     </div>
   )
 }

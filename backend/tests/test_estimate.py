@@ -38,9 +38,18 @@ from services.estimate import (
     RDAP_ENRICHMENT_LARGE_COUNT_THRESHOLD,
     estimate_calls_for_item,
     estimate_job,
+    partition_upload_items,
+    upload_item_has_hold,
 )
 from services.job_store import clear_all_jobs
-from models import InputType
+from services.upload_parser import parse_upload
+from models import (
+    DomainHold,
+    DomainHoldType,
+    DomainStatusSource,
+    InputType,
+    UploadedInputItem,
+)
 
 client = TestClient(app)
 
@@ -986,3 +995,194 @@ class TestMdi28cAutoRescanEstimate:
         assert result["auto_rescan_domain_eligible_max"] == 1
         assert result["auto_rescan_url_eligible_max"] == 1
         assert result["auto_rescan_estimated_quota_max"] == 9
+
+
+# ── MDI-51 — upload hold-aware quota estimate ─────────────────────────────────
+
+
+def _upload_item(
+    domain: str,
+    *,
+    position: int = 1,
+    epp_status: list[str] | None = None,
+    domain_hold: DomainHold | None = None,
+) -> UploadedInputItem:
+    hold = domain_hold or DomainHold(
+        has_hold=False,
+        hold_types=[DomainHoldType.NONE],
+        source=DomainStatusSource.NOT_CHECKED,
+        raw_statuses=[],
+    )
+    return UploadedInputItem(
+        input_original=domain,
+        input_normalized=domain,
+        input_type=InputType.DOMAIN,
+        position=position,
+        epp_status=epp_status or [],
+        domain_hold=hold,
+        domain_status_source=(
+            DomainStatusSource.UPLOADED_FILE if hold.has_hold or epp_status else DomainStatusSource.NOT_CHECKED
+        ),
+    )
+
+
+def _held_item(domain: str, hold_type: str, *, position: int = 1) -> UploadedInputItem:
+    types = []
+    if hold_type == "clientHold":
+        types = [DomainHoldType.CLIENT_HOLD]
+    elif hold_type == "serverHold":
+        types = [DomainHoldType.SERVER_HOLD]
+    elif hold_type == "both":
+        types = [DomainHoldType.CLIENT_HOLD, DomainHoldType.SERVER_HOLD]
+    hold = DomainHold(
+        has_hold=True,
+        hold_types=types,
+        source=DomainStatusSource.UPLOADED_FILE,
+        raw_statuses=[t.value for t in types],
+    )
+    return _upload_item(
+        domain,
+        position=position,
+        epp_status=[t.value for t in types],
+        domain_hold=hold,
+    )
+
+
+def _post_upload_estimate(items: list[UploadedInputItem], **kwargs) -> dict:
+    payload = {
+        "items": [i.model_dump(mode="json") for i in items],
+        "input_mode": "upload",
+        "use_domain_reports": False,
+        **kwargs,
+    }
+    resp = client.post(ESTIMATE_URL, json=payload)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestMdi51UploadHoldAwareEstimate:
+    def test_no_held_domains_all_eligible(self):
+        items = [
+            _upload_item("alpha.example"),
+            _upload_item("beta.example", position=2),
+        ]
+        body = _post_upload_estimate(items)
+        assert body["accepted_count"] == 2
+        assert body["held_skipped_count"] == 0
+        assert body["eligible_vt_count"] == 2
+        assert body["estimated_vt_calls_max"] == 6
+
+    def test_client_hold_excluded(self):
+        items = [
+            _held_item("held-client.example", "clientHold"),
+            _upload_item("clean.example", position=2),
+        ]
+        body = _post_upload_estimate(items)
+        assert body["held_skipped_count"] == 1
+        assert body["eligible_vt_count"] == 1
+        assert body["estimated_vt_calls_max"] == 3
+
+    def test_server_hold_excluded(self):
+        items = [_held_item("held-server.example", "serverHold")]
+        body = _post_upload_estimate(items)
+        assert body["held_skipped_count"] == 1
+        assert body["eligible_vt_count"] == 0
+        assert body["estimated_vt_calls_max"] == 0
+
+    def test_both_holds_excluded(self):
+        items = [_held_item("held-both.example", "both")]
+        body = _post_upload_estimate(items)
+        assert body["held_skipped_count"] == 1
+        assert body["eligible_vt_count"] == 0
+
+    def test_mixed_held_and_non_held(self):
+        items = [
+            _held_item("h1.example", "clientHold", position=1),
+            _held_item("h2.example", "serverHold", position=2),
+            _upload_item("clean1.example", position=3),
+            _upload_item("clean2.example", position=4),
+        ]
+        body = _post_upload_estimate(items)
+        assert body["accepted_count"] == 4
+        assert body["held_skipped_count"] == 2
+        assert body["eligible_vt_count"] == 2
+        assert body["estimated_vt_calls_max"] == 6
+
+    def test_all_held_zero_vt_no_quota_block(self, tmp_path):
+        items = [_held_item(f"held{i}.example", "clientHold", position=i) for i in range(1, 6)]
+        usage_file = tmp_path / "vt_usage.json"
+        usage_file.write_text(json.dumps({
+            "date_utc": "2099-01-01",
+            "daily_lookups_used": 499,
+            "daily_limit": 500,
+        }))
+        old_env = os.environ.get("VT_USAGE_FILE")
+        os.environ["VT_USAGE_FILE"] = str(usage_file)
+        try:
+            body = _post_upload_estimate(items)
+        finally:
+            if old_env is None:
+                os.environ.pop("VT_USAGE_FILE", None)
+            else:
+                os.environ["VT_USAGE_FILE"] = old_env
+        assert body["eligible_vt_count"] == 0
+        assert body["estimated_vt_calls_max"] == 0
+        assert body["total_estimated_vt_calls_max"] == 0
+        assert body["will_exceed_quota"] is False
+
+    def test_missing_status_not_false_held(self):
+        items = [_upload_item("unknown.example")]
+        body = _post_upload_estimate(items)
+        assert body["held_skipped_count"] == 0
+        assert body["eligible_vt_count"] == 1
+
+    def test_epp_status_fallback_without_domain_hold_object(self):
+        item = UploadedInputItem(
+            input_original="fallback.example",
+            input_normalized="fallback.example",
+            input_type=InputType.DOMAIN,
+            position=1,
+            epp_status=["clientHold"],
+            domain_hold=DomainHold(
+                has_hold=False,
+                hold_types=[DomainHoldType.NONE],
+                source=DomainStatusSource.NOT_CHECKED,
+                raw_statuses=[],
+            ),
+        )
+        assert upload_item_has_hold(item) is True
+        eligible, held = partition_upload_items([item])
+        assert held == 1
+        assert eligible == []
+
+    def test_duplicate_normalized_domain_held_row_wins(self):
+        csv = (
+            "DNS Form,Create Date,EPP Status,Registrar Name\n"
+            "dup.example,2020-01-01,clientTransferProhibited,Reg A\n"
+            "dup.example,2021-03-10,clientHold,Reg B\n"
+        ).encode()
+        parsed = parse_upload(csv, "dup.csv")
+        assert len(parsed.accepted) == 1
+        assert parsed.accepted[0].domain_hold.has_hold is True
+        body = _post_upload_estimate(parsed.accepted)
+        assert body["held_skipped_count"] == 1
+        assert body["eligible_vt_count"] == 0
+
+    @pytest.mark.parametrize("status_token", [
+        "CLIENTHOLD",
+        "clienthold",
+        "ClientHold",
+        "SERVERHOLD",
+        "serverhold",
+        "ServerHold",
+    ])
+    def test_case_insensitive_status_values(self, status_token):
+        csv = (
+            "DNS Form,Create Date,EPP Status,Registrar Name\n"
+            f"case.example,2020-01-01,{status_token},Reg A\n"
+        ).encode()
+        parsed = parse_upload(csv, "case.csv")
+        assert parsed.accepted[0].domain_hold.has_hold is True
+        body = _post_upload_estimate(parsed.accepted)
+        assert body["held_skipped_count"] == 1
+        assert body["eligible_vt_count"] == 0

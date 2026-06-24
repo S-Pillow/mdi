@@ -14,9 +14,10 @@ Hard guarantees:
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Sequence, Tuple
 
-from models import InputType
+from models import DomainStatusSource, InputType, UploadedInputItem
+from services.hold_detection import detect_hold
 
 # VT free-tier: 4 requests per minute → 15 seconds minimum between calls.
 VT_RATE_LIMIT_INTERVAL_SECONDS: float = 15.0
@@ -100,6 +101,39 @@ def _enrichment_warning(lookups: int) -> str:
         "De-duplication of shared registered domains reduces actual runtime. "
         "Consider splitting large batches if enrichment latency is a concern."
     )
+
+
+def upload_item_has_hold(item: UploadedInputItem) -> bool:
+    """
+    Return True when uploaded spreadsheet metadata indicates clientHold/serverHold.
+
+    Uses domain_hold when present; falls back to epp_status tokens so estimate
+    stays correct if the client round-trips epp_status without domain_hold.
+    """
+    if item.domain_hold.has_hold:
+        return True
+    if item.epp_status:
+        combined = ", ".join(item.epp_status)
+        return detect_hold(combined, DomainStatusSource.UPLOADED_FILE).has_hold
+    return False
+
+
+def partition_upload_items(
+    items: Sequence[UploadedInputItem],
+) -> Tuple[List[UploadedInputItem], int]:
+    """
+    Split upload-validated items into VT-eligible vs held/skipped counts.
+
+    Held domains are excluded from VT estimate and quota blocking math.
+    """
+    eligible: List[UploadedInputItem] = []
+    held_count = 0
+    for item in items:
+        if upload_item_has_hold(item):
+            held_count += 1
+        else:
+            eligible.append(item)
+    return eligible, held_count
 
 
 def estimate_calls_for_item(input_type: InputType, use_domain_reports: bool) -> tuple[int, int]:
