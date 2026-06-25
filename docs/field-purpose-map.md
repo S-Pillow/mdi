@@ -1262,26 +1262,62 @@ Five explicit buttons above the table (vague Actions dropdown removed in MDI-30C
 - **Rescan Selected** (MDI-15 — enabled when job complete, rows selected, scannable)
 - **Rescan Stale** (MDI-15 — enabled when eligible stale rows exist)
 
-### MDI-16 export API and fields
+### MDI-16 / MDI-54A export API and fields
 
 `POST /api/mdi/jobs/{job_id}/export` — body: `format` (`csv` | `json`),
 `scope` (`all` | `flagged` | `selected`), optional `positions` (required when
 `scope=selected`; ignored for `all`/`flagged`).
 
-**CSV columns (stable order):** position, input_original, input_normalized,
-input_type, processing_status, triage_bucket, triage_confidence,
-recommended_action, evidence_status, vt_hits, vt_suspicious, vt_total_engines,
-vt_ratio, freshness, vt_scan_date, live_status, http_status_code,
-redirect_count, created_at, age_bucket, registrar, domain_status_source,
-domain_hold_has_hold, domain_hold_source, triage_reason, error_codes.
+Export Flagged, Export All, and Export Selected all use the same backend CSV
+builder (`export_service.build_csv_export`). Scope only changes which saved
+result rows are included.
 
-**CSV exclusions:** `vt_engine_results`, full `epp_status`, `nameservers`,
-`domain_hold.raw_statuses`, stack traces, internal paths, secrets.
+**Read-only guarantee:** default CSV exports use **saved job/result data only**.
+They do **not** trigger VirusTotal, Cloudflare, WHOIS/RDAP, DNS, live-check,
+quota usage, runtime file writes, or usage-history append.
+
+#### Default CSV columns (MDI-54A — stable order)
+
+`input`, `checked_as`, `result`, `registrar`, `hold_status`, `domain_created`,
+`cloudflare_rank`, `detection_ratio`, `last_scanned`, `error`
+
+| Column | Source / meaning |
+|---|---|
+| `input` | `input_original` — operator-facing input string |
+| `checked_as` | Actual saved VT lookup method/target from `vt_mode_used` plus saved input fields (same target derivation as VT GUI URL behavior). **Not** parsed `input_type` alone. Examples: `url_report:http://example.com/`, `url_report:https://example.com/path`, `domain_report:example.com`, `skipped_on_hold`, `not_checked_quota_blocked`, `not_checked_error` |
+| `result` | Analyst summary: `flagged`, `clean`, `on_hold`, `unknown`, or `error` |
+| `registrar` | Saved registrar; blank when unavailable |
+| `hold_status` | `clientHold`, `serverHold`, `clientHold + serverHold`, `unknown`, or blank when confirmed no hold (never `none`) |
+| `domain_created` | Saved domain creation date as `YYYY-MM-DD`; blank when unavailable |
+| `cloudflare_rank` | Cloudflare Radar **Popularity bucket** display value only (drawer-style), e.g. `>200000 / UNRANKED`. Not source, checked date, raw API object, or internal field names |
+| `detection_ratio` | Saved VT ratio in slash form (e.g. `1/91`, `0/92`). Raw CSV cell is **tab-prefixed** so spreadsheet apps treat it as text and do not convert `1/91` to a date. Blank when VT skipped or unavailable; no misleading `0/0` |
+| `last_scanned` | Saved VT scan timestamp (`YYYY-MM-DD HH:MM:SS UTC`); blank when VT skipped or unavailable |
+| `error` | Concise error codes/messages from saved `errors[]`; blank when none |
+
+**`result` values:**
+
+- `on_hold` — clientHold/serverHold caused VT/live skip
+- `flagged` — VT succeeded and malicious + suspicious hits ≥ 1
+- `clean` — VT succeeded and malicious + suspicious hits = 0
+- `unknown` — no reliable VT clean/flagged decision and not clearly a technical failure
+- `error` — lookup, quota, processing, or export error prevents a reliable result
+
+**CSV exclusions (default export):** wide forensic fields such as
+`vt_engine_results`, full `epp_status`, `nameservers`, `domain_hold.raw_statuses`,
+Cloudflare source/checked-at/raw-bucket columns, hold-impact fields, MDI-49 URL
+evidence fields, stack traces, internal paths, and secrets. Use JSON evidence
+export for the fuller field set.
+
+#### JSON evidence export (unchanged by MDI-54A)
 
 **JSON evidence schema:** `mdi-evidence-v1` — includes job metadata block,
-scope, optional positions, and per-result objects with CSV fields plus
-`triage_reason` (list), sanitized `errors`, `vt_engine_results`, `epp_status`,
-`nameservers`, `domain_hold` (without `raw_statuses`), `vt_mode_used`.
+scope, optional positions, and per-result objects with the full evidence field
+set (including triage fields, sanitized `errors`, `vt_engine_results`,
+`epp_status`, `nameservers`, `domain_hold`, `vt_mode_used`, Cloudflare rank
+fields, hold-impact fields, MDI-49 VT URL evidence fields, etc.).
+
+JSON evidence remains the **fuller export path** for forensic review. MDI-54A
+changed the **default CSV contract only**.
 
 **Flagged export rule:** `triage_bucket` malicious/suspicious OR `vt_hits > 0`
 OR `vt_suspicious > 0`; held rows excluded from flagged scope (included in
