@@ -7,63 +7,39 @@ by operators. Standalone Vite/React frontend + FastAPI backend.
 
 ## What MDI does today
 
-MDI is a **production-capable** analyst tool (not a shell or placeholder). It:
+MDI is an analyst workflow for reviewing potentially malicious domains and URLs
+using saved evidence, quota-aware checks, and exportable results. It:
 
 - Accepts **paste** input (domains/URLs, one per line or separated)
 - Accepts **CSV/XLSX upload** with automatic header detection (legacy `.xls` not supported)
 - Runs **quota-free** input validation, upload preview, and quota/runtime **estimate**
+- **Hold-aware upload estimate** — spreadsheet rows with `clientHold` / `serverHold` (including pipe-delimited EPP status cells) are counted as hold-skipped and excluded from eligible VT estimates
 - Runs **VirusTotal checks only after explicit job submission** (`Run MDI Check`)
-- Skips VT and live checks for **held domains** (`clientHold` / `serverHold` from upload or enrichment)
+- Skips VT and live checks for **held domains** (from upload metadata or RDAP/WHOIS enrichment)
+- Surfaces **limited VT URL evidence** on URL-report checks (targeted brand, redirection chain, last final URL) — context only, not enforcement
 - Enriches registered domains via **RDAP/WHOIS** (age, registrar, hold context)
+- Optionally enriches with **Cloudflare Radar DNS popularity** rank/bucket when enabled (blast-radius context, not maliciousness proof)
+- Provides **hold-impact guidance** from popularity bucket (Critical → Unknown) — guidance only; does not override triage or act on registries
 - Runs **live URL checks** for eligible **flagged** items during job processing
+- Classifies results with **updated recommended actions** (investigate/hold review, request new scan for stale evidence, verify/investigate when live/age is uncertain, action already taken for held domains)
 - Classifies results into **triage cards**, a priority-sorted **results table**, and a **detail drawer**
 - Provides a per-row **More Actions** menu (export evidence, refresh, request scan)
-- Exposes **Run Options** (sidebar) and **Advanced Settings** (nav gear menu)
+- Exposes **Run Options** (sidebar) and **Advanced Settings** (nav gear menu), including optional Cloudflare Radar rank lookup
 - Shows an operational **dashboard** (metadata-only aggregates; no domain search)
-- Exports **CSV** (all / flagged / selected) and **JSON evidence** from results bulk actions, row menu, or drawer
+- Exports **CSV** (default) or **XLSX** analyst reports (all / flagged / selected) and **JSON evidence** for full forensic fields
 
-**Not in MVP:** automated enforcement, block rules, watchlist, Salesforce/ticketing,
-monitoring, or persistent domain history search.
+MDI does not perform automated enforcement or takedown actions; operator review
+remains required.
 
 ## MDI Processing Flow
 
-MDI validates quota first, skips already-held domains, enriches domain context
-where needed, uses VirusTotal for eligible items, reruns triage after
-rescans/live checks, and saves the final result.
-
-```mermaid
-flowchart TD
-    A[Submit] --> B{Enough quota?}
-    B -- No --> C[Rejected]
-    B -- Yes --> D[For each domain]
-
-    D --> E{Already on hold?}
-    E -- Yes --> F[HELD → done]
-    E -- No --> G[RDAP lookup]
-
-    G --> H{RDAP failed?}
-    H -- Yes --> I[WHOIS fallback]
-    H -- No --> J{Hold found?}
-    I --> J
-
-    J -- Yes --> K[HELD → done]
-    J -- No --> L[VT lookup]
-
-    L --> M{Quota left?}
-    M -- No --> N[ERROR → done]
-    M -- Yes --> O[Triage initial result]
-
-    O --> P{Auto-rescan needed?}
-    P -- Yes --> Q[New VT scan]
-    Q --> R[Re-triage]
-    P -- No --> S{Flagged or suspicious?}
-    R --> S
-
-    S -- Yes --> T[Live check]
-    T --> U[Re-triage]
-    S -- No --> V[Final result → save]
-    U --> V
-```
+- Upload or paste domains/URLs.
+- MDI normalizes input and previews estimated quota usage.
+- Spreadsheet uploads detect hold statuses (comma, semicolon, pipe, or whitespace separated) and exclude hold-skipped rows from VT quota estimates.
+- MDI checks eligible items using the selected VT mode (URL report or domain report for bare domains).
+- MDI enriches saved results with domain/URL evidence, registrar/hold context, optional Cloudflare Radar popularity context, freshness/live context, and triage guidance.
+- Results show triage, recommended action, hold-impact guidance, VT ratio, freshness, live status, created date, and age.
+- Operators can export CSV/XLSX analyst reports or JSON evidence.
 
 ## Architecture
 
@@ -137,3 +113,6 @@ and frontend asset filenames when auditing production.
 
 Copy `.env.example` to `.env` on the production host and fill in real values.
 Production secrets are injected via `/etc/dns-tool/secrets.env` (never commit).
+
+Optional Cloudflare Radar rank lookup requires `CLOUDFLARE_RADAR_API_TOKEN` in
+server-side secrets when the job option is enabled.

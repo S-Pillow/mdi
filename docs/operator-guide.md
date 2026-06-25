@@ -16,8 +16,11 @@ domains and URLs submitted by operators. For each accepted item, MDI may:
 - Validate and normalize input
 - Enrich registered domains via RDAP/WHOIS (domain age, registrar, hold status)
 - Query VirusTotal (VT) for malicious/suspicious engine counts
+- Surface **limited VT URL evidence** on URL-report rows (brand, redirection chain, final URL)
 - Run optional live URL checks on flagged items
-- Classify items into triage buckets with recommended actions
+- Optionally fetch **Cloudflare Radar DNS popularity** rank when enabled (context only)
+- Show **hold-impact guidance** from popularity bucket (guidance only — no automated holds)
+- Classify items into triage buckets with **recommended actions** (investigate/hold review, request new scan, verify/investigate, action already taken)
 - Support manual VT report refresh and new-scan requests
 - Optionally auto-rescan stale flagged items (URL scans and domain reanalysis) during initial job processing
 - Export CSV summaries or JSON evidence
@@ -38,9 +41,11 @@ action on your behalf.
 
 ### Triage tool, not enforcement
 
-Treat MDI output as **analyst guidance**. `recommended_action` values such as
-`investigate`, `monitor`, or `takedown` are suggestions based on available
-signals. Confirm findings through your own procedures before any external action.
+Treat MDI output as **analyst guidance**. Recommended action labels such as
+**Investigate / Hold Review**, **Request New Scan**, or **Verify / Investigate**
+describe how to interpret saved evidence — they do not trigger enforcement or
+registry changes. Confirm findings through your own procedures before any
+external action.
 
 ---
 
@@ -110,8 +115,8 @@ without scheme, trailing slashes, etc.).
 
 1. Choose a **CSV or XLSX** file (legacy `.xls` is not supported).
 2. Click **Validate Upload** — preview shows accepted, rejected, held, and detected columns. **No quota consumed.**
-3. Review column mapping and held domains in the upload validation panel.
-4. Click **Estimate Quota & Runtime** — held upload domains are excluded from the VT estimate.
+3. Review column mapping and held domains in the upload validation panel. EPP status cells may use comma, semicolon, **pipe** (`|`), or whitespace separators (common in registry exports).
+4. Click **Estimate Quota & Runtime** — rows already on **clientHold** or **serverHold** from the spreadsheet are counted as **hold-skipped** and **excluded from eligible VT count** and worst-case VT call estimate. **Paste mode is unchanged** — hold-skipping in estimate applies to upload mode only when upload metadata confirms a hold.
 5. Click **Run MDI Check** — upload metadata (create date, EPP status, registrar, nameservers) is preserved into job results.
 
 **Domain column** (required): DNS Form, Domain, Domain Name, Hostname, Host, URL, Target, Indicator.
@@ -154,7 +159,7 @@ Estimate or Run MDI Check and are **saved with the job at submit time**.
 | Location | Label in UI | Controls |
 |---|---|---|
 | **Sidebar** | **Run Options** | Domain reports for bare domains (active); live-check scope (read-only — flagged items only, not configurable today) |
-| **Nav gear menu** | **Advanced Settings** | Stale threshold (active); auto-rescan + max auto-rescans (active, **OFF by default**, quota-consuming when enabled) |
+| **Nav gear menu** | **Advanced Settings** | Stale threshold (active); auto-rescan + max auto-rescans (active, **OFF by default**, quota-consuming when enabled); **Cloudflare Radar rank lookup** (optional, popularity context only — requires server token when enabled) |
 
 **Exports are not configured in Settings.** Use Results bulk actions, row More
 Actions, or the detail drawer after a job completes. Exports do not consume VT quota.
@@ -162,8 +167,8 @@ Actions, or the detail drawer after a job completes. Exports do not consume VT q
 **Live-check scope** is fixed today (eligible flagged items during processing).
 Custom live-check settings are deferred (future backlog).
 
-**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring,
-or automated enforcement — these do not appear in Settings.
+**Not implemented in MDI:** Watchlist, Create Block Rule, Salesforce/ticketing,
+monitoring, or automated enforcement — these do not appear in Settings.
 
 When reviewing a recovered or in-progress job, both panels show **Locked**;
 editable values apply to the next run only. See §2 for dismiss/clear behavior.
@@ -182,10 +187,15 @@ results exist it minimizes to a "Last estimate" line when still present.
 Estimate shows:
 
 - Accepted / rejected / duplicate counts
-- Estimated VT call range (min/max)
+- **Eligible VT** count and **hold-skipped** count (upload mode when spreadsheet rows are on hold)
+- Estimated VT call range (min = all cached; max = worst case)
 - Estimated duration range
 - Current quota remaining
 - Whether the job would exceed available quota (`will_exceed_quota`)
+
+The estimate panel states **Estimate only — no VT calls, no quota consumed**.
+When hold-skipped rows are present, copy explains that those domains are excluded
+from VT estimate and quota blocking.
 
 ### Shared VT quota
 
@@ -271,14 +281,78 @@ the current job only. Active filter is indicated by card styling and `aria-press
 |---|---|
 | **Triage bucket** | Primary classification: malicious, suspicious, held, clean, etc. |
 | **Confidence** | high / medium / low / unknown — strength of triage signal |
-| **Recommended action** | Operator guidance: investigate, monitor, takedown, clear, skip, etc. |
+| **Recommended action** | Operator guidance label — see §7.1 |
+| **Hold Impact** | Popularity-based hold-impact level (Critical … Unknown) — guidance only |
 | **VT ratio** | Malicious hits vs total engines (e.g. `3/72`) |
 | **Freshness** | fresh, stale, very_stale, never_scanned — based on VT scan date |
-| **Live status** | HEAD-request outcome for flagged URL-mode items |
-| **Evidence status** | complete, partial, none — whether expected checks ran |
+| **Live status** | HEAD-request outcome for eligible flagged URL-mode items |
+| **Evidence status** | complete, partial, none, skipped_hold — whether expected checks ran |
 
 Rows are priority-sorted by virtual triage tier (critical flagged+live+recent
 first).
+
+### 7.1 Recommended action labels (MDI-52)
+
+These are **guidance text**, not buttons. Legacy labels may appear on older
+recovered jobs.
+
+| UI label | Meaning for analysts |
+|---|---|
+| **Investigate / Hold Review** | VT flagged the item and live/recent context suggests active risk — review evidence and consider hold workflow through your normal procedures. MDI does not place holds. |
+| **Request New Scan** | VT report is **stale** or **very stale** — refresh evidence with **Request New Scan** (or a new job) before relying on the result for action. Prefer this wording over “refresh” for stale flagged rows. |
+| **Verify / Investigate** | Flagged but live check shows down, or age/freshness/live context is ambiguous — verify the domain/URL and investigate before action. |
+| **Action Already Taken** | Registry **clientHold** or **serverHold** is present — VT was skipped because the hold is the operative action. |
+| **No Action Based on VT** | Clean VT result with **fresh** report — no VT-driven action suggested. |
+| **Retry Lookup** | Processing or quota error prevented a reliable VT result — retry when quota/connectivity allows. |
+
+### 7.2 VT URL evidence (MDI-49)
+
+For rows checked via **URL report**, the detail drawer may show **VT URL Evidence**
+when VT returned it:
+
+- **Targeted brand** — brand name(s) reported by VT phishing engines
+- **Brand sources** — which VT engines reported the brand
+- **Redirection chain** — intermediate URLs VT observed
+- **Last final URL** — final URL after redirects
+
+Use this as **supporting context** alongside VT ratio and triage — not as proof of
+maliciousness on its own and not a substitute for JSON evidence export. Fields are
+absent for domain-report mode or when VT omitted them. Exports do not trigger new
+VT calls.
+
+### 7.3 Cloudflare Radar popularity (MDI-50A / MDI-50B)
+
+When **Cloudflare Radar rank lookup** is enabled in Advanced Settings and the server
+is configured, MDI adds **DNS popularity / blast-radius context** after VT processing.
+
+**How to read it:**
+
+- Table/drawer shows a **popularity bucket** (e.g. `>200000 / UNRANKED`, `TOP 1K`)
+- Rank data is **optional** — may show unavailable if lookup was off, token missing, or API error
+
+**Do not infer:**
+
+- Maliciousness or clean verdict from rank alone
+- That Cloudflare rank changed VT detection counts
+- That MDI will block, release, or escalate based on rank
+
+Cloudflare URL Scanner and Cloudflare Intel are **not** in scope for MDI.
+
+### 7.4 Hold Impact guidance (MDI-50C)
+
+**Hold Impact** estimates possible operational blast radius if an analyst were to
+pursue a registry hold — based on **Cloudflare popularity bucket only**.
+
+| Level | How to treat it |
+|---|---|
+| **Critical** / **High** | Highly or moderately popular domain — review blast radius and escalate internally before any hold decision. |
+| **Medium** | Measurable popularity — consider business/customer impact. |
+| **Low** | Lower popularity bucket — lower rank-based concern; still requires analyst review. |
+| **None** | Unranked in MDI’s bucket — no rank-based hold-impact warning. |
+| **Unknown** | Rank lookup disabled, failed, or unavailable — **do not** use rank as hold-impact evidence. |
+
+Hold Impact is **guidance only**. It does not override triage, recommended action,
+VT results, or trigger automated holds/takedowns.
 
 ---
 
@@ -327,8 +401,8 @@ setting adds it.
 |---|---|
 | Parse-time rejection (`invalid_input`, `ip_address_not_supported`) | Fix input; wait for auto-validation — do **not** Run MDI Check until accepted |
 | VT failure / quota block on row (`retry_lookup`) | New job later when quota allows |
-| Stale VT report (`refresh_report`) | **Refresh Report** (~1 quota unit) |
-| Very stale / pending scan (`request_new_scan`) | **Request New Scan** (~2–4 units); URL-mode only |
+| Stale VT report | **Request New Scan** (~2–4 units) when triage recommends it; **Refresh Report** (~1 unit) when a lighter re-fetch is enough |
+| Very stale / pending scan (`request_new_scan`) | **Request New Scan** (~2–4 units); URL-mode or domain reanalysis per mode |
 | `quota_lock_timeout` | Wait and retry — lock contention, **not** daily quota exhaustion |
 | `auth_error` / `no_api_key` | **Contact admin** — configuration fix, not analyst retry |
 | Export failed (`no_flagged_rows`, etc.) | Adjust export scope — **no new lookups** |
@@ -344,8 +418,11 @@ Open a row to inspect full evidence. Sections include:
 
 - **Triage classification** — bucket, confidence, recommended action, reasons
 - **VT Summary** — hits, suspicious count, ratio, scan date, freshness
+- **VT URL Evidence** — targeted brand, redirection chain, last final URL (URL-report rows when present)
 - **VT Hit Details** — per-engine detections (when present)
-- **Domain Age Context** — created date, age bucket, registrar (from RDAP/WHOIS)
+- **Domain Age Context** — created date, age bucket, registrar (from RDAP/WHOIS or upload)
+- **Cloudflare Radar Rank** — popularity bucket, source, checked time (when lookup ran)
+- **Hold Impact Guidance** — level and reason from popularity bucket (when derivable)
 - **Live Activity Context** — live status and check timestamp (when run)
 - **Triage Reasons** — plain-language explanation strings
 - **Evidence** — evidence status, freshness, and structured `errors[]` with severity badges
@@ -366,7 +443,7 @@ Clicking it opens a compact **Actions** menu with four explicit controls:
 Disabled actions use `disabled` + `aria-disabled` and show a tooltip explaining why.
 Only one row menu is open at a time. Press **Escape** or click outside to close.
 
-**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
+**Not implemented:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
 automated enforcement actions do not appear in this menu.
 
 ### Detail drawer actions
@@ -374,7 +451,7 @@ automated enforcement actions do not appear in this menu.
 The drawer **8. Actions** section uses the same four controls and contracts as
 the row More Actions menu (see above).
 
-**Not in MVP:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
+**Not implemented:** Watchlist, Create Block Rule, Salesforce/ticketing, monitoring, or
 automated enforcement actions do not appear in the drawer.
 
 ---
@@ -531,12 +608,12 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 | **Row click-target refinement** | Deferred — eye icon vs row click behavior |
 | **Dashboard quota trend surfacing** | Deferred — dashboard is metadata aggregates; nav quota widget shows current counter |
 
-### Rejected / out of scope (MVP)
+### Rejected / out of scope
 
 | Feature | Status |
 |---|---|
-| **Watchlist** | **Not implemented** — rejected for MVP unless explicitly approved later |
-| **Create Block Rule** | **Not implemented** — rejected for MVP |
+| **Watchlist** | **Not implemented** |
+| **Create Block Rule** | **Not implemented** |
 | **Salesforce / ticketing integration** | **Not implemented** |
 | **Automated serverHold/clientHold enforcement** | **Not implemented** — MDI surfaces hold status; does not act on registries |
 | **Enforcement actions** | **None** — MDI does not block, quarantine, or modify infrastructure |
@@ -589,7 +666,7 @@ Check the quota widget in the nav bar. It reflects the shared counter.
 8. ☐ Filter with triage cards
 9. ☐ Inspect rows in detail drawer
 10. ☐ Refresh or scan only when justified (quota-aware)
-11. ☐ Export CSV/JSON if needed
+11. ☐ Export CSV/XLSX or JSON evidence if needed
 12. ☐ Check dashboard for operational trends (metadata only)
 
 For deployment, incidents, or permission errors, see the

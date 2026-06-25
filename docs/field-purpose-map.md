@@ -74,6 +74,25 @@ UI control / feature status (MDI-32):
 | `vt_engine_results` | `Optional[List[Dict]]` | display, reporting | Non-clean VT engine detections. **Excluded from CSV**; **included in JSON evidence** (`mdi-evidence-v1`). |
 | `vt_report_url` | `Optional[str]` | display, action link | Computed public VT GUI URL (MDI-34). Domain report → `/gui/domain/{domain}`; URL report → `/gui/url/{base64url}`. Browser only — no VT API, no quota. UI disabled when absent. |
 
+### VT URL evidence (MDI-49)
+
+Limited fields extracted from **VT URL report** attributes during the initial VT
+lookup (URL-report mode only — full URLs and bare domains checked as
+`http://{domain}/`). **Not populated for domain-report mode.** Evidence/context
+only; does not change triage, quota, or enforcement. No additional VT calls on
+export.
+
+| Field | Type | Primary Purpose | Source | Quota | CSV/XLSX | JSON |
+|---|---|---|---|---|---|---|
+| `vt_targeted_brand` | `Optional[str]` | display | VT URL report `targeted_brand` map (unique brands joined with `; `) | On initial VT only | No | Yes |
+| `vt_targeted_brand_sources` | `List[str]` | display | VT engine names that reported brand evidence | On initial VT only | No | Yes |
+| `vt_redirection_chain` | `List[str]` | display | VT `redirection_chain` (URLs before final; excludes last final URL) | On initial VT only | No | Yes |
+| `vt_last_final_url` | `Optional[str]` | display | VT `last_final_url` after redirects | On initial VT only | No | Yes |
+
+Blank when VT did not run, mode was domain report, or VT attributes omitted these
+fields. Shown in detail drawer when any field is present. Refreshed on manual
+Refresh/Scan when VT returns updated URL report data.
+
 ### URL live activity
 
 | Field | Type | Primary Purpose | Notes |
@@ -81,21 +100,31 @@ UI control / feature status (MDI-32):
 | `live_status` | `LiveStatus` | display, filtering, reporting | HEAD-request result: `active`, `redirect`, `not_found`, `timeout`, `dns_failure`, `blocked`, etc. |
 | `live_checked_at` | `Optional[datetime]` | display, audit | UTC timestamp when the live check ran. |
 
-### Cloudflare Radar rank (MDI-50B)
+### Cloudflare Radar rank (MDI-50A contract / MDI-50B integration)
 
-Popularity / blast-radius context from Cloudflare Radar 1.1.1.1 DNS data. **Not maliciousness evidence.** Does not change VT flagged logic, `triage_bucket`, or `recommended_action`. Does not consume VT quota. Default off (`cloudflare_rank_lookup_enabled=false`).
+**MDI-50A** defined the discovery/data contract: Cloudflare Radar **1.1.1.1 DNS
+popularity rank** is blast-radius / popularity context — **not maliciousness
+evidence** and does not change VT hits, triage, or recommended actions.
+Cloudflare URL Scanner and Cloudflare Intel are **out of scope**.
+
+**MDI-50B** integrated optional per-domain lookup after VT processing. Requires
+`CLOUDFLARE_RADAR_API_TOKEN` in `/etc/dns-tool/secrets.env` when enabled. Job
+option: `cloudflare_rank_lookup_enabled` (backend default **false**). Does not
+consume VT quota. Rank data may be unavailable (auth, rate limit, unranked domain).
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
 | `cloudflare_rank_available` | `bool` | display | `true` when rank or bucket data obtained. |
 | `cloudflare_rank` | `Optional[int]` | display | Exact rank when in global top 100. |
-| `cloudflare_rank_bucket` | `Optional[str]` | display, filtering | `TOP_100` … `TOP_1M`, `UNRANKED`, `UNKNOWN`. |
+| `cloudflare_rank_bucket` | `Optional[str]` | display, filtering | Normalized bucket: `TOP_100`, `TOP_1K`, `TOP_5K`, `TOP_10K`, `TOP_100K`, `TOP_1M`, `UNRANKED`, `UNKNOWN`. |
 | `cloudflare_rank_raw_bucket` | `Optional[str]` | audit | Raw API bucket string (e.g. `200`, `>200000`). |
 | `cloudflare_rank_source` | `Optional[str]` | audit | `cloudflare_radar_popular`. |
 | `cloudflare_rank_checked_at` | `Optional[datetime]` | display, audit | UTC lookup timestamp. |
 | `cloudflare_rank_error` | `Optional[str]` | display, audit | Sanitized error code (`auth_failed`, `rate_limited`, …). |
 
-Job option: `cloudflare_rank_lookup_enabled` (default `false`). Token: `CLOUDFLARE_RADAR_API_TOKEN` in `/etc/dns-tool/secrets.env` (server-side only).
+**Display/export bucket example:** `>200000 / UNRANKED` (raw inequality + normalized
+bucket). CSV/XLSX analyst export includes popularity bucket display in
+`cloudflare_rank` column only; full rank fields remain in JSON evidence.
 
 ### Hold-impact guidance (MDI-50C)
 
@@ -113,18 +142,36 @@ Analyst guidance derived from `cloudflare_rank_bucket` only. **Not maliciousness
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
-| `hold_impact_level` | `Optional[str]` | display | `critical`, `high`, `medium`, `low`, `none`, `unknown`. |
-| `hold_impact_reason` | `Optional[str]` | display | Operator-facing guidance text for the level. |
+| `hold_impact_level` | `Optional[str]` | display, guidance | `critical`, `high`, `medium`, `low`, `none`, `unknown`. Derived post-job from stored `cloudflare_rank_bucket` only. |
+| `hold_impact_reason` | `Optional[str]` | display, guidance | Operator-facing text for the level. No enforcement; does not override VT/triage/`recommended_action`. |
 
 ### Triage
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
 | `triage_bucket` | `TriageBucket` | display, filtering, reporting | `malicious`, `suspicious`, `held`, `clean`, `unresolvable`, `error`, `pending`. Top-level classification. |
-| `triage_reason` | `Optional[str]` | display | Short plain-language explanation, e.g. `"VT: 5 engines flagged malicious"`. |
-| `triage_confidence` | `TriageConfidence` | display, filtering | `high`, `medium`, `low`, `unknown`. |
-| `recommended_action` | `RecommendedAction` | display, workflow | `investigate`, `takedown`, `monitor`, `clear`, `skip`, `manual_review`, `none`. Operator guidance only. |
-| `evidence_status` | `EvidenceStatus` | display, audit | `complete`, `partial`, `none`. Whether all expected checks ran. |
+| `triage_reason` | `Optional[str]` | display | Short plain-language explanation bullets (list). |
+| `triage_confidence` | `TriageConfidence` | display, filtering | `high`, `medium`, `low`, `unknown`, `clean`. |
+| `recommended_action` | `RecommendedAction` | display, guidance | MDI-52 PRD-aligned operator labels — guidance only, no automated buttons. See **Recommended action values (MDI-52)** below. |
+| `evidence_status` | `EvidenceStatus` | display, audit | `complete`, `partial`, `none`, `skipped_hold`. Whether expected checks ran. |
+
+#### Recommended action values (MDI-52)
+
+Current primary labels from `triage_rules.py` (legacy enum values may appear on
+older recovered jobs):
+
+| Value | UI label | When used | Quota |
+|---|---|---|---|
+| `investigate_hold` | Investigate / Hold Review | Flagged + active/recent/live context | None (guidance) |
+| `request_new_scan` | Request New Scan | Flagged or clean + stale/very_stale VT report | None until operator runs scan |
+| `verify_investigate` | Verify / Investigate | Flagged + no-live or ambiguous live/age/freshness | None (guidance) |
+| `action_already_taken` | Action Already Taken | Domain on registry hold | None |
+| `no_action_based_on_vt` | No Action Based on VT | Clean + fresh VT evidence | None |
+| `retry_lookup` | Retry Lookup | Error/quota block before usable VT | Retry may consume quota |
+
+Legacy values preserved for persisted jobs: `investigate`, `takedown`, `monitor`,
+`clear`, `skip`, `manual_review`, `refresh_report`, `review_for_action`, `none`.
+Stale flagged rows use **`request_new_scan`**, not `refresh_report`.
 
 ### Errors (`MdiError` — MDI-22 / MDI-22B)
 
@@ -220,11 +267,17 @@ are identical to `MdiInputItem`.
 | `source_row` | `int \| null` | audit | 1-based row number in the source file. |
 | `source_sheet` | `str \| null` | audit | Worksheet name for XLSX uploads. |
 
-### Upload job workflow (MDI-30A)
+### Upload job workflow (MDI-30A / MDI-51)
 
-- `POST /api/mdi/jobs/upload-preview` — quota-free parse; returns `columns_detected`, `missing_optional_columns`, `header_row`, `source_sheet`.
-- `POST /api/mdi/jobs/estimate` with `items` + `input_mode=upload` — excludes held upload domains from VT estimate.
+- `POST /api/mdi/jobs/upload-preview` — quota-free parse; returns `columns_detected`, `missing_optional_columns`, `header_row`, `source_sheet`, `held_skipped_count`.
+- `POST /api/mdi/jobs/estimate` with `items` + `input_mode=upload` — **MDI-51:** excludes confirmed-held upload domains from `eligible_vt_count` and VT call min/max; surfaces `held_skipped_count`. Paste mode: `held_skipped_count` is always `0`.
 - `POST /api/mdi/jobs/submit` with `items` + `input_mode=upload` — preserves upload metadata into `MdiResultItem`; held domains skip VT/live checks.
+
+**Hold detection from upload EPP status (offline):** `hold_detection.detect_hold()`
+splits status cells on comma, semicolon, **pipe** (`|`), whitespace, or newline —
+including production-style exports such as
+`clientTransferProhibited|clientHold|inactive`. ICANN URL suffixes on tokens are
+stripped. Only `clientHold` and `serverHold` trigger hold-skip.
 
 ### Hold detection fields (offline)
 
@@ -318,20 +371,23 @@ This translation happens in the service layer to avoid mutating the stored norma
 Quota is incremented per `calls_made` reported by `vt_service.fetch_report()`.
 Atomic write: `vt_usage.json.tmp → os.replace() → vt_usage.json`.
 
-### Triage mapping (MDI-06)
+### Triage mapping (MDI-06 / MDI-52)
+
+Authoritative rules: `backend/services/triage_rules.py`. Stale flagged/clean rows
+recommend **`request_new_scan`**, not `refresh_report`.
 
 | Condition | `triage_bucket` | `recommended_action` | `evidence_status` |
 |---|---|---|---|
-| `vt_malicious > 0` | `malicious` | `investigate` | `complete` |
-| `vt_malicious == 0, vt_suspicious > 0` | `suspicious` | `manual_review` | `complete` |
-| Both 0, engines > 0 | `clean` | `clear` | `complete` |
-| Both 0, engines == 0 (never scanned) | `pending` | `none` | `partial` |
-| VT blocking error (429, 5xx, timeout) | `error` | `retry_lookup` | `partial` |
-| VT success + RDAP/WHOIS warning | follows VT | follows VT | `complete` or `partial` |
-| VT success + live-check warning | follows VT | follows VT | `complete` or `partial` |
-| Confirmed hold (held item) | `held` | `action_already_taken` | `skipped_hold` |
-| Quota exhausted mid-run (skip) | `error` | `retry_lookup` | `partial` |
-| Quota lock timeout | `error` | `retry_lookup` | `partial` |
+| Confirmed hold | `held` | `action_already_taken` | `skipped_hold` |
+| Blocking error / quota skip (no VT) | `error` | `retry_lookup` | `partial` |
+| Flagged + live and/or recent | `malicious` / `suspicious` | `investigate_hold` | `complete` |
+| Flagged + stale / very_stale | `malicious` / `suspicious` | `request_new_scan` | `complete` |
+| Flagged + no-live | `malicious` / `suspicious` | `verify_investigate` | `complete` |
+| Flagged (catch-all) | `malicious` / `suspicious` | `verify_investigate` | `complete` |
+| Clean + fresh | `clean` | `no_action_based_on_vt` | `complete` |
+| Clean + stale / very_stale | `clean` | `request_new_scan` | `complete` |
+| Clean + unknown freshness | `clean` | `verify_investigate` | `complete` |
+| No engines / pending | `pending` | `retry_lookup` | `partial` |
 
 ### Freshness classification (`vt_service.classify_freshness`)
 
@@ -393,8 +449,8 @@ This endpoint performs no external calls, creates no jobs, and mutates no runtim
 
 | Field | Type | Primary Purpose | Notes |
 |---|---|---|---|
-| `eligible_vt_count` | `int` | display | Items eligible for VT checks. Paste: equals accepted count when hold is NOT_CHECKED. Upload: excludes confirmed-held items. |
-| `held_skipped_count` | `int` | display | Items confirmed-held that contribute 0 VT calls. Always `0` for paste input. Populated for upload mode (MDI-30A). |
+| `eligible_vt_count` | `int` | display | Items eligible for VT checks. Paste: equals accepted count when hold is NOT_CHECKED. Upload (MDI-51): excludes confirmed-held items (`held_skipped_count`). |
+| `held_skipped_count` | `int` | display | Items confirmed-held from upload metadata; contribute **0** VT calls. Always `0` for paste input. Shown in upload preview and estimate panel when > 0. |
 
 ### Input-type breakdown fields
 
