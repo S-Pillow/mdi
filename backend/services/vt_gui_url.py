@@ -49,6 +49,31 @@ def _vt_report_was_retrieved(
     return False
 
 
+def vt_lookup_target_for_item(item: "MdiResultItem") -> Optional[str]:
+    """
+    Reconstruct the VT lookup target from saved row fields (no API calls).
+
+    Matches the target MDI used when vt_mode_used is url_report or domain_report.
+    """
+    mode = item.vt_mode_used
+    normalized = (item.input_normalized or "").strip()
+    if not normalized:
+        return None
+
+    if mode == VtModeUsed.DOMAIN_REPORT:
+        domain = normalized.lower().rstrip(".")
+        return domain if _is_plausible_domain(domain) else None
+
+    if mode == VtModeUsed.URL_REPORT:
+        if item.input_type == InputType.URL:
+            url_target = normalized
+        else:
+            url_target = f"http://{normalized.lower().rstrip('.')}/"
+        if url_target.startswith(("http://", "https://")):
+            return url_target
+    return None
+
+
 def vt_gui_report_url_for_item(item: "MdiResultItem") -> Optional[str]:
     """
     Build a safe VT GUI URL from persisted row data, or None when unavailable.
@@ -68,24 +93,12 @@ def vt_gui_report_url_for_item(item: "MdiResultItem") -> Optional[str]:
     ):
         return None
 
-    normalized = (item.input_normalized or "").strip()
-    if not normalized:
+    target = vt_lookup_target_for_item(item)
+    if not target:
         return None
 
     if mode == VtModeUsed.DOMAIN_REPORT:
-        domain = normalized.lower().rstrip(".")
-        if not _is_plausible_domain(domain):
-            return None
-        return f"{VT_GUI_BASE}/domain/{domain}"
+        return f"{VT_GUI_BASE}/domain/{target}"
 
-    # URL report mode — link only from the normalized URL target MDI used for VT
-    if item.input_type == InputType.URL:
-        url_target = normalized
-    else:
-        url_target = f"http://{normalized.lower().rstrip('.')}/"
-
-    if not url_target.startswith(("http://", "https://")):
-        return None
-
-    return f"{VT_GUI_BASE}/url/{_vt_url_id(url_target)}"
+    return f"{VT_GUI_BASE}/url/{_vt_url_id(target)}"
 

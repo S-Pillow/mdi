@@ -13,7 +13,11 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import re
+
 from models import (
+    DomainHoldType,
+    DomainStatusSource,
     ExportFormat,
     ExportRequest,
     ExportScope,
@@ -21,50 +25,25 @@ from models import (
     MdiProcessingStatus,
     MdiResultItem,
     TriageBucket,
+    VtModeUsed,
 )
 from services.job_store import InMemoryJob
+from services.vt_gui_url import vt_lookup_target_for_item
 
 CSV_HEADERS: List[str] = [
-    "position",
-    "input_original",
-    "input_normalized",
-    "input_type",
-    "processing_status",
-    "triage_bucket",
-    "triage_confidence",
-    "recommended_action",
-    "evidence_status",
-    "vt_hits",
-    "vt_suspicious",
-    "vt_total_engines",
-    "vt_ratio",
-    "freshness",
-    "vt_scan_date",
-    "live_status",
-    "http_status_code",
-    "redirect_count",
-    "created_at",
-    "age_bucket",
+    "input",
+    "checked_as",
+    "result",
     "registrar",
-    "domain_status_source",
-    "domain_hold_has_hold",
-    "domain_hold_source",
-    "triage_reason",
-    "error_codes",
-    "cloudflare_rank_available",
+    "hold_status",
+    "domain_created",
     "cloudflare_rank",
-    "cloudflare_rank_bucket",
-    "cloudflare_rank_raw_bucket",
-    "cloudflare_rank_source",
-    "cloudflare_rank_checked_at",
-    "cloudflare_rank_error",
-    "hold_impact_level",
-    "hold_impact_reason",
-    "vt_targeted_brand",
-    "vt_targeted_brand_sources",
-    "vt_redirection_chain",
-    "vt_last_final_url",
+    "detection_ratio",
+    "last_scanned",
+    "error",
 ]
+
+_CLOUDFLARE_INEQUALITY_BUCKET_RE = re.compile(r"^\s*>\s*\d+\s*$")
 
 _INJECTION_FIRST_CHARS = frozenset("=+-@")
 _SCHEMA_VERSION = "mdi-evidence-v1"
@@ -202,49 +181,168 @@ def _enum_value(value: Any) -> Any:
     return value
 
 
-def _result_csv_row(result: MdiResultItem) -> List[str]:
+def _vt_export_has_scan(result: MdiResultItem) -> bool:
+    """True when saved row data includes a completed VT report lookup."""
+    if result.vt_mode_used not in (VtModeUsed.URL_REPORT, VtModeUsed.DOMAIN_REPORT):
+        return False
+    if result.vt_scan_date is not None:
+        return True
+    if (result.vt_total_engines or 0) > 0:
+        return True
+    return False
+
+
+def format_checked_as(result: MdiResultItem) -> str:
+    mode = result.vt_mode_used
+    if mode == VtModeUsed.SKIPPED_HOLD:
+        return "skipped_on_hold"
+    if mode == VtModeUsed.SKIPPED_QUOTA:
+        return "not_checked_quota_blocked"
+    if mode in (VtModeUsed.URL_REPORT, VtModeUsed.DOMAIN_REPORT):
+        target = vt_lookup_target_for_item(result)
+        if target:
+            return f"{mode.value}:{target}"
+    if (
+        mode == VtModeUsed.NOT_CHECKED
+        or result.processing_status == MdiProcessingStatus.ERROR
+        or result.errors
+    ):
+        return "not_checked_error"
+    return "not_checked_error"
+
+
+def format_export_result(result: MdiResultItem) -> str:
+    if (
+        result.processing_status == MdiProcessingStatus.HOLD_SKIPPED
+        or result.vt_mode_used == VtModeUsed.SKIPPED_HOLD
+        or result.triage_bucket == TriageBucket.HELD
+        or _is_held(result)
+    ):
+        return "on_hold"
+    if result.vt_mode_used == VtModeUsed.SKIPPED_QUOTA:
+        return "error"
+    if result.processing_status == MdiProcessingStatus.ERROR:
+        return "error"
+    if result.triage_bucket == TriageBucket.ERROR:
+        return "error"
+    if _vt_export_has_scan(result):
+        flagging = (result.vt_hits or 0) + (result.vt_suspicious or 0)
+        return "flagged" if flagging >= 1 else "clean"
+    if result.errors:
+        return "error"
+    return "unknown"
+
+
+def format_hold_status(result: MdiResultItem) -> str:
     hold = result.domain_hold
-    hold_source = _enum_value(hold.source) if hold else ""
+    if hold is None:
+        return "unknown"
+    labels: List[str] = []
+    if DomainHoldType.CLIENT_HOLD in hold.hold_types:
+        labels.append("clientHold")
+    if DomainHoldType.SERVER_HOLD in hold.hold_types:
+        labels.append("serverHold")
+    if hold.has_hold and labels:
+        return " + ".join(labels)
+    if hold.source == DomainStatusSource.NOT_CHECKED:
+        return "unknown"
+    if hold.has_hold:
+        return "unknown"
+    return ""
+
+
+def format_domain_created(result: MdiResultItem) -> str:
+    if result.created_at is None:
+        return ""
+    dt = result.created_at
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def format_cloudflare_rank_popularity_bucket(result: MdiResultItem) -> str:
+    bucket = result.cloudflare_rank_bucket
+    raw_bucket = result.cloudflare_rank_raw_bucket
+
+    if (
+        bucket == "UNRANKED"
+        and raw_bucket
+        and _CLOUDFLARE_INEQUALITY_BUCKET_RE.match(str(raw_bucket))
+    ):
+        return f"{str(raw_bucket).strip()} / UNRANKED"
+
+    if result.cloudflare_rank_available and bucket:
+        label = str(bucket).replace("_", " ")
+        if result.cloudflare_rank is not None and result.cloudflare_rank <= 100:
+            return f"{label} (rank {result.cloudflare_rank})"
+        if raw_bucket:
+            return f"{label} (bucket {raw_bucket})"
+        return label
+
+    if bucket == "UNRANKED":
+        return "UNRANKED"
+
+    return ""
+
+
+def format_detection_ratio_cell(result: MdiResultItem) -> str:
+    if result.vt_mode_used in (
+        VtModeUsed.SKIPPED_HOLD,
+        VtModeUsed.SKIPPED_QUOTA,
+        VtModeUsed.NOT_CHECKED,
+    ):
+        return ""
+    if not _vt_export_has_scan(result):
+        return ""
+    ratio = (result.vt_ratio or "").strip()
+    if not ratio or ratio == "0/0" or ratio.endswith("/0"):
+        return ""
+    return f"\t{ratio}"
+
+
+def format_last_scanned(result: MdiResultItem) -> str:
+    if result.vt_mode_used in (
+        VtModeUsed.SKIPPED_HOLD,
+        VtModeUsed.SKIPPED_QUOTA,
+        VtModeUsed.NOT_CHECKED,
+    ):
+        return ""
+    if result.vt_scan_date is None:
+        return ""
+    dt = result.vt_scan_date
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def format_export_error(result: MdiResultItem) -> str:
+    if not result.errors:
+        return ""
+    parts: List[str] = []
+    for err in result.errors:
+        code = err.code or ""
+        message = (err.message or "").strip()
+        if code and message:
+            parts.append(f"{code}: {message}")
+        elif code:
+            parts.append(code)
+        elif message:
+            parts.append(message)
+    return " | ".join(parts)
+
+
+def _result_csv_row(result: MdiResultItem) -> List[str]:
     return [
-        sanitize_csv_cell(result.position),
         sanitize_csv_cell(result.input_original),
-        sanitize_csv_cell(result.input_normalized),
-        sanitize_csv_cell(_enum_value(result.input_type)),
-        sanitize_csv_cell(_enum_value(result.processing_status)),
-        sanitize_csv_cell(_enum_value(result.triage_bucket)),
-        sanitize_csv_cell(_enum_value(result.triage_confidence)),
-        sanitize_csv_cell(_enum_value(result.recommended_action)),
-        sanitize_csv_cell(_enum_value(result.evidence_status)),
-        sanitize_csv_cell(result.vt_hits),
-        sanitize_csv_cell(result.vt_suspicious),
-        sanitize_csv_cell(result.vt_total_engines),
-        sanitize_csv_cell(result.vt_ratio),
-        sanitize_csv_cell(_enum_value(result.freshness)),
-        sanitize_csv_cell(result.vt_scan_date),
-        sanitize_csv_cell(_enum_value(result.live_status)),
-        sanitize_csv_cell(result.http_status_code),
-        sanitize_csv_cell(result.redirect_count),
-        sanitize_csv_cell(result.created_at),
-        sanitize_csv_cell(_enum_value(result.age_bucket)),
+        sanitize_csv_cell(format_checked_as(result)),
+        sanitize_csv_cell(format_export_result(result)),
         sanitize_csv_cell(result.registrar),
-        sanitize_csv_cell(hold_source),
-        sanitize_csv_cell(hold.has_hold if hold else False),
-        sanitize_csv_cell(hold_source),
-        sanitize_csv_cell(" | ".join(result.triage_reason)),
-        sanitize_csv_cell(" | ".join(err.code for err in result.errors)),
-        sanitize_csv_cell(result.cloudflare_rank_available),
-        sanitize_csv_cell(result.cloudflare_rank),
-        sanitize_csv_cell(result.cloudflare_rank_bucket),
-        sanitize_csv_cell(result.cloudflare_rank_raw_bucket),
-        sanitize_csv_cell(result.cloudflare_rank_source),
-        sanitize_csv_cell(result.cloudflare_rank_checked_at),
-        sanitize_csv_cell(result.cloudflare_rank_error),
-        sanitize_csv_cell(result.hold_impact_level),
-        sanitize_csv_cell(result.hold_impact_reason),
-        sanitize_csv_cell(result.vt_targeted_brand),
-        sanitize_csv_cell(" | ".join(result.vt_targeted_brand_sources)),
-        sanitize_csv_cell(" | ".join(result.vt_redirection_chain)),
-        sanitize_csv_cell(result.vt_last_final_url),
+        sanitize_csv_cell(format_hold_status(result)),
+        sanitize_csv_cell(format_domain_created(result)),
+        sanitize_csv_cell(format_cloudflare_rank_popularity_bucket(result)),
+        format_detection_ratio_cell(result),
+        sanitize_csv_cell(format_last_scanned(result)),
+        sanitize_csv_cell(format_export_error(result)),
     ]
 
 

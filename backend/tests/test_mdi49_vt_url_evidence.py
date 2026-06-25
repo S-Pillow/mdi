@@ -29,7 +29,6 @@ from models import (
     VtModeUsed,
 )
 from services import export_service, job_store, vt_service
-from services.export_service import CSV_HEADERS
 from services.job_persistence import deserialize_job, serialize_job
 from services.job_store import InMemoryJob, clear_all_jobs
 from services.vt_service import (
@@ -236,15 +235,6 @@ class TestExportIncludesUrlEvidence:
         clear_all_jobs()
         yield
         clear_all_jobs()
-
-    def test_csv_headers_include_mdi49_fields(self):
-        for field in (
-            "vt_targeted_brand",
-            "vt_targeted_brand_sources",
-            "vt_redirection_chain",
-            "vt_last_final_url",
-        ):
-            assert field in CSV_HEADERS
 
     def test_json_export_includes_mdi49_fields(self):
         row = MdiResultItem(
