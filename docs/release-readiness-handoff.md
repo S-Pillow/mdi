@@ -43,23 +43,23 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-49/50D: `b1a9650300c185b8a4330538b988757d71141101` | Static bundle: `index-UlaSQnOO.js`, `index-CG0zkzGS.css` at `/var/www/html/tools/mdi/` — **unchanged by MDI-54A** |
-| MDI backend | MDI-54A: `ca5aa9b6b45d3b65871632eee8b5a72afd5eeb33` | `/opt/mdi/backend`; 10-column CSV export contract; previous backend `b1a9650` (MDI-49) |
+| Frontend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | Static bundle: `index-DRQeaMJN.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/` |
+| MDI backend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | `/opt/mdi/backend`; 10-column CSV + XLSX analyst export; previous backend `ca5aa9b` (MDI-54A) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
 
-MDI-54A (2026-06-25) deployed **backend-only** from `main` @ `ca5aa9b`; previous
-production backend was `b1a9650` (MDI-49). Files copied:
-`backend/services/export_service.py`, `backend/services/vt_gui_url.py`;
-`build_info.json` updated; `mdi-backend.service` **restarted**; nginx **not**
-reloaded; frontend **not** redeployed. Backup:
-`/opt/mdi/backups/mdi54a-20260625-022850/backend/`.
+MDI-54B (2026-06-25 ~03:22–03:23 UTC) deployed **full-stack** from `main` @ `1073bff`
+on host `srv766238`. Backend files copied: `models.py`, `routers/mdi.py`,
+`services/export_service.py`; `build_info.json` updated; `mdi-backend.service`
+**restarted**; frontend built and rsynced to `/var/www/html/tools/mdi/`; nginx
+**not** reloaded; **no package install** (`openpyxl 3.1.5` already present).
+Backups: `/opt/mdi/backups/mdi54b-20260625-032222/backend/`,
+`/var/www/html/tools/mdi.bak-20260625-032222/`. Previous production: backend
+`ca5aa9b`, frontend `index-UlaSQnOO.js` / `index-CG0zkzGS.css`.
 
-The frontend/backend split is expected after backend-only or frontend-only deploys.
-MDI-54A intentionally left the frontend at MDI-49 (`index-UlaSQnOO.js`) because
-CSV export is server-generated. JSON evidence export schema (`mdi-evidence-v1`)
-remains unchanged.
+Bulk exports now support **CSV (default)** or **XLSX** via a single format selector;
+JSON evidence export schema (`mdi-evidence-v1`) remains unchanged.
 
-Prior coordinated deploy notes (VTFIX-02G/02I, MDI-49 full-stack) remain in section
+Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in section
 5 smoke history below.
 
 ## 3. Stabilization Sequence
@@ -97,16 +97,27 @@ Prior coordinated deploy notes (VTFIX-02G/02I, MDI-49 full-stack) remain in sect
 | Ticket | Outcome |
 |---|---|
 | MDI-54A | Lean 10-column CSV export contract — **merged, backend-deployed, production-smoked, accepted** |
-| MDI-54B | XLSX export | **Not started** — documented backlog only |
+| MDI-54B | XLSX export with result-based row coloring — **merged, full-stack deployed, production-smoked, accepted** |
 
 MDI-54A commits on `main`: `b1f9fa6` (fix mdi csv export contract),
 `ca5aa9b` (docs: update mdi csv export contract).
 
-**Release-note warning:** default MDI CSV export is now a **breaking** 10-column
-analyst contract. Consumers expecting the legacy wide ~39-column CSV must use
-**JSON evidence export** for full forensic fields until MDI-54B XLSX export exists.
+MDI-54B commit on `main`: `1073bff` (add mdi xlsx export).
 
-Exact production CSV header:
+**Release-note context (MDI-54A):** default MDI CSV export is a **breaking** 10-column
+analyst contract versus the legacy wide ~39-column CSV.
+
+**Current export paths (MDI-54B):**
+
+- **CSV** — default bulk format; same 10-column contract; `detection_ratio` tab-prefixed in raw CSV
+- **XLSX** — optional bulk format; same 10 columns; result-based row coloring; plain-text ratio cells
+- **JSON evidence** — full forensic fields (`mdi-evidence-v1`); unchanged
+
+Consumers needing legacy wide spreadsheet fields should use **JSON evidence export**
+for full forensic review. XLSX provides the analyst 10-column view with coloring,
+not the legacy wide field set.
+
+Exact production analyst export header (CSV and XLSX):
 
 `input,checked_as,result,registrar,hold_status,domain_created,cloudflare_rank,detection_ratio,last_scanned,error`
 
@@ -182,7 +193,7 @@ MDI currently supports:
 - Refresh Report
 - Request New Scan
 - bulk actions
-- CSV export (10-column analyst contract; MDI-54A) and JSON evidence export (full forensic fields; unchanged schema)
+- CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
 - dashboard metric ownership: shared VT operational metrics vs MDI-only triage/enrichment
 - Run Options and Advanced Settings
@@ -245,6 +256,50 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02H-RUNTIME approved daily-history schema normalization | Accepted |
 | VTFIX-02I dashboard quota trend table column alignment | Accepted |
 | MDI-54A 10-column CSV export contract | Accepted |
+| MDI-54B XLSX export with result-based row coloring | Accepted |
+
+**MDI-54B production deploy and export smoke (2026-06-25 ~03:22–03:23 UTC):**
+
+Full-stack deploy on `srv766238`: backend `1073bff` → `/opt/mdi/backend` (from
+`ca5aa9b` / MDI-54A); frontend `index-DRQeaMJN.js` / `index-BQreofYY.css` via
+`rsync -a --delete` from `/root/mdi/frontend/dist/` to `/var/www/html/tools/mdi/`.
+Backend files copied: `models.py`, `routers/mdi.py`, `services/export_service.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted**; nginx **not**
+reloaded; **no package install** (`openpyxl 3.1.5` already present). Backups:
+`/opt/mdi/backups/mdi54b-20260625-032222/backend/`,
+`/var/www/html/tools/mdi.bak-20260625-032222/`.
+
+Safe API verification (read-only): `/api/mdi/health`, `/api/mdi/version`,
+`/api/mdi/usage`, `/api/mdi/schema-summary`, `/api/mdi/jobs/latest` → 200;
+`/api/mdi/version` commit `1073bff456d551d97f63a99826748b35db35e617`.
+
+Export smoke (recovered saved job `8b31c76e-a4f5-4082-b153-ccfc349b3760`; no new
+scan; no MDI job submit): **PASS** for CSV and XLSX Export All, Export Flagged,
+and Export Selected. Exact header (CSV and XLSX):
+
+`input,checked_as,result,registrar,hold_status,domain_created,cloudflare_rank,detection_ratio,last_scanned,error`
+
+Sample row checks on saved production data:
+
+- `checked_as`: `url_report:http://truereligionus.us/` (actual lookup method/target)
+- `cloudflare_rank`: `>200000 / UNRANKED` (popularity bucket display)
+- CSV `detection_ratio`: raw cell tab-prefixed (`\t1/92`); displays as `1/92` in spreadsheets
+- XLSX `detection_ratio`: plain text `1/92`, cell format `@`, no tab prefix
+- XLSX formatting: header bold; freeze `A2`; autofilter `A1:J2`
+- XLSX row coloring: `flagged` fill `FFFDE8E8`; `result` text present in cell
+- JSON evidence export: unchanged — `schema_version: mdi-evidence-v1`; 46 fields;
+  `vt_targeted_brand` preserved
+
+Frontend verification: format selector visible in deployed bundle (`index-DRQeaMJN.js`);
+default **CSV**; options CSV / XLSX; three bulk buttons preserved (Export Flagged,
+Export All, Export Selected); no modal/popup; row JSON evidence remains JSON-only.
+
+No runtime/quota file changes; VT daily usage remained **244**; no external API
+calls; no VT quota consumed; no MDI jobs submitted; VT Bulk Check untouched.
+
+**Non-blocking smoke note:** production export smoke used one flagged saved row;
+`clean` / `on_hold` / `error` / `unknown` XLSX fills were not re-smoked because
+no safe saved job exposed those rows. Do not create live jobs to manufacture them.
 
 **MDI-54A production deploy and export smoke (2026-06-25 02:29 UTC):**
 
@@ -273,11 +328,9 @@ Sample row checks on saved production data:
   fields preserved (e.g. `vt_targeted_brand`, `vt_redirection_chain`)
 
 No runtime/quota file changes; no external API calls; no VT quota consumed; no MDI
-jobs submitted. MDI-54B not started.
+jobs submitted.
 
-**VTFIX-02I production deploy and visual smoke (2026-06-12 01:18 UTC):**
-
-Frontend-only deploy: `5b504e3` → `/var/www/html/tools/mdi/` via
+**VTFIX-02I production deploy and visual smoke (2026-06-12 01:18 UTC):** via
 `rsync -a --delete`. No backend deploy; no VT Bulk deploy; `mdi-backend.service`
 **not** restarted; nginx **not** reloaded. Backup:
 `/var/www/html/tools/mdi.bak-20260612-011810/`. Bundles before:
@@ -513,7 +566,7 @@ consume shared VT quota.
 | Request New Scan | Consumes quota when confirmed; often more than Refresh |
 | Auto-rescan | OFF by default; quota-impacting when enabled |
 | Open in VirusTotal | Opens public VT GUI; no VT API quota |
-| Export actions | No VT quota; CSV is 10-column analyst contract (MDI-54A); use JSON for full forensic fields |
+| Export actions | No VT quota; CSV (default) or XLSX bulk export — 10-column analyst contract (MDI-54A/54B); JSON evidence for full forensic fields |
 | Dashboard | No VT quota; read-only; source filter does not consume quota |
 | Start New Scan | No VT quota; clears displayed frontend results only |
 
@@ -598,8 +651,10 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Old frontend backups accumulate until operator cleanup | Housekeeping |
 | Failed/error job edge cases were not fully production-smoked during final UI smoke | Future test |
 | Current completed non-recovered job path was not live-smoked during MDI-38 because no live job was submitted | Future test |
-| Legacy wide ~39-column CSV consumers | **Breaking change** — resolved path is JSON evidence export until MDI-54B XLSX |
-| MDI-54A export smoke used single-row recovered job | Acceptable — contract verified on real production data; multi-row edge cases not re-smoked |
+| Legacy wide ~39-column CSV consumers | **Breaking change (MDI-54A)** — use JSON evidence for full forensic fields; XLSX provides the 10-column analyst view with row coloring (MDI-54B), not the legacy wide field set |
+| MDI-54A/54B export smoke used single flagged saved row | Acceptable — contract verified on real production data; multi-row and non-flagged XLSX fills not re-smoked in production |
+| XLSX bulk export built in memory | Acceptable — very large exports may be slower/heavier than CSV |
+| XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -643,10 +698,11 @@ operator review and separate approval.
 | Ticket | Scope | Status |
 |---|---|---|
 | MDI-54A | Lean 10-column CSV export contract | **Closed** — merged, backend-deployed, production-smoked, accepted (2026-06-25) |
-| MDI-54B | XLSX export for full forensic spreadsheet workflow | **Not started** — documented backlog only |
+| MDI-54B | XLSX export with result-based row coloring | **Closed** — merged, full-stack deployed, production-smoked, accepted (2026-06-25) |
 
-Legacy wide-CSV consumers must switch to JSON evidence export for full forensic
-fields until MDI-54B ships.
+MDI-54 series complete. Legacy wide-CSV consumers should use **JSON evidence
+export** for full forensic fields. Bulk CSV (default) and XLSX share the 10-column
+analyst contract; XLSX adds result-based row coloring.
 
 ### Other non-blocking items
 
