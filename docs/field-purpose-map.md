@@ -1264,13 +1264,14 @@ Five explicit buttons above the table (vague Actions dropdown removed in MDI-30C
 
 ### MDI-16 / MDI-54A export API and fields
 
-`POST /api/mdi/jobs/{job_id}/export` — body: `format` (`csv` | `json`),
+`POST /api/mdi/jobs/{job_id}/export` — body: `format` (`csv` | `xlsx` | `json`),
 `scope` (`all` | `flagged` | `selected`), optional `positions` (required when
 `scope=selected`; ignored for `all`/`flagged`).
 
-Export Flagged, Export All, and Export Selected all use the same backend CSV
-builder (`export_service.build_csv_export`). Scope only changes which saved
-result rows are included.
+Export Flagged, Export All, and Export Selected all use the same backend analyst
+export builders (`export_service.build_csv_export` or `build_xlsx_export`). Scope
+only changes which saved result rows are included. CSV remains the default UI
+format; XLSX uses the same 10-column contract with result-based row coloring.
 
 **Read-only guarantee:** default CSV exports use **saved job/result data only**.
 They do **not** trigger VirusTotal, Cloudflare, WHOIS/RDAP, DNS, live-check,
@@ -1317,7 +1318,15 @@ set (including triage fields, sanitized `errors`, `vt_engine_results`,
 fields, hold-impact fields, MDI-49 VT URL evidence fields, etc.).
 
 JSON evidence remains the **fuller export path** for forensic review. MDI-54A
-changed the **default CSV contract only**.
+changed the **default CSV contract only**. MDI-54B adds optional **XLSX** with
+the same 10 columns, text-safe ratio/date cells, and full-row coloring by
+`result` (`flagged`, `clean`, `on_hold`, `unknown`, `error`).
+
+#### XLSX analyst export (MDI-54B)
+
+Same 10-column order as CSV. Row fill colors are supplemental; `result` text is
+always present. UI default remains CSV; bulk actions include a Format selector
+(CSV / XLSX). JSON evidence export unchanged.
 
 **Flagged export rule:** `triage_bucket` malicious/suspicious OR `vt_hits > 0`
 OR `vt_suspicious > 0`; held rows excluded from flagged scope (included in
@@ -1437,7 +1446,7 @@ recovery or manual actions. IP inputs rejected before job creation (MDI-27).
 | **Create Block Rule** | rejected / out of scope | Not implemented |
 | **Salesforce / ticketing** | rejected / out of scope | Not shown |
 | **Monitoring / enforcement** | rejected / out of scope | Not shown |
-| Export XLSX/PDF/ZIP | deferred | Not implemented |
+| Export XLSX/PDF/ZIP | deferred | XLSX analyst export active (MDI-54B); PDF/ZIP not implemented |
 | Custom live-check scope toggle | deferred | Fixed flagged-only rule today (read-only in Run Options) |
 | Extra export scopes (clean-only, stale-only) | deferred | CSV/JSON scopes above are active |
 | Post-results UI layout cleanup (MDI-35) | done | Unified filter cards, Job ID in VT Usage & Status, compact estimate |

@@ -453,9 +453,9 @@ They are **not configured in Settings** — use the Results area after a job com
 
 | Export | Where | Scope |
 |---|---|---|
-| **Export All CSV** | Bulk actions | All rows in current job |
-| **Export Selected CSV** | Bulk actions | Checked rows only |
-| **Export Flagged CSV** | Bulk actions | Flagged rows (malicious/suspicious with VT hits) |
+| **Export All CSV/XLSX** | Bulk actions | All rows in current job |
+| **Export Selected CSV/XLSX** | Bulk actions | Checked rows only |
+| **Export Flagged CSV/XLSX** | Bulk actions | Flagged rows (malicious/suspicious with VT hits) |
 | **Evidence JSON** | Row More Actions or detail drawer | Selected row — full `mdi-evidence-v1` structure |
 
 Additional export scopes (clean-only, stale-only, etc.) may be reviewed in a future ticket.

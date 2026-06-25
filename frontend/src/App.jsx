@@ -615,7 +615,7 @@ async function downloadJobExport(jobId, { format, scope, positions }) {
   const cd = resp.headers.get('Content-Disposition') || ''
   const match = cd.match(/filename="([^"]+)"/)
   const fallbackTs = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15)
-  const ext = format === 'json' ? 'json' : 'csv'
+  const ext = format === 'json' ? 'json' : format === 'xlsx' ? 'xlsx' : 'csv'
   const prefix = format === 'json' ? 'mdi_evidence' : 'mdi_export'
   const filename = match ? match[1] : `${prefix}_${scope}_${fallbackTs}.${ext}`
   const url = URL.createObjectURL(blob)
@@ -1349,7 +1349,7 @@ function CollapsibleSettingsPanel({
             <p className="settings-info-heading">Exports</p>
             <p className="settings-info-text">
               Exports are available from Results bulk actions, row More Actions, and the detail drawer.
-              CSV (all, flagged, selected) and JSON evidence per row require a completed job. No export consumes VT quota.
+              CSV or XLSX (all, flagged, selected) and JSON evidence per row require a completed job. No export consumes VT quota.
               Additional export scopes may be reviewed in a future ticket.
             </p>
           </div>
@@ -2351,19 +2351,35 @@ function BulkControls({
   canRescanStale,
   staleCount,
   actionInProgress,
+  exportFormat,
+  onExportFormatChange,
   onExportAll,
   onExportFlagged,
   onExportSelected,
   onRescanSelected,
   onRescanStale,
 }) {
+  const formatLabel = exportFormat === 'xlsx' ? 'XLSX' : 'CSV'
   return (
     <div className="bulk-controls">
       <span className="bulk-label">Bulk actions:</span>
+      <label className="export-format-select">
+        <span className="export-format-label">Format:</span>
+        <select
+          className="export-format-dropdown"
+          value={exportFormat}
+          onChange={e => onExportFormatChange(e.target.value)}
+          disabled={actionInProgress}
+          aria-label="Bulk export format"
+        >
+          <option value="csv">CSV</option>
+          <option value="xlsx">XLSX</option>
+        </select>
+      </label>
       <button
         className={canExportFlagged && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
         disabled={!canExportFlagged || actionInProgress}
-        title={canExportFlagged ? 'Download flagged rows as CSV' : 'No flagged rows to export'}
+        title={canExportFlagged ? `Download flagged rows as ${formatLabel}` : 'No flagged rows to export'}
         onClick={onExportFlagged}
       >
         <IconUpload /> Export Flagged
@@ -2371,7 +2387,7 @@ function BulkControls({
       <button
         className={canExportAll && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
         disabled={!canExportAll || actionInProgress}
-        title={canExportAll ? 'Download all rows as CSV' : 'No results to export'}
+        title={canExportAll ? `Download all rows as ${formatLabel}` : 'No results to export'}
         onClick={onExportAll}
       >
         <IconUpload /> Export All
@@ -2379,7 +2395,7 @@ function BulkControls({
       <button
         className={canExportSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
         disabled={!canExportSelected || actionInProgress}
-        title={canExportSelected ? 'Download selected rows as CSV' : 'Select rows first'}
+        title={canExportSelected ? `Download selected rows as ${formatLabel}` : 'Select rows first'}
         onClick={onExportSelected}
       >
         <IconUpload /> Export Selected
@@ -2665,6 +2681,7 @@ function TriageWorkspace({
   job, jobError, jobId,
   selectedItem, onSelectItem,
   actionInProgress, actionMessage, exportMessage,
+  exportFormat, onExportFormatChange,
   onRescanSelected, onRescanStale,
   onExportAll, onExportFlagged, onExportSelected,
   onExportEvidence, onRefreshRow, onScanRow,
@@ -2786,6 +2803,8 @@ function TriageWorkspace({
           canRescanStale={canRescanStale}
           staleCount={staleScannable}
           actionInProgress={actionInProgress}
+          exportFormat={exportFormat}
+          onExportFormatChange={onExportFormatChange}
           onExportAll={onExportAll}
           onExportFlagged={onExportFlagged}
           onExportSelected={() => onExportSelected && onExportSelected([...selectedIds])}
@@ -3261,6 +3280,7 @@ export default function App() {
   const [actionInProgress, setActionInProgress] = useState(false)
   const [actionMessage, setActionMessage]     = useState(null)
   const [exportMessage, setExportMessage]     = useState(null)
+  const [bulkExportFormat, setBulkExportFormat] = useState('csv')
   const [actionModal, setActionModal]         = useState(null)
   const [actionConfirming, setActionConfirming] = useState(false)
 
@@ -3550,7 +3570,7 @@ export default function App() {
       setExportMessage(
         format === 'json'
           ? 'Evidence JSON download started.'
-          : `CSV export (${scope}) download started.`
+          : `${format === 'xlsx' ? 'XLSX' : 'CSV'} export (${scope}) download started.`
       )
     } catch (err) {
       setExportMessage(`Export failed: ${err.message}`)
@@ -3558,15 +3578,15 @@ export default function App() {
   }
 
   function handleExportAll() {
-    runExport({ format: 'csv', scope: 'all' })
+    runExport({ format: bulkExportFormat, scope: 'all' })
   }
 
   function handleExportFlagged() {
-    runExport({ format: 'csv', scope: 'flagged' })
+    runExport({ format: bulkExportFormat, scope: 'flagged' })
   }
 
   function handleExportSelected(positions) {
-    runExport({ format: 'csv', scope: 'selected', positions })
+    runExport({ format: bulkExportFormat, scope: 'selected', positions })
   }
 
   function handleExportEvidence(row) {
@@ -3828,6 +3848,8 @@ export default function App() {
               actionInProgress={actionInProgress || !!job?.action_in_progress}
               actionMessage={actionMessage}
               exportMessage={exportMessage}
+              exportFormat={bulkExportFormat}
+              onExportFormatChange={setBulkExportFormat}
               onRescanSelected={handleRescanSelected}
               onRescanStale={handleRescanStale}
               onExportAll={handleExportAll}

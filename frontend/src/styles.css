@@ -1902,6 +1902,24 @@ body {
   letter-spacing: 0.05em;
   margin-right: 2px;
 }
+.export-format-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+.export-format-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.export-format-dropdown {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
 
 /* ── Progress bar ────────────────────────────────────────── */
 .progress-track {

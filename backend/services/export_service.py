@@ -285,7 +285,8 @@ def format_cloudflare_rank_popularity_bucket(result: MdiResultItem) -> str:
     return ""
 
 
-def format_detection_ratio_cell(result: MdiResultItem) -> str:
+def format_detection_ratio_plain(result: MdiResultItem) -> str:
+    """Slash ratio for display/export text (no CSV tab prefix)."""
     if result.vt_mode_used in (
         VtModeUsed.SKIPPED_HOLD,
         VtModeUsed.SKIPPED_QUOTA,
@@ -296,6 +297,13 @@ def format_detection_ratio_cell(result: MdiResultItem) -> str:
         return ""
     ratio = (result.vt_ratio or "").strip()
     if not ratio or ratio == "0/0" or ratio.endswith("/0"):
+        return ""
+    return ratio
+
+
+def format_detection_ratio_cell(result: MdiResultItem) -> str:
+    ratio = format_detection_ratio_plain(result)
+    if not ratio:
         return ""
     return f"\t{ratio}"
 
@@ -331,19 +339,61 @@ def format_export_error(result: MdiResultItem) -> str:
     return " | ".join(parts)
 
 
-def _result_csv_row(result: MdiResultItem) -> List[str]:
+def _analyst_row_values(result: MdiResultItem) -> List[str]:
+    """Shared 10-column analyst contract values (plain text; no CSV tab prefix)."""
+    registrar = result.registrar or ""
     return [
-        sanitize_csv_cell(result.input_original),
-        sanitize_csv_cell(format_checked_as(result)),
-        sanitize_csv_cell(format_export_result(result)),
-        sanitize_csv_cell(result.registrar),
-        sanitize_csv_cell(format_hold_status(result)),
-        sanitize_csv_cell(format_domain_created(result)),
-        sanitize_csv_cell(format_cloudflare_rank_popularity_bucket(result)),
-        format_detection_ratio_cell(result),
-        sanitize_csv_cell(format_last_scanned(result)),
-        sanitize_csv_cell(format_export_error(result)),
+        result.input_original or "",
+        format_checked_as(result),
+        format_export_result(result),
+        registrar,
+        format_hold_status(result),
+        format_domain_created(result),
+        format_cloudflare_rank_popularity_bucket(result),
+        format_detection_ratio_plain(result),
+        format_last_scanned(result),
+        format_export_error(result),
     ]
+
+
+def _result_csv_row(result: MdiResultItem) -> List[str]:
+    values = _analyst_row_values(result)
+    return [
+        sanitize_csv_cell(values[0]),
+        sanitize_csv_cell(values[1]),
+        sanitize_csv_cell(values[2]),
+        sanitize_csv_cell(values[3]),
+        sanitize_csv_cell(values[4]),
+        sanitize_csv_cell(values[5]),
+        sanitize_csv_cell(values[6]),
+        format_detection_ratio_cell(result),
+        sanitize_csv_cell(values[8]),
+        sanitize_csv_cell(values[9]),
+    ]
+
+
+XLSX_RESULT_ROW_FILLS: Dict[str, str] = {
+    "flagged": "FFFDE8E8",
+    "clean": "FFE8F5E9",
+    "on_hold": "FFEDE9FE",
+    "unknown": "FFF3F4F6",
+    "error": "FFFEF3C7",
+}
+
+XLSX_HEADER_FILL = "FFF3F4F6"
+XLSX_TEXT_COLUMNS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+XLSX_COLUMN_WIDTHS = {
+    "input": 28,
+    "checked_as": 36,
+    "result": 12,
+    "registrar": 22,
+    "hold_status": 18,
+    "domain_created": 14,
+    "cloudflare_rank": 22,
+    "detection_ratio": 14,
+    "last_scanned": 24,
+    "error": 32,
+}
 
 
 def build_csv_export(
@@ -358,6 +408,56 @@ def build_csv_export(
     writer.writerow(CSV_HEADERS)
     for row in rows:
         writer.writerow(_result_csv_row(row))
+    return buffer.getvalue()
+
+
+def _xlsx_row_fill(result_value: str):
+    from openpyxl.styles import PatternFill
+
+    color = XLSX_RESULT_ROW_FILLS.get(result_value, XLSX_RESULT_ROW_FILLS["unknown"])
+    return PatternFill(fill_type="solid", fgColor=color)
+
+
+def build_xlsx_export(
+    job: InMemoryJob,
+    rows: List[MdiResultItem],
+    scope: ExportScope,
+) -> bytes:
+    """Build XLSX bytes with 10-column analyst contract and result-based row coloring."""
+    del job, scope  # reserved for future metadata rows
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "MDI Export"
+
+    header_font = Font(bold=True)
+    header_fill = PatternFill(fill_type="solid", fgColor=XLSX_HEADER_FILL)
+
+    for col_idx, header in enumerate(CSV_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        letter = get_column_letter(col_idx)
+        ws.column_dimensions[letter].width = XLSX_COLUMN_WIDTHS.get(header, 16)
+
+    for row_idx, result in enumerate(rows, start=2):
+        values = _analyst_row_values(result)
+        row_fill = _xlsx_row_fill(values[2])
+        for col_idx, value in enumerate(values, start=1):
+            text = value if value else None
+            cell = ws.cell(row=row_idx, column=col_idx, value=text)
+            cell.fill = row_fill
+            if col_idx - 1 in XLSX_TEXT_COLUMNS:
+                cell.number_format = "@"
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(CSV_HEADERS))}{max(1, len(rows) + 1)}"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
     return buffer.getvalue()
 
 
@@ -376,6 +476,8 @@ def build_export_filename(
     ts = safe_timestamp_for_filename()
     if fmt == "json":
         return f"mdi_evidence_{scope.value}_{ts}.json"
+    if fmt == "xlsx":
+        return f"mdi_export_{scope.value}_{ts}.xlsx"
     return f"mdi_export_{scope.value}_{ts}.csv"
 
 

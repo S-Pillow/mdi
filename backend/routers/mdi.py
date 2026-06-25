@@ -698,7 +698,7 @@ async def scan_job(job_id: str, req: JobActionRequest):
 @router.post("/jobs/{job_id}/export", tags=["Jobs"])
 async def export_job(job_id: str, req: ExportRequest) -> Response:
     """
-    Export job results as CSV or JSON evidence (in-memory download only).
+    Export job results as CSV, XLSX, or JSON evidence (in-memory download only).
 
     Allowed only when job status is done or error. No VT/RDAP/live calls.
     No quota consumed. No usage history append. No server-side file write.
@@ -719,6 +719,10 @@ async def export_job(job_id: str, req: ExportRequest) -> Response:
         content = export_service.build_csv_export(job, rows, req.scope)
         filename = export_service.build_export_filename("csv", req.scope, req.positions)
         media_type = "text/csv; charset=utf-8"
+    elif req.format == ExportFormat.XLSX:
+        content = export_service.build_xlsx_export(job, rows, req.scope)
+        filename = export_service.build_export_filename("xlsx", req.scope, req.positions)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     else:
         content = export_service.build_evidence_json_export(
             job, rows, req.scope, req.positions

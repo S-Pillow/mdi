@@ -418,6 +418,16 @@ class TestExportIsolation:
             resp = _export("export-test-job", {"format": "csv", "scope": "all"})
         assert resp.status_code == 200
 
+    def test_no_vt_calls_xlsx(self):
+        items = [_make_result("a.example")]
+        _register_job(_make_job(items))
+        with patch("services.vt_service.fetch_report", side_effect=AssertionError("VT called")):
+            resp = _export("export-test-job", {"format": "xlsx", "scope": "all"})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     def test_runtime_files_not_modified(self, tmp_path, monkeypatch):
         paths = {
             "MDI_LATEST_JOB_FILE": tmp_path / "mdi_latest_job.json",
@@ -432,6 +442,25 @@ class TestExportIsolation:
 
         _register_job(_make_job([_make_result("a.example")]))
         resp = _export("export-test-job", {"format": "csv", "scope": "all"})
+        assert resp.status_code == 200
+
+        for path in paths.values():
+            assert path.stat().st_size == before[path]
+
+    def test_runtime_files_not_modified_xlsx(self, tmp_path, monkeypatch):
+        paths = {
+            "MDI_LATEST_JOB_FILE": tmp_path / "mdi_latest_job.json",
+            "VT_USAGE_FILE": tmp_path / "vt_usage.json",
+            "VT_USAGE_HISTORY_FILE": tmp_path / "vt_usage_history.jsonl",
+            "VT_DAILY_HISTORY_FILE": tmp_path / "vt_daily_history.json",
+        }
+        for key, path in paths.items():
+            monkeypatch.setenv(key, str(path))
+            path.write_text("{}" if path.suffix == ".json" else "")
+        before = {p: p.stat().st_size for p in paths.values()}
+
+        _register_job(_make_job([_make_result("a.example")]))
+        resp = _export("export-test-job", {"format": "xlsx", "scope": "all"})
         assert resp.status_code == 200
 
         for path in paths.values():

@@ -949,6 +949,7 @@ class JobActionAcceptedResponse(BaseModel):
 class ExportFormat(str, Enum):
     """Output format for job export downloads."""
     CSV = "csv"
+    XLSX = "xlsx"
     JSON = "json"
 
 
@@ -963,7 +964,7 @@ class ExportRequest(BaseModel):
     """Request body for POST /api/mdi/jobs/{job_id}/export."""
     format: ExportFormat = Field(
         ...,
-        description="[workflow] csv for tabular export; json for evidence bundle.",
+        description="[workflow] csv or xlsx for 10-column analyst export; json for evidence bundle.",
     )
     scope: ExportScope = Field(
         ...,
