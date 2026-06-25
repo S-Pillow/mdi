@@ -43,25 +43,24 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | VTFIX-02I: `5b504e346450e57ed402932b2de32ead80083ab0` | Static bundle: `index-9Cqf9ev9.js`, `index-DseIq5wp.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | VTFIX-02G: `ea103fe06129674485cb1c26ca30e3dc3e5ab200` | `/opt/mdi/backend`; `live_quota` snapshot; per-tool quota trend fields; `build_info` ticket VTFIX-02G |
+| Frontend | MDI-49/50D: `b1a9650300c185b8a4330538b988757d71141101` | Static bundle: `index-UlaSQnOO.js`, `index-CG0zkzGS.css` at `/var/www/html/tools/mdi/` — **unchanged by MDI-54A** |
+| MDI backend | MDI-54A: `ca5aa9b6b45d3b65871632eee8b5a72afd5eeb33` | `/opt/mdi/backend`; 10-column CSV export contract; previous backend `b1a9650` (MDI-49) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
 
-VTFIX-02G (2026-06-11) deployed coordinated MDI backend + frontend; `mdi-backend.service`
-restarted. VTFIX-02I (2026-06-12) deployed frontend-only trend-table alignment fix;
-`mdi-backend.service` **not** restarted; nginx **not** reloaded. Frontend backup:
-`/var/www/html/tools/mdi.bak-20260612-011810/`. Bundles before 02I:
-`index-UBWBOg5l.js`, `index-BoqbTN7t.css`.
-Backups: `/opt/mdi/backups/vtfix-02g-20260611-090410/`,
-`/var/www/html/tools/mdi.bak-20260611-090410/`. Prior bundles before 02G:
-`index-QhEGJa8t.js`, `index-CZdxqujH.css`.
+MDI-54A (2026-06-25) deployed **backend-only** from `main` @ `ca5aa9b`; previous
+production backend was `b1a9650` (MDI-49). Files copied:
+`backend/services/export_service.py`, `backend/services/vt_gui_url.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted**; nginx **not**
+reloaded; frontend **not** redeployed. Backup:
+`/opt/mdi/backups/mdi54a-20260625-022850/backend/`.
 
-The frontend/backend split is expected after frontend-only deploys. VTFIX-02C UI
-(`fbef931`) deployed frontend-only with **no backend restart** and **no nginx
-reload**. VTFIX-02D coordinated backend deploy (2026-06-11) updated MDI and VT
-Bulk daily-history writers. VTFIX-02F (2026-06-11) deployed VT Bulk live-counter
-coordination only; `mdi-backend.service` was **not** restarted (MDI writer already
-flock-correct).
+The frontend/backend split is expected after backend-only or frontend-only deploys.
+MDI-54A intentionally left the frontend at MDI-49 (`index-UlaSQnOO.js`) because
+CSV export is server-generated. JSON evidence export schema (`mdi-evidence-v1`)
+remains unchanged.
+
+Prior coordinated deploy notes (VTFIX-02G/02I, MDI-49 full-stack) remain in section
+5 smoke history below.
 
 ## 3. Stabilization Sequence
 
@@ -92,6 +91,24 @@ flock-correct).
 | MDI-46 | Input page layout cohesion pass accepted and deployed |
 | MDI-47 | Type floor / readability pass accepted and deployed |
 | MDI-48 | Input workflow guidance and placeholder clarity accepted and deployed |
+
+### MDI export contract series (MDI-54)
+
+| Ticket | Outcome |
+|---|---|
+| MDI-54A | Lean 10-column CSV export contract — **merged, backend-deployed, production-smoked, accepted** |
+| MDI-54B | XLSX export | **Not started** — documented backlog only |
+
+MDI-54A commits on `main`: `b1f9fa6` (fix mdi csv export contract),
+`ca5aa9b` (docs: update mdi csv export contract).
+
+**Release-note warning:** default MDI CSV export is now a **breaking** 10-column
+analyst contract. Consumers expecting the legacy wide ~39-column CSV must use
+**JSON evidence export** for full forensic fields until MDI-54B XLSX export exists.
+
+Exact production CSV header:
+
+`input,checked_as,result,registrar,hold_status,domain_created,cloudflare_rank,detection_ratio,last_scanned,error`
 
 ### VTFIX-02 shared VT quota / dashboard attribution series
 
@@ -165,7 +182,7 @@ MDI currently supports:
 - Refresh Report
 - Request New Scan
 - bulk actions
-- CSV / JSON evidence exports
+- CSV export (10-column analyst contract; MDI-54A) and JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
 - dashboard metric ownership: shared VT operational metrics vs MDI-only triage/enrichment
 - Run Options and Advanced Settings
@@ -227,6 +244,36 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02H daily-history backfill dry-run tooling | Accepted |
 | VTFIX-02H-RUNTIME approved daily-history schema normalization | Accepted |
 | VTFIX-02I dashboard quota trend table column alignment | Accepted |
+| MDI-54A 10-column CSV export contract | Accepted |
+
+**MDI-54A production deploy and export smoke (2026-06-25 02:29 UTC):**
+
+Backend-only deploy: `ca5aa9b` → `/opt/mdi/backend` (from `b1a9650` / MDI-49).
+Files copied: `export_service.py`, `vt_gui_url.py`; `build_info.json` updated.
+`mdi-backend.service` **restarted**; nginx **not** reloaded; frontend **not**
+redeployed (bundle remains `index-UlaSQnOO.js`). Backup:
+`/opt/mdi/backups/mdi54a-20260625-022850/backend/`.
+
+Safe API verification (read-only): `/api/mdi/health`, `/api/mdi/version`,
+`/api/mdi/usage`, `/api/mdi/schema-summary`, `/api/mdi/jobs/latest` → 200;
+`/api/mdi/version` commit `ca5aa9b6b45d3b65871632eee8b5a72afd5eeb33`.
+
+Export smoke (recovered saved job `8b31c76e-a4f5-4082-b153-ccfc349b3760`; no new
+scan; no MDI job submit): **PASS** for Export All, Export Flagged, and Export
+Selected. All three scopes returned the exact 10-column header:
+
+`input,checked_as,result,registrar,hold_status,domain_created,cloudflare_rank,detection_ratio,last_scanned,error`
+
+Sample row checks on saved production data:
+
+- `checked_as`: `url_report:http://truereligionus.us/` (actual lookup method/target)
+- `cloudflare_rank`: `>200000 / UNRANKED` (popularity bucket display)
+- `detection_ratio`: raw cell tab-prefixed (`\t1/92`); displays as `1/92` in spreadsheets
+- JSON evidence export: unchanged — `schema_version: mdi-evidence-v1`; full forensic
+  fields preserved (e.g. `vt_targeted_brand`, `vt_redirection_chain`)
+
+No runtime/quota file changes; no external API calls; no VT quota consumed; no MDI
+jobs submitted. MDI-54B not started.
 
 **VTFIX-02I production deploy and visual smoke (2026-06-12 01:18 UTC):**
 
@@ -466,7 +513,7 @@ consume shared VT quota.
 | Request New Scan | Consumes quota when confirmed; often more than Refresh |
 | Auto-rescan | OFF by default; quota-impacting when enabled |
 | Open in VirusTotal | Opens public VT GUI; no VT API quota |
-| Export actions | No VT quota |
+| Export actions | No VT quota; CSV is 10-column analyst contract (MDI-54A); use JSON for full forensic fields |
 | Dashboard | No VT quota; read-only; source filter does not consume quota |
 | Start New Scan | No VT quota; clears displayed frontend results only |
 
@@ -551,6 +598,8 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Old frontend backups accumulate until operator cleanup | Housekeeping |
 | Failed/error job edge cases were not fully production-smoked during final UI smoke | Future test |
 | Current completed non-recovered job path was not live-smoked during MDI-38 because no live job was submitted | Future test |
+| Legacy wide ~39-column CSV consumers | **Breaking change** — resolved path is JSON evidence export until MDI-54B XLSX |
+| MDI-54A export smoke used single-row recovered job | Acceptable — contract verified on real production data; multi-row edge cases not re-smoked |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -588,6 +637,16 @@ MDI-43 remains **documented backlog only — not started**.
 Manual-review daily-history dates still open (not written): `2026-06-03` (total 138,
 JSONL sum 2) and `2026-06-07` (total 5, JSONL sum 3). Further backfill requires
 operator review and separate approval.
+
+### MDI-54 export follow-on
+
+| Ticket | Scope | Status |
+|---|---|---|
+| MDI-54A | Lean 10-column CSV export contract | **Closed** — merged, backend-deployed, production-smoked, accepted (2026-06-25) |
+| MDI-54B | XLSX export for full forensic spreadsheet workflow | **Not started** — documented backlog only |
+
+Legacy wide-CSV consumers must switch to JSON evidence export for full forensic
+fields until MDI-54B ships.
 
 ### Other non-blocking items
 
