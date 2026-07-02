@@ -47,6 +47,7 @@ from models import MdiResultItem
 logger = logging.getLogger("mdi.job_persistence")
 
 _PERSISTENCE_LOCK = asyncio.Lock()
+_TERMINAL_JOB_STATUSES = frozenset({"done", "error"})
 
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
@@ -178,6 +179,25 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
     )
 
 
+def sanitize_terminal_action_state(job: "job_store.InMemoryJob") -> "job_store.InMemoryJob":  # type: ignore[name-defined]
+    """
+    Clear stale action_in_progress on terminal recovered jobs (MDI-59A).
+
+    A completed job must not remain UI-blocked because a prior refresh/scan
+    persisted action_in_progress=true before the in-memory flag was cleared.
+    Does not modify queued/running jobs.
+    """
+    if job.status in _TERMINAL_JOB_STATUSES and job.action_in_progress:
+        logger.info(
+            "sanitize_terminal_action_state: clearing stale action_in_progress "
+            "for terminal job %s (status=%s)",
+            job.job_id,
+            job.status,
+        )
+        job.action_in_progress = False
+    return job
+
+
 # ── Write ──────────────────────────────────────────────────────────────────────
 
 async def write_latest_job(
@@ -275,7 +295,8 @@ def read_latest_job(
         return None
 
     try:
-        return deserialize_job(data)
+        job = deserialize_job(data)
+        return sanitize_terminal_action_state(job)
     except Exception as exc:
         logger.warning("read_latest_job: schema error deserializing %s: %s", path, exc)
         return None

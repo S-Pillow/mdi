@@ -497,7 +497,32 @@ def _append_action_history(
         )
 
 
-async def run_refresh_action(job_id: str, request: JobActionRequest) -> None:
+async def _clear_action_in_progress_and_persist(
+    job: InMemoryJob,
+    *,
+    job_file: Optional[Path] = None,
+) -> None:
+    """Clear action_in_progress and persist terminal job state (MDI-59A)."""
+    job.action_in_progress = False
+    try:
+        await job_persistence.write_latest_job(job, job_file=job_file)
+    except Exception as exc:
+        logger.error(
+            "Failed to persist cleared action_in_progress for job %s: %s",
+            job.job_id,
+            exc,
+        )
+
+
+async def run_refresh_action(
+    job_id: str,
+    request: JobActionRequest,
+    *,
+    usage_file: Optional[Path] = None,
+    history_file: Optional[Path] = None,
+    daily_file: Optional[Path] = None,
+    job_file: Optional[Path] = None,
+) -> None:
     """Background task: refresh selected or stale items."""
     job = await resolve_job(job_id)
     if job is None:
@@ -507,14 +532,38 @@ async def run_refresh_action(job_id: str, request: JobActionRequest) -> None:
     job.action_in_progress = True
     job.last_action_type = "refresh"
     try:
-        stats = await _run_items(job, selection.eligible, "refresh")
+        stats = await _run_items(
+            job,
+            selection.eligible,
+            "refresh",
+            usage_file=usage_file,
+            history_file=history_file,
+            daily_file=daily_file,
+            job_file=job_file,
+        )
         job.vt_refresh_count += stats.items_completed
-        _append_action_history(job, "refresh", request.scope, selection, stats)
+        _append_action_history(
+            job,
+            "refresh",
+            request.scope,
+            selection,
+            stats,
+            history_file=history_file,
+            daily_file=daily_file,
+        )
     finally:
-        job.action_in_progress = False
+        await _clear_action_in_progress_and_persist(job, job_file=job_file)
 
 
-async def run_scan_action(job_id: str, request: JobActionRequest) -> None:
+async def run_scan_action(
+    job_id: str,
+    request: JobActionRequest,
+    *,
+    usage_file: Optional[Path] = None,
+    history_file: Optional[Path] = None,
+    daily_file: Optional[Path] = None,
+    job_file: Optional[Path] = None,
+) -> None:
     """Background task: request new scan for selected or stale items."""
     job = await resolve_job(job_id)
     if job is None:
@@ -524,10 +573,26 @@ async def run_scan_action(job_id: str, request: JobActionRequest) -> None:
     job.action_in_progress = True
     job.last_action_type = "scan"
     try:
-        stats = await _run_items(job, selection.eligible, "scan")
-        _append_action_history(job, "scan", request.scope, selection, stats)
+        stats = await _run_items(
+            job,
+            selection.eligible,
+            "scan",
+            usage_file=usage_file,
+            history_file=history_file,
+            daily_file=daily_file,
+            job_file=job_file,
+        )
+        _append_action_history(
+            job,
+            "scan",
+            request.scope,
+            selection,
+            stats,
+            history_file=history_file,
+            daily_file=daily_file,
+        )
     finally:
-        job.action_in_progress = False
+        await _clear_action_in_progress_and_persist(job, job_file=job_file)
 
 
 def start_refresh_action(job_id: str, request: JobActionRequest) -> None:
