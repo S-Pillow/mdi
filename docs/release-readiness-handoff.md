@@ -43,9 +43,18 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | Static bundle: `index-DRQeaMJN.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | `/opt/mdi/backend`; 10-column CSV + XLSX analyst export; previous backend `ca5aa9b` (MDI-54A) |
+| Frontend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | Static bundle: `index-DRQeaMJN.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/` (unchanged by MDI-59A) |
+| MDI backend | MDI-59A: `32148c102639cbb9adcf84646c80039d8b9b0617` | `/opt/mdi/backend`; action flag persistence + recovery sanitization; previous backend `1073bff` (MDI-54B) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-59A (2026-07-02 04:03 UTC) deployed **backend-only** from `main` @ `32148c1`
+on host `srv766238`. Backend files copied: `services/job_actions.py`,
+`services/job_persistence.py`; `build_info.json` updated; `mdi-backend.service`
+**restarted**; frontend **not** redeployed; nginx **not** reloaded. Backup:
+`/opt/mdi/backups/mdi59a-20260702-040308/`. Previous production backend:
+`1073bff` (MDI-54B). Fixes stale `action_in_progress=true` on completed recovered
+jobs blocking Start New Scan; recovery sanitization clears terminal stale flags on
+API read; future refresh/scan actions persist cleared flag after completion.
 
 MDI-54B (2026-06-25 ~03:22–03:23 UTC) deployed **full-stack** from `main` @ `1073bff`
 on host `srv766238`. Backend files copied: `models.py`, `routers/mdi.py`,
@@ -98,11 +107,14 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 |---|---|
 | MDI-54A | Lean 10-column CSV export contract — **merged, backend-deployed, production-smoked, accepted** |
 | MDI-54B | XLSX export with result-based row coloring — **merged, full-stack deployed, production-smoked, accepted** |
+| MDI-59A | Stale `action_in_progress` persistence/recovery fix — **merged, backend-deployed, production-verified, accepted** (operator Start New Scan visual confirmation pending) |
 
 MDI-54A commits on `main`: `b1f9fa6` (fix mdi csv export contract),
 `ca5aa9b` (docs: update mdi csv export contract).
 
 MDI-54B commit on `main`: `1073bff` (add mdi xlsx export).
+
+MDI-59A commit on `main`: `32148c1` (fix mdi action flag persistence).
 
 **Release-note context (MDI-54A):** default MDI CSV export is a **breaking** 10-column
 analyst contract versus the legacy wide ~39-column CSV.
@@ -257,6 +269,49 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | VTFIX-02I dashboard quota trend table column alignment | Accepted |
 | MDI-54A 10-column CSV export contract | Accepted |
 | MDI-54B XLSX export with result-based row coloring | Accepted |
+| MDI-59A stale action flag persistence/recovery fix | Accepted (API-verified; operator Start New Scan visual confirmation pending) |
+
+**MDI-59A production deploy and stuck-action unblock (2026-07-02 04:03 UTC):**
+
+Backend-only deploy on `srv766238`: backend `32148c1` → `/opt/mdi/backend` (from
+`1073bff` / MDI-54B). Frontend unchanged: `index-DRQeaMJN.js` /
+`index-BQreofYY.css`. Backend files copied: `services/job_actions.py`,
+`services/job_persistence.py`; `build_info.json` updated; `mdi-backend.service`
+**restarted** and **active**; nginx **not** reloaded; frontend **not** redeployed.
+Backup: `/opt/mdi/backups/mdi59a-20260702-040308/`.
+
+Safe API verification (read-only): `/api/mdi/health`, `/api/mdi/version`,
+`/api/mdi/usage`, `/api/mdi/jobs/latest` → 200; `/api/mdi/health` and
+`/api/mdi/version` commit `32148c102639cbb9adcf84646c80039d8b9b0617`;
+`/api/mdi/usage` `daily_lookups_used=0`, `remaining=500` (unchanged).
+
+Stuck recovered job unblock (recovered job `2aac9b0b-88c2-4f7a-81d0-f86e50e589d3`;
+no new scan; no MDI job submit; no POST actions): **PASS** via API — `/api/mdi/jobs/latest`
+returned `status=done`, `action_in_progress=false`, `last_action_type=refresh`.
+Backend log confirmed recovery sanitization (not runtime edit):
+`sanitize_terminal_action_state: clearing stale action_in_progress for terminal job 2aac9b0b-88c2-4f7a-81d0-f86e50e589d3 (status=done)`.
+
+UI verification: production UI loads (`https://forgeforward.app/tools/mdi/` → 200;
+same bundle hashes). Start New Scan enablement inferred from API state matching
+frontend gating (`status=done`, `action_in_progress=false`). **Pending operator
+visual confirmation** that Start New Scan is enabled and blocked copy is gone;
+no scan was submitted during deploy or docs closure.
+
+Runtime/quota safety: metadata unchanged before/after deploy for
+`mdi_latest_job.json`, `vt_usage.json`, `vt_usage.lock`, `vt_usage_history.jsonl`,
+`vt_daily_history.json`. No runtime JSON edit; no quota reset; no external API
+calls; no VT quota consumed; no MDI jobs submitted; VT Bulk Check untouched.
+
+**Accepted known limitation:** disk/API divergence — on-disk
+`/var/lib/dns-tool/mdi_latest_job.json` still has stale `action_in_progress=true`
+while API returns `action_in_progress=false` through recovery sanitization. This
+is acceptable for operator unblock after deploy. Optional separate runtime cleanup
+ticket may align disk/API state if desired. Next refresh/scan action should persist
+`action_in_progress=false` to disk.
+
+Rollback (documented; not executed): restore from
+`/opt/mdi/backups/mdi59a-20260702-040308/` (`job_actions.py`, `job_persistence.py`,
+`build_info.json`) and restart `mdi-backend.service`.
 
 **MDI-54B production deploy and export smoke (2026-06-25 ~03:22–03:23 UTC):**
 
@@ -655,6 +710,8 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | MDI-54A/54B export smoke used single flagged saved row | Acceptable — contract verified on real production data; multi-row and non-flagged XLSX fills not re-smoked in production |
 | XLSX bulk export built in memory | Acceptable — very large exports may be slower/heavier than CSV |
 | XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
+| Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
+| Post–MDI-59A: disk `mdi_latest_job.json` may still show the stale `action_in_progress=true` while API returns `false` | Acceptable — operator unblock via API; optional runtime cleanup ticket for disk/API alignment; next refresh/scan should persist `false` to disk |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -703,6 +760,15 @@ operator review and separate approval.
 MDI-54 series complete. Legacy wide-CSV consumers should use **JSON evidence
 export** for full forensic fields. Bulk CSV (default) and XLSX share the 10-column
 analyst contract; XLSX adds result-based row coloring.
+
+### MDI-59A action flag persistence follow-on
+
+| Ticket | Scope | Status |
+|---|---|---|
+| MDI-59A | Stale `action_in_progress` persistence/recovery fix | **Closed** — merged, backend-deployed, production-verified, accepted (2026-07-02) |
+| MDI-59A-RUNTIME (optional) | One-time disk alignment of `mdi_latest_job.json` `action_in_progress` for job `2aac9b0b-…` | **Optional backlog** — not required for operator unblock; backup + verify if pursued |
+
+MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 
 ### Other non-blocking items
 
