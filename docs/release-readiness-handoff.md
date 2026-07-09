@@ -43,9 +43,34 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-54B: `1073bff456d551d97f63a99826748b35db35e617` | Static bundle: `index-DRQeaMJN.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/` (unchanged by MDI-59A) |
-| MDI backend | MDI-59A: `32148c102639cbb9adcf84646c80039d8b9b0617` | `/opt/mdi/backend`; action flag persistence + recovery sanitization; previous backend `1073bff` (MDI-54B) |
+| Frontend | MDI-57A: `f886ceb8c2900e4999329260c99868fd5ab9fd72` | Static bundle: `index-BlibenHD.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/`; previous `index-DRQeaMJN.js` removed |
+| MDI backend | MDI-57A: `f886ceb8c2900e4999329260c99868fd5ab9fd72` | `/opt/mdi/backend`; submit-only pending URL behavior, 30-day stale default, very-stale boundary scaling, pending-analysis triage + export, updated estimate model; previous backend `32148c1` (MDI-59A) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-57A (2026-07-09T00:45–00:47 UTC) deployed **full-stack** from `main` @
+`f886ceb8c2900e4999329260c99868fd5ab9fd72` on host `srv766238`. Backend files
+copied: `services/vt_service.py`, `services/triage_rules.py`,
+`services/job_processor.py`, `services/estimate.py`,
+`services/job_persistence.py`, `services/job_store.py`,
+`services/export_service.py`, `models.py`, `routers/mdi.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**;
+frontend built and rsynced (`rsync -av --delete`) to `/var/www/html/tools/mdi/`;
+old bundle `index-DRQeaMJN.js` **removed**; nginx **not** reloaded; VT Bulk
+Check **untouched**. Backups: backend
+`/root/backups/mdi-57a-pre-deploy-backend-20260709T004552Z/`, frontend
+`/root/backups/mdi-57a-pre-deploy-frontend-20260709T004552Z/`. Previous
+production: backend `32148c1` (MDI-59A), frontend `index-DRQeaMJN.js` /
+`index-BQreofYY.css`.
+
+MDI-57A changes initial URL-mode VirusTotal behavior to submit-only pending
+analysis: new unknown URLs use GET + POST submit (2 calls), then stop — no
+immediate re-fetch; cached URL reports remain 1 call; URL estimate max changes
+3 → 2; stale threshold default 7 → 30 days; very-stale boundary becomes
+`max(2 * stale_threshold_days, 30)`; pending rows show `Pending VT analysis`
+(not `0/0`), triage_bucket `pending`, recommended_action `refresh_report`,
+evidence_status `partial`, freshness `never_scanned`; pending export rows use
+`pending_analysis` field; 404 and empty/zero-stat reports are not treated as
+clean.
 
 MDI-59A (2026-07-02 04:03 UTC) deployed **backend-only** from `main` @ `32148c1`
 on host `srv766238`. Backend files copied: `services/job_actions.py`,
@@ -100,6 +125,17 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-46 | Input page layout cohesion pass accepted and deployed |
 | MDI-47 | Type floor / readability pass accepted and deployed |
 | MDI-48 | Input workflow guidance and placeholder clarity accepted and deployed |
+
+### MDI-57A VT quota optimization / pending URL state
+
+| Ticket | Outcome |
+|---|---|
+| MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default — **merged, full-stack deployed, production-verified, smoke-accepted, closed** |
+
+MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
+
+MDI-57B (bulk Refresh Pending action) and MDI-59 (progress-phase UX) remain
+separate future backlog items — not started.
 
 ### MDI export contract series (MDI-54)
 
@@ -204,6 +240,7 @@ MDI currently supports:
 - Open in VirusTotal
 - Refresh Report
 - Request New Scan
+- pending-analysis URL state (MDI-57A): new unknown URLs are submit-only (2 VT calls); pending rows show `Pending VT analysis`, `Refresh Report` recommended action, and partial evidence — not `0/0` or clean; `pending_analysis` export field
 - bulk actions
 - CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
@@ -270,6 +307,58 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-54A 10-column CSV export contract | Accepted |
 | MDI-54B XLSX export with result-based row coloring | Accepted |
 | MDI-59A stale action flag persistence/recovery fix | Accepted (API-verified; operator Start New Scan visual confirmation pending) |
+| MDI-57A submit-only pending URL state, 30-day stale default, pending-analysis triage + export, updated estimate model | Accepted — full-stack deployed, production-verified, operator smoke-accepted |
+
+**MDI-57A production deploy and smoke acceptance (2026-07-09T00:45–00:47 UTC):**
+
+Full-stack deploy on `srv766238`: backend `f886ceb8` → `/opt/mdi/backend` (from
+`32148c1` / MDI-59A); frontend `index-BlibenHD.js` / `index-BQreofYY.css` via
+`rsync -av --delete` from `/root/mdi/frontend/dist/` to
+`/var/www/html/tools/mdi/`; old bundle `index-DRQeaMJN.js` removed. Backend
+files copied: `services/vt_service.py`, `services/triage_rules.py`,
+`services/job_processor.py`, `services/estimate.py`,
+`services/job_persistence.py`, `services/job_store.py`,
+`services/export_service.py`, `models.py`, `routers/mdi.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**;
+`daemon-reload` executed (unit-file change warning cleared); nginx **not**
+reloaded; VT Bulk Check **untouched**. Backups:
+`/root/backups/mdi-57a-pre-deploy-backend-20260709T004552Z/` (10 files),
+`/root/backups/mdi-57a-pre-deploy-frontend-20260709T004552Z/`.
+
+Safe API verification (read-only): `/api/mdi/health` → 200, commit
+`f886ceb8c2900e4999329260c99868fd5ab9fd72`; `/api/mdi/version` → 200, same
+commit; `/api/mdi/usage` → 200, `daily_lookups_used=0`, `remaining=500`
+(unchanged from pre-deploy); `/api/mdi/jobs/latest` → 200, `status=done`, no
+recovered-job regression; `/api/mdi/schema-summary` → `STALE_THRESHOLD_DAYS: 30`
+confirmed. Production `index.html` references `index-BlibenHD.js` and
+`index-BQreofYY.css`; JS bundle confirmed to contain `isPendingAnalysis` and
+`stale_threshold_days:30`; no Refresh Pending bulk button; no progress-phase UI.
+
+Focused backend pre-deploy tests: **393 passed, 0 failed**
+(`test_vt_service.py`, `test_estimate.py`, `test_jobs_submit.py`,
+`test_triage_rules.py`, `test_export.py`, `test_job_persistence.py`,
+`test_mdi57a_submit_only_pending.py`). Frontend build: 31 modules, no generated
+artifacts committed.
+
+Smoke acceptance: operator (Steven) reported all MDI-57A smoke tests passed
+after deployment. Detailed per-step smoke artifacts were not added to docs
+beyond operator acceptance. Live pending-analysis workflow verification gap is
+closed by operator acceptance. Any quota consumed during smoke was
+operator-approved and expected.
+
+Runtime/quota safety: all five runtime files (`mdi_latest_job.json`,
+`vt_usage.json`, `vt_usage_history.jsonl`, `vt_daily_history.json`,
+`vt_usage.lock`) had identical sizes and mtimes before and after deployment.
+No runtime JSON edit; no quota reset; no external API calls; no VT quota
+consumed during deploy; no MDI jobs submitted during deploy; VT Bulk Check
+untouched.
+
+Rollback (documented; not executed): restore from
+`/root/backups/mdi-57a-pre-deploy-backend-20260709T004552Z/` (nine service/model/router files + `build_info.json`) to
+`/opt/mdi/backend/`; restore from
+`/root/backups/mdi-57a-pre-deploy-frontend-20260709T004552Z/` to
+`/var/www/html/tools/mdi/`; restart `mdi-backend.service`; verify
+`/api/mdi/version` returns `32148c1`.
 
 **MDI-59A production deploy and stuck-action unblock (2026-07-02 04:03 UTC):**
 
@@ -712,6 +801,11 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
 | Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
 | Post–MDI-59A: disk `mdi_latest_job.json` may still show the stale `action_in_progress=true` while API returns `false` | Acceptable — operator unblock via API; optional runtime cleanup ticket for disk/API alignment; next refresh/scan should persist `false` to disk |
+| No bulk Refresh Pending action (MDI-57B) | Acceptable — operators must refresh individual pending URL rows one at a time via Row More Actions → Refresh Report |
+| Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Known failure** — fixture domain created 2026-05-30 aged out of the VERY_NEW window; confirmed on unmodified `main` before MDI-57A; needs separate fix ticket; does not block MDI-57A |
+| Progress-phase UX (MDI-59) — per-item progress indicators during job execution | **Future backlog** — not started; separate ticket required |
+| Manual Request New Scan completedness check | **Future backlog** — not part of MDI-57A scope |
+| Pending URL rows require operator-initiated Refresh Report; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -769,6 +863,18 @@ analyst contract; XLSX adds result-based row coloring.
 | MDI-59A-RUNTIME (optional) | One-time disk alignment of `mdi_latest_job.json` `action_in_progress` for job `2aac9b0b-…` | **Optional backlog** — not required for operator unblock; backup + verify if pursued |
 
 MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
+
+### MDI-57A VT quota optimization follow-on
+
+| Ticket | Scope | Status |
+|---|---|---|
+| MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default | **Closed** — merged, full-stack deployed, production-verified, smoke-accepted (2026-07-09) |
+| MDI-57B | Bulk Refresh Pending action — refresh all pending URL rows in one operation | **Future backlog** — not started |
+| MDI-59 | Progress-phase UX — per-item progress indicators during job execution | **Future backlog** — not started |
+| Date-drift test fix | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture refresh | **Future backlog** — not started; separate ticket required |
+
+MDI-57B and MDI-59 are **documented backlog only — not started**. Do not
+conflate with MDI-57A closure.
 
 ### Other non-blocking items
 
