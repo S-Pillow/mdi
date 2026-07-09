@@ -104,9 +104,10 @@ def select_eligible_items(
 
     action: "refresh" or "scan"
     scope:
-      - selected: positions list
+      - selected: positions list (ordinary Refresh Report)
       - stale: freshness in {stale, very_stale}
-      - pending: MDI-57A pending-analysis URL rows (refresh only)
+      - pending: MDI-57A pending-analysis URL rows (refresh only, all in job)
+      - selected_pending: MDI-63 selected pending-analysis URL rows (refresh only)
     """
     out = EligibilityResult()
 
@@ -119,6 +120,27 @@ def select_eligible_items(
                 out.record_skip("invalid_position")
                 continue
             _evaluate_item(job, result, action, out)
+    elif scope == RefreshScanScope.SELECTED_PENDING:
+        # MDI-63: selected subset of pending-analysis URL rows (refresh only).
+        if action != "refresh":
+            out.record_skip("selected_pending_scope_refresh_only")
+            return out
+        if not positions:
+            return out
+        for pos in positions:
+            result = _result_by_position(job, pos)
+            if result is None:
+                out.record_skip("invalid_position")
+                continue
+            if not is_pending_refresh_eligible(result):
+                if _is_held(result):
+                    out.record_skip("held")
+                elif not result.input_normalized:
+                    out.record_skip("missing_input")
+                else:
+                    out.record_skip("not_pending")
+                continue
+            out.eligible.append(result)
     elif scope == RefreshScanScope.PENDING:
         # MDI-57B: Bulk Refresh Pending — refresh action only.
         if action != "refresh":
@@ -196,7 +218,10 @@ def estimate_action(
                 domain_rescan_eligible_count += 1
             else:
                 url_scan_eligible_count += 1
-        if request.scope == RefreshScanScope.PENDING and action == "refresh":
+        if request.scope in (
+            RefreshScanScope.PENDING,
+            RefreshScanScope.SELECTED_PENDING,
+        ) and action == "refresh":
             pending_eligible_count += 1
 
     try:
@@ -222,6 +247,7 @@ def estimate_action(
     will_exceed = q_max > remaining
 
     scope_val = request.scope.value if hasattr(request.scope, "value") else str(request.scope)
+    selected_count = len(request.positions or [])
     if selection.eligible:
         if request.scope == RefreshScanScope.PENDING and action == "refresh":
             msg = (
@@ -229,6 +255,18 @@ def estimate_action(
                 f"estimated {q_min}–{q_max} VT quota unit(s) "
                 f"(1 lookup per pending URL)."
             )
+        elif request.scope == RefreshScanScope.SELECTED_PENDING and action == "refresh":
+            msg = (
+                f"Refresh Selected Pending will process {len(selection.eligible)} "
+                f"pending URL(s) from {selected_count} selected row(s); "
+                f"estimated {q_min}–{q_max} VT quota unit(s) "
+                f"(1 lookup per pending URL)."
+            )
+            if selection.skipped_count:
+                msg += (
+                    f" {selection.skipped_count} selected row(s) skipped "
+                    f"(not pending-eligible)."
+                )
         else:
             msg = (
                 f"{action.capitalize()} will process {len(selection.eligible)} item(s); "
@@ -244,11 +282,16 @@ def estimate_action(
     else:
         if request.scope == RefreshScanScope.PENDING:
             msg = "No pending URL rows eligible for Refresh Pending."
+        elif request.scope == RefreshScanScope.SELECTED_PENDING:
+            msg = "No selected pending URL rows eligible for Refresh Selected Pending."
         else:
             msg = f"No eligible items for {action}."
 
     if will_exceed:
-        if request.scope == RefreshScanScope.PENDING and action == "refresh":
+        if request.scope in (
+            RefreshScanScope.PENDING,
+            RefreshScanScope.SELECTED_PENDING,
+        ) and action == "refresh":
             msg += (
                 f" Insufficient quota. This action needs {q_max} lookups "
                 f"but only {remaining} remain today (UTC)."
@@ -565,6 +608,8 @@ def _set_action_phase(job: InMemoryJob, action: str, scope: RefreshScanScope) ->
     if action == "refresh":
         if scope == RefreshScanScope.PENDING:
             job.current_phase = "refresh_pending"
+        elif scope == RefreshScanScope.SELECTED_PENDING:
+            job.current_phase = "refresh_selected_pending"
         else:
             job.current_phase = "refresh_report"
     elif action == "scan":

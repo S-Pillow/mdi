@@ -319,6 +319,11 @@ function countSelectedScannable(results, selectedIds, job) {
 function countPendingRefreshable(results) {
   return (results || []).filter(r => isPendingAnalysis(r) && canRefreshRow(r)).length
 }
+function countSelectedPendingRefreshable(results, selectedIds) {
+  return (results || []).filter(
+    r => selectedIds.has(r.position) && isPendingAnalysis(r) && canRefreshRow(r),
+  ).length
+}
 
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
 function isExportFlagged(r) {
@@ -1710,6 +1715,7 @@ const PHASE_LABELS = {
   finalizing: 'Finalizing results…',
   refresh_report: 'Refresh Report in progress…',
   refresh_pending: 'Refresh Pending in progress…',
+  refresh_selected_pending: 'Refresh Selected Pending in progress…',
   request_new_scan: 'Request New Scan in progress…',
   rescan_stale: 'Rescan Stale in progress…',
 }
@@ -1723,6 +1729,7 @@ function isActionPhase(phase) {
   return (
     phase === 'refresh_report'
     || phase === 'refresh_pending'
+    || phase === 'refresh_selected_pending'
     || phase === 'request_new_scan'
     || phase === 'rescan_stale'
   )
@@ -2168,6 +2175,7 @@ function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel
   if (!open || !estimate) return null
   const isScan = action === 'scan'
   const isRefreshPending = action === 'refresh' && scope === 'pending'
+  const isRefreshSelectedPending = action === 'refresh' && scope === 'selected_pending'
   const blocked = estimate.will_exceed_quota
   const skipSummary = estimate.skipped_reasons_summary
     ? Object.entries(estimate.skipped_reasons_summary).map(([k, v]) => `${k}: ${v}`).join(', ')
@@ -2178,6 +2186,7 @@ function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel
 
   let title = isScan ? 'Request New Scan' : 'Refresh VT Report'
   if (isRefreshPending) title = 'Refresh Pending VT Analysis'
+  if (isRefreshSelectedPending) title = 'Refresh Selected Pending VT Analysis'
 
   return (
     <div className="action-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="action-modal-title">
@@ -2192,6 +2201,27 @@ function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel
             </p>
             <p>Rows that are still not ready will remain <strong>Pending VT analysis</strong>.</p>
             <p>This does <strong>not</strong> submit a new scan.</p>
+          </div>
+        ) : isRefreshSelectedPending ? (
+          <div className="action-modal-msg">
+            <p>
+              Refresh Selected Pending checks whether VirusTotal has completed analysis for
+              <strong> selected pending URL rows only</strong>.
+            </p>
+            <p>
+              This costs <strong>1 VT lookup per eligible selected pending row</strong>
+              {n > 0 ? ` (${n} URL${n === 1 ? '' : 's'} → up to ${n} lookup${n === 1 ? '' : 's'})` : ''}.
+            </p>
+            {estimate.skipped_count > 0 && (
+              <p>
+                <strong>{estimate.skipped_count}</strong> selected row(s) will be skipped because they are
+                not pending-eligible.
+              </p>
+            )}
+            <p>Rows that are still not ready will remain <strong>Pending VT analysis</strong>.</p>
+            <p>
+              This is a <strong>GET-only Refresh Report</strong> — no URL submit, no Request New Scan.
+            </p>
           </div>
         ) : (
           <p className="action-modal-msg">{estimate.message}</p>
@@ -2214,7 +2244,7 @@ function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel
         )}
         {blocked && (
           <p className="action-modal-warn">
-            {isRefreshPending
+            {(isRefreshPending || isRefreshSelectedPending)
               ? `Insufficient quota. This action needs ${need} lookups but only ${remaining} remain today (UTC).`
               : '⛔ Insufficient quota for worst-case estimate. Action blocked.'}
           </p>
@@ -2237,7 +2267,13 @@ function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel
               onClick={onConfirm}
               disabled={confirming || blocked || estimate.eligible_count === 0}
             >
-              {confirming ? 'Starting…' : (isRefreshPending ? 'Confirm Refresh Pending' : 'Confirm refresh')}
+              {confirming ? 'Starting…' : (
+                isRefreshPending
+                  ? 'Confirm Refresh Pending'
+                  : isRefreshSelectedPending
+                    ? 'Confirm Refresh Selected Pending'
+                    : 'Confirm refresh'
+              )}
             </button>
           )}
         </div>
@@ -2446,8 +2482,10 @@ function BulkControls({
   canRescanSelected,
   canRescanStale,
   canRefreshPending,
+  canRefreshSelectedPending,
   staleCount,
   pendingCount,
+  selectedPendingCount,
   actionInProgress,
   exportFormat,
   onExportFormatChange,
@@ -2457,6 +2495,7 @@ function BulkControls({
   onRescanSelected,
   onRescanStale,
   onRefreshPending,
+  onRefreshSelectedPending,
 }) {
   const formatLabel = exportFormat === 'xlsx' ? 'XLSX' : 'CSV'
   const refreshPendingTitle = actionInProgress
@@ -2464,6 +2503,11 @@ function BulkControls({
     : (canRefreshPending
       ? `Refresh Pending — check whether VirusTotal has completed analysis for ${pendingCount} submitted URL(s) (1 VT lookup each)`
       : 'No pending URL rows')
+  const refreshSelectedPendingTitle = actionInProgress
+    ? 'A refresh/scan action is already in progress'
+    : (canRefreshSelectedPending
+      ? `Refresh Selected Pending — check whether VirusTotal has completed analysis for ${selectedPendingCount} selected pending URL(s) (1 VT lookup each)`
+      : 'No selected pending URL rows')
   return (
     <div className="bulk-controls">
       <span className="bulk-label">Bulk actions:</span>
@@ -2511,6 +2555,14 @@ function BulkControls({
         onClick={onRefreshPending}
       >
         <IconRefresh /> Refresh Pending{pendingCount > 0 ? ` (${pendingCount})` : ''}
+      </button>
+      <button
+        className={canRefreshSelectedPending && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canRefreshSelectedPending || actionInProgress}
+        title={refreshSelectedPendingTitle}
+        onClick={onRefreshSelectedPending}
+      >
+        <IconRefresh /> Refresh Selected Pending{selectedPendingCount > 0 ? ` (${selectedPendingCount})` : ''}
       </button>
       <button
         className={canRescanSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
@@ -2794,7 +2846,7 @@ function TriageWorkspace({
   selectedItem, onSelectItem,
   actionInProgress, actionMessage, exportMessage,
   exportFormat, onExportFormatChange,
-  onRescanSelected, onRescanStale, onRefreshPending,
+  onRescanSelected, onRescanStale, onRefreshPending, onRefreshSelectedPending,
   onExportAll, onExportFlagged, onExportSelected,
   onExportEvidence, onRefreshRow, onScanRow,
   onCloseDashboard,
@@ -2856,9 +2908,11 @@ function TriageWorkspace({
   const staleScannable = countStaleScannable(allResults, job)
   const selectedScannable = countSelectedScannable(allResults, selectedIds, job)
   const pendingRefreshable = countPendingRefreshable(allResults)
+  const selectedPendingRefreshable = countSelectedPendingRefreshable(allResults, selectedIds)
   const canRescanSelected = isComplete && !actionInProgress && selectedScannable > 0
   const canRescanStale = isComplete && !actionInProgress && staleScannable > 0
   const canRefreshPending = isComplete && !actionInProgress && pendingRefreshable > 0
+  const canRefreshSelectedPending = isComplete && !actionInProgress && selectedPendingRefreshable > 0
   const flaggedCount = allResults.filter(isExportFlagged).length
   const canExportAll = isComplete && !actionInProgress && allResults.length > 0
   const canExportFlagged = isComplete && !actionInProgress && flaggedCount > 0
@@ -2916,8 +2970,10 @@ function TriageWorkspace({
           canRescanSelected={canRescanSelected}
           canRescanStale={canRescanStale}
           canRefreshPending={canRefreshPending}
+          canRefreshSelectedPending={canRefreshSelectedPending}
           staleCount={staleScannable}
           pendingCount={pendingRefreshable}
+          selectedPendingCount={selectedPendingRefreshable}
           actionInProgress={actionInProgress}
           exportFormat={exportFormat}
           onExportFormatChange={onExportFormatChange}
@@ -2927,6 +2983,7 @@ function TriageWorkspace({
           onRescanSelected={() => onRescanSelected && onRescanSelected([...selectedIds])}
           onRescanStale={() => onRescanStale && onRescanStale()}
           onRefreshPending={() => onRefreshPending && onRefreshPending()}
+          onRefreshSelectedPending={() => onRefreshSelectedPending && onRefreshSelectedPending([...selectedIds])}
         />
       )}
 
@@ -3636,9 +3693,13 @@ export default function App() {
               }
             }
             const n = baseline.positions.length
-            setActionMessage(
-              `Refresh Pending complete — ${completed} of ${n} URLs now have completed VT reports; ${stillPending} still pending; ${failed} failed.`
-            )
+            const isSelectedPending = baseline.scope === 'selected_pending'
+            const label = isSelectedPending ? 'Refresh Selected Pending' : 'Refresh Pending'
+            let summary = `${label} complete — ${completed} of ${n} URLs now have completed VT reports; ${stillPending} still pending; ${failed} failed.`
+            if (isSelectedPending && baseline.skippedNonPending > 0) {
+              summary += ` ${baseline.skippedNonPending} selected non-pending row(s) were skipped.`
+            }
+            setActionMessage(summary)
           } else {
             setActionMessage('VT action completed. Results updated.')
           }
@@ -3703,10 +3764,22 @@ export default function App() {
     setActionConfirming(true)
     try {
       const isRefreshPending = actionModal.action === 'refresh' && actionModal.scope === 'pending'
+      const isRefreshSelectedPending = actionModal.action === 'refresh' && actionModal.scope === 'selected_pending'
       if (isRefreshPending) {
         const pendingRows = (job?.results || []).filter(r => isPendingAnalysis(r) && canRefreshRow(r))
         pendingRefreshBaselineRef.current = {
+          scope: 'pending',
           positions: pendingRows.map(r => r.position),
+        }
+      } else if (isRefreshSelectedPending) {
+        const selectedSet = new Set(actionModal.positions || [])
+        const pendingRows = (job?.results || []).filter(
+          r => selectedSet.has(r.position) && isPendingAnalysis(r) && canRefreshRow(r),
+        )
+        pendingRefreshBaselineRef.current = {
+          scope: 'selected_pending',
+          positions: pendingRows.map(r => r.position),
+          skippedNonPending: actionModal.estimate?.skipped_count ?? 0,
         }
       } else {
         pendingRefreshBaselineRef.current = null
@@ -3716,13 +3789,17 @@ export default function App() {
       setActionInProgress(true)
       const fallbackPhase = isRefreshPending
         ? 'refresh_pending'
-        : actionModal.action === 'scan'
-          ? (actionModal.scope === 'stale' ? 'rescan_stale' : 'request_new_scan')
-          : 'refresh_report'
+        : isRefreshSelectedPending
+          ? 'refresh_selected_pending'
+          : actionModal.action === 'scan'
+            ? (actionModal.scope === 'stale' ? 'rescan_stale' : 'request_new_scan')
+            : 'refresh_report'
       setActionMessage(phaseLabel(fallbackPhase) || (
         isRefreshPending
           ? 'Refresh Pending in progress…'
-          : `${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`
+          : isRefreshSelectedPending
+            ? 'Refresh Selected Pending in progress…'
+            : `${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`
       ))
       setActionModal(null)
       scheduleJobPoll(jobId)
@@ -3746,6 +3823,10 @@ export default function App() {
 
   function handleRefreshPending() {
     openActionModal('refresh', 'pending', null)
+  }
+
+  function handleRefreshSelectedPending(positions) {
+    openActionModal('refresh', 'selected_pending', positions)
   }
 
   function handleDrawerRefresh(row) {
@@ -4047,6 +4128,7 @@ export default function App() {
               onRescanSelected={handleRescanSelected}
               onRescanStale={handleRescanStale}
               onRefreshPending={handleRefreshPending}
+              onRefreshSelectedPending={handleRefreshSelectedPending}
               onExportAll={handleExportAll}
               onExportFlagged={handleExportFlagged}
               onExportSelected={handleExportSelected}

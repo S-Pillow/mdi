@@ -623,10 +623,10 @@ async def _handle_job_action(
     if block_reason:
         raise HTTPException(status_code=409, detail=block_reason)
 
-    if req.scope == RefreshScanScope.SELECTED and not req.positions:
+    if req.scope in (RefreshScanScope.SELECTED, RefreshScanScope.SELECTED_PENDING) and not req.positions:
         raise HTTPException(
             status_code=422,
-            detail="positions is required when scope is 'selected'.",
+            detail=f"positions is required when scope is '{req.scope.value}'.",
         )
 
     estimate = job_actions.estimate_action(job, action, req)
@@ -681,6 +681,7 @@ async def refresh_job(job_id: str, req: JobActionRequest):
 
     Updates the existing job in-place. No new job_id. Uses saved job options.
     scope=pending (MDI-57B) refreshes all pending-analysis URL rows; no submit.
+    scope=selected_pending (MDI-63) refreshes only selected pending-analysis URL rows.
     """
     return await _handle_job_action(job_id, "refresh", req)
 

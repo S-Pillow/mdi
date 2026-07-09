@@ -886,7 +886,8 @@ class RefreshScanScope(str, Enum):
     """Scope for refresh/rescan actions on an existing job."""
     SELECTED = "selected"
     STALE = "stale"
-    PENDING = "pending"  # MDI-57B: all pending-analysis URL rows
+    PENDING = "pending"  # MDI-57B: all pending-analysis URL rows (refresh only)
+    SELECTED_PENDING = "selected_pending"  # MDI-63: selected pending-analysis URL rows only
 
 
 class JobActionRequest(BaseModel):
@@ -894,13 +895,17 @@ class JobActionRequest(BaseModel):
     scope: RefreshScanScope = Field(
         ...,
         description=(
-            "[workflow] selected rows by position, all stale eligible rows, "
-            "or all pending-analysis URL rows (refresh only)."
+            "[workflow] selected rows by position (ordinary Refresh Report), "
+            "all stale eligible rows, all pending-analysis URL rows (refresh only), "
+            "or selected pending-analysis URL rows only (MDI-63)."
         ),
     )
     positions: Optional[List[int]] = Field(
         None,
-        description="[workflow] 1-based row positions; required when scope=selected.",
+        description=(
+            "[workflow] 1-based row positions; required when scope=selected "
+            "or scope=selected_pending."
+        ),
     )
     confirm: bool = Field(
         True,
@@ -935,7 +940,10 @@ class JobActionEstimateResponse(BaseModel):
     )
     pending_eligible_count: int = Field(
         0,
-        description="[display] Pending-analysis URL rows eligible for Bulk Refresh Pending (MDI-57B).",
+        description=(
+            "[display] Pending-analysis URL rows eligible for Refresh Pending "
+            "(all-pending or selected-pending scope)."
+        ),
     )
 
 
