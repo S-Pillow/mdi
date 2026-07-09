@@ -131,8 +131,11 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | Ticket | Outcome |
 |---|---|
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default — **merged, full-stack deployed, production-verified, smoke-accepted, closed** |
+| MDI-61 | Date-drift test fix for `test_age_bucket_very_new` — **merged, test-only, no deploy required, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
+
+MDI-61 commit on `main`: `3818b13` (fix age bucket date drift test).
 
 MDI-57B (bulk Refresh Pending action) and MDI-59 (progress-phase UX) remain
 separate future backlog items — not started.
@@ -802,7 +805,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
 | Post–MDI-59A: disk `mdi_latest_job.json` may still show the stale `action_in_progress=true` while API returns `false` | Acceptable — operator unblock via API; optional runtime cleanup ticket for disk/API alignment; next refresh/scan should persist `false` to disk |
 | No bulk Refresh Pending action (MDI-57B) | Acceptable — operators must refresh individual pending URL rows one at a time via Row More Actions → Refresh Report |
-| Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Known failure** — fixture domain created 2026-05-30 aged out of the VERY_NEW window; confirmed on unmodified `main` before MDI-57A; needs separate fix ticket; does not block MDI-57A |
+| Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Resolved by MDI-61 (2026-07-09)** — fixture date `2026-05-30` aged out of VERY_NEW; test now rewrites date to yesterday in memory before parsing; no fixture CSV change; full backend suite green at 1021 passed |
 | Progress-phase UX (MDI-59) — per-item progress indicators during job execution | **Future backlog** — not started; separate ticket required |
 | Manual Request New Scan completedness check | **Future backlog** — not part of MDI-57A scope |
 | Pending URL rows require operator-initiated Refresh Report; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
@@ -871,7 +874,7 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default | **Closed** — merged, full-stack deployed, production-verified, smoke-accepted (2026-07-09) |
 | MDI-57B | Bulk Refresh Pending action — refresh all pending URL rows in one operation | **Future backlog** — not started |
 | MDI-59 | Progress-phase UX — per-item progress indicators during job execution | **Future backlog** — not started |
-| Date-drift test fix | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture refresh | **Future backlog** — not started; separate ticket required |
+| MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09); production remains at MDI-57A `f886ceb8` |
 
 MDI-57B and MDI-59 are **documented backlog only — not started**. Do not
 conflate with MDI-57A closure.
