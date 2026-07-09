@@ -1751,7 +1751,7 @@ function InputTabsPanel({
   )
 }
 
-// ── MDI-59 progress phase labels ──────────────────────────────────────────────
+// ── MDI-59 progress phase labels (MDI-59B copy refinement) ───────────────────
 
 const PHASE_LABELS = {
   enriching: 'Enriching domain data…',
@@ -1759,15 +1759,21 @@ const PHASE_LABELS = {
   checking_live_site: 'Checking live site status…',
   checking_cloudflare_rank: 'Checking Cloudflare rank…',
   finalizing: 'Finalizing results…',
-  refresh_report: 'Refresh Report in progress…',
+  refresh_report: 'Refreshing report…',
   refresh_pending: 'Refresh Pending in progress…',
   refresh_selected_pending: 'Refresh Selected Pending in progress…',
   request_new_scan: 'Request New Scan in progress…',
   rescan_stale: 'Rescan Stale in progress…',
 }
 
-function phaseLabel(phase) {
+function phaseLabel(phase, context = null) {
   if (!phase) return null
+  if (phase === 'refresh_report' && context?.scope === 'selected') {
+    return 'Refreshing selected report(s)…'
+  }
+  if (phase === 'request_new_scan' && context?.scope === 'selected') {
+    return 'Rescan Selected in progress…'
+  }
   return PHASE_LABELS[phase] || null
 }
 
@@ -1797,17 +1803,20 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const pct       = attempted > 0 ? Math.round((completed / attempted) * 100) : 0
   const isRunning = job?.status === 'running' || job?.status === 'queued'
   const phase = job?.current_phase || null
+  const manualActionPhase = !!job?.action_in_progress && isActionPhase(phase)
   // Only show phase while the job/action is actually active (avoid stale recovered copy)
   const showActivePhase = !!phase && (isRunning || !!job?.action_in_progress)
-  const phaseCopy = showActivePhase ? phaseLabel(phase) : null
+  // MDI-59B: action banner is primary during manual actions; avoid duplicate phase copy here
+  const phaseCopy = showActivePhase && !manualActionPhase ? phaseLabel(phase) : null
   const vtPhaseMeaningful = isRunning && phase === 'checking_virustotal'
   const outsideVtPhase = isRunning && phase && phase !== 'checking_virustotal'
-  const indeterminateProgress = outsideVtPhase || (!!job?.action_in_progress && isActionPhase(phase))
+  const indeterminateProgress = outsideVtPhase || manualActionPhase
   const isRecoveredPreviousDay = isPreviousUtcQuotaDayJob(job, quotaDateUtc)
   const runSectionLabel = isRecoveredPreviousDay ? 'Recovered job' : 'Current run'
   const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' && !showActivePhase ? 'var(--risk-clean)' : 'var(--accent-blue)'
-  const statusLine = phaseCopy
-    || (isRunning ? 'Processing…' : job?.status?.toUpperCase())
+  const statusLine = manualActionPhase
+    ? 'Working…'
+    : (phaseCopy || (isRunning ? 'Processing…' : job?.status?.toUpperCase()))
 
   return (
     <div className="vt-usage-panel">
@@ -3097,7 +3106,9 @@ function TriageWorkspace({
       {/* Loading state */}
       {allResults.length === 0 && isRunning && (
         <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-          {job?.status === 'queued' ? 'Queued — waiting to start…' : 'Processing… results will appear as they complete.'}
+          {job?.status === 'queued'
+            ? 'Queued — waiting to start…'
+            : (phaseLabel(job?.current_phase) || 'Processing… results will appear as they complete.')}
         </div>
       )}
     </>
@@ -3526,6 +3537,8 @@ export default function App() {
   const rowActionPendingRef = useRef(false)
   // MDI-57B: snapshot pending positions before Bulk Refresh Pending for completion summary.
   const pendingRefreshBaselineRef = useRef(null)
+  // MDI-59B: action/scope context for scope-aware phase labels during manual actions
+  const pendingActionContextRef = useRef(null)
 
   const [actionInProgress, setActionInProgress] = useState(false)
   const [actionMessage, setActionMessage]     = useState(null)
@@ -3654,6 +3667,7 @@ export default function App() {
       pollRef.current = null
     }
     rowActionPendingRef.current = false
+    pendingActionContextRef.current = null
     dismissDisplayedJob()
     setDashboardOpen(false)
     setSettingsOpen(false)
@@ -3717,7 +3731,7 @@ export default function App() {
       if (actionDone) setActionInProgress(false)
       // MDI-59: prefer backend phase labels for in-progress action banners
       if (!actionDone && data.current_phase) {
-        const fromPhase = phaseLabel(data.current_phase)
+        const fromPhase = phaseLabel(data.current_phase, pendingActionContextRef.current)
         if (fromPhase) setActionMessage(fromPhase)
       }
       if ((data.status === 'done' || data.status === 'error') && actionDone) {
@@ -3725,6 +3739,7 @@ export default function App() {
         refreshQuota()
         if (rowActionPendingRef.current) {
           rowActionPendingRef.current = false
+          pendingActionContextRef.current = null
           const serverSummary = formatActionSummaryMessage(data.last_action_summary)
           if (serverSummary) {
             pendingRefreshBaselineRef.current = null
@@ -3853,6 +3868,8 @@ export default function App() {
       await startAction(actionModal.action, actionModal.scope, actionModal.positions)
       rowActionPendingRef.current = true
       setActionInProgress(true)
+      const actionContext = { action: actionModal.action, scope: actionModal.scope }
+      pendingActionContextRef.current = actionContext
       const fallbackPhase = isRefreshPending
         ? 'refresh_pending'
         : isRefreshSelectedPending
@@ -3860,7 +3877,7 @@ export default function App() {
           : actionModal.action === 'scan'
             ? (actionModal.scope === 'stale' ? 'rescan_stale' : 'request_new_scan')
             : 'refresh_report'
-      setActionMessage(phaseLabel(fallbackPhase) || (
+      setActionMessage(phaseLabel(fallbackPhase, actionContext) || (
         isRefreshPending
           ? 'Refresh Pending in progress…'
           : isRefreshSelectedPending
@@ -3873,6 +3890,7 @@ export default function App() {
     } catch (err) {
       rowActionPendingRef.current = false
       pendingRefreshBaselineRef.current = null
+      pendingActionContextRef.current = null
       setActionMessage(`Action failed: ${err.message}`)
     } finally {
       setActionConfirming(false)
