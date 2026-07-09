@@ -71,7 +71,9 @@ reports are incomplete; after max incomplete polls the row follows
 pending/not-ready behavior (`vt_scan_pending`, Refresh Report follow-up).
 Completed zero-detection reports with scan date and engines remain valid
 clean/no-action evidence. Domain rescan path unchanged. Quota estimates and
-writer/lock semantics unchanged. Live smoke **not** run — GET verification only.
+writer/lock semantics unchanged. Live smoke **accepted** (2026-07-09) — Outcome A
+completed-report path; Outcome B incomplete/pending not observed (optional future
+coverage only, not a blocker).
 
 MDI-59 (2026-07-09T03:47–03:48 UTC) deployed **full-stack** from `main` @
 `43934287f31784f2364a88496da7a77d88f7dca3` on host `srv766238`. Backend files
@@ -210,7 +212,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter — **merged, full-stack deployed, safe-verified, live smoke-accepted, closed** |
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase — **merged, full-stack deployed, GET/static verified, closed** (job/action smoke not run; operator visual optional on next natural job/action) |
 | MDI-61 | Date-drift test fix for `test_age_bucket_very_new` — **merged, test-only, no deploy required, closed** |
-| MDI-62 | Manual Request New Scan URL completedness gate — **merged, backend-deployed, GET-verified, closed** (live smoke not run) |
+| MDI-62 | Manual Request New Scan URL completedness gate — **merged, backend-deployed, GET-verified, live smoke-accepted, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -399,7 +401,7 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-57A submit-only pending URL state, 30-day stale default, pending-analysis triage + export, updated estimate model | Accepted — full-stack deployed, production-verified, operator smoke-accepted |
 | MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified, **live Refresh Pending smoke accepted** |
 | MDI-59 Progress-phase UX — phase-aware job/action progress labels | Accepted — full-stack deployed, GET/API/static verified; **job/action smoke not run — GET/static verification only** |
-| MDI-62 Manual Request New Scan URL completedness gate | Accepted — backend-deployed, GET/API verified; **live smoke not run — GET verification only** |
+| MDI-62 Manual Request New Scan URL completedness gate | Accepted — backend-deployed, GET/API verified, **live smoke accepted** (Outcome A completed report) |
 
 **MDI-62 production deploy and safe verification (2026-07-09T06:26–06:27 UTC):**
 
@@ -433,10 +435,9 @@ visible completed `0/0`; completed zero-detection reports with scan date and
 engines remain valid clean/no-action evidence; quota estimates and writer/lock
 semantics unchanged; domain rescan path unchanged.
 
-**Smoke status:** no live smoke was run. No POST/job action was performed during
-deploy or verification. Optional live smoke (quota-approved only): Request New
-Scan on a stale URL row; confirm incomplete VT response shows pending/warning,
-not `0/0` clean.
+**Smoke status (deploy):** no POST/job action during deploy or GET verification.
+Live Manual Request New Scan smoke **accepted** separately (2026-07-09) — see
+below.
 
 Runtime/quota safety: runtime metadata unchanged before/after for
 `mdi_latest_job.json`, `vt_usage.json`, `vt_usage_history.jsonl`,
@@ -447,6 +448,51 @@ Rollback (documented; not executed): restore from
 `/root/backups/mdi-62-pre-deploy-backend-20260709T062531Z/`; restart
 `mdi-backend.service`; verify `/api/mdi/version` returns
 `43934287f31784f2364a88496da7a77d88f7dca3`.
+
+**MDI-62 live Manual Request New Scan smoke acceptance (2026-07-09):**
+
+Quota-approved live smoke on `srv766238` at production commit
+`77e53b84d5adb84b0757899d47d390d4b92fb6c0`. Job
+`379b41f8-d2d2-41f0-bf51-2d2bd20e3108`; row position **1**; URL
+`https://forgeforward.app/tools/cn_domain_categorizer/` (URL, not held; selected
+Request New Scan eligible). No separate stale one-row URL target was available in
+the saved job; the fresh/clean eligible URL row was used under the allowed
+“otherwise eligible” rule.
+
+Pre-smoke (GET): `/api/mdi/version` → `77e53b84…`; `/api/mdi/health` → 200 ok;
+`/api/mdi/usage` → **7 used / 493 remaining**; `/api/mdi/jobs/latest` →
+`status=done`, `action_in_progress=false`, `phase=None`.
+
+Estimate: `POST /api/mdi/jobs/{job_id}/scan` with
+`{"scope":"selected","positions":[1],"estimate_only":true}` → `eligible_count=1`,
+`estimated_quota_min=2`, `estimated_quota_max=4`, `will_exceed_quota=false`,
+`url_scan_eligible_count=1`. Approved cap: no more than **5** VT lookups; max 4
+≤ 5, so action proceeded.
+
+Action: `POST /api/mdi/jobs/{job_id}/scan` with
+`{"scope":"selected","positions":[1],"estimate_only":false,"confirm":true}` →
+accepted, `items_queued=1`; polling completed on first poll;
+`action_in_progress=false`; `phase=None`; `vt_scan_failed_count=0`.
+
+Usage: pre-smoke **7 used / 493 remaining** → post-smoke **9 used / 491
+remaining** (delta **+2**; quota cap respected).
+
+Row outcome (Outcome A — completed VT report): `triage_bucket` clean → **clean**;
+`recommended_action` no_action_based_on_vt → **no_action_based_on_vt**;
+`vt_ratio` **0/92** → **0/92** (not `0/0`); `vt_total_engines` 92 → **92**;
+`vt_scan_date` 2026-07-09T04:13:36Z → **2026-07-09T07:26:18Z**; `freshness`
+fresh → **fresh**; `evidence_status` complete → **complete**; errors none;
+`vt_scan_pending` absent. Completed zero-detection report remained
+clean/no-action with full engine evidence. **No `0/0` clean misread occurred.**
+
+Outcome B (incomplete/pending VT URL object) was **not observed** — VirusTotal
+returned a completed report within the poll budget. Outcome B remains optional
+future coverage only, not an active blocker.
+
+Runtime updates from smoke (expected): `mdi_latest_job.json` updated;
+`vt_usage.json` updated; `vt_usage_history.jsonl` grew 59250 → 60291;
+`vt_daily_history.json` mtime updated; `vt_usage.lock` unchanged. No deploy,
+restart, nginx reload, or frontend change during smoke; VT Bulk Check untouched.
 
 **MDI-59 production deploy and safe verification (2026-07-09T03:47–03:48 UTC):**
 
@@ -1089,7 +1135,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | No per-row progress, ETA, or server completion counters in MDI-59 | Acceptable — explicitly out of scope; future backlog if needed |
 | Manual Request New Scan completedness on incomplete VT URL poll responses | **Resolved by MDI-62 (2026-07-09)** — URL scan polling applies MDI-57A completed-report gate; incomplete objects are pending/partial, not clean or `0/0` |
 | Incomplete manual scan on row with prior completed VT evidence | Acceptable — prior hits/ratio preserved with `vt_scan_pending` warning; triage bucket may not flip to `pending` |
-| Live Manual Request New Scan production smoke (MDI-62) | **Not run** — GET verification only; optional quota-approved smoke remains separate |
+| Live Manual Request New Scan production smoke (MDI-62) | **Resolved** (2026-07-09) — Outcome A completed report: 1 URL row, usage +2, `0/92` clean, no `0/0` misread; job `379b41f8-…`; Outcome B not observed (optional future coverage only) |
 | Pre-existing flaky test: `test_mdi14_detail_evidence.py::test_usage_history_excludes_item_level_evidence` | Acceptable — unrelated; timestamp substring `404` false-positive; passes on rerun |
 | Client-derived Refresh Pending completion summary is advisory | Acceptable — may miscount rare failure shapes |
 | Live Refresh Pending production smoke (MDI-57B) | **Resolved** (2026-07-09) — 1 pending URL, usage +1, row completed to clean `0/92`; GET-only refresh; job `379b41f8-…` |
@@ -1098,7 +1144,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Selected-subset Refresh Pending | **Future backlog** — not part of MDI-57B/59 scope |
 | Per-row persistence during bulk actions | **Future backlog** — not part of MDI-57B/59 scope |
 | Improved server-side completion counters | **Future backlog** — not part of MDI-57B/59/62 scope |
-| Manual Request New Scan completedness check | **Resolved by MDI-62 (2026-07-09)** — backend-deployed, GET-verified, closed; live smoke not run |
+| Manual Request New Scan completedness check | **Resolved by MDI-62 (2026-07-09)** — backend-deployed, GET-verified, live smoke accepted (Outcome A) |
 | Pending URL rows require operator-initiated Refresh Report / Refresh Pending; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
 | Refresh 404 on pending URL does not auto-submit | Acceptable — by design |
 
@@ -1167,13 +1213,14 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | **Closed** — merged, full-stack deployed, safe-verified, live smoke-accepted (2026-07-09) |
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase | **Closed** — merged, full-stack deployed, GET/static verified (2026-07-09); job/action smoke not run |
 | MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09) |
-| MDI-62 | Manual Request New Scan URL completedness gate | **Closed** — merged, backend-deployed, GET-verified (2026-07-09); live smoke not run |
+| MDI-62 | Manual Request New Scan URL completedness gate | **Closed** — merged, backend-deployed, GET-verified, live smoke-accepted (2026-07-09); Outcome A completed report; Outcome B not observed |
 
 Production backend is at MDI-62 `77e53b8`; production frontend remains MDI-59
 `4393428` (`index-6YooG29_.js` / `index-DMlC-T_G.css`). Selected-subset Refresh
 Pending, per-row persistence, and improved server-side completion counters remain
-**future backlog only — not started**. Optional live Manual Request New Scan
-smoke requires explicit quota approval.
+**future backlog only — not started**. Optional Outcome B incomplete/pending
+Manual Request New Scan smoke remains quota-approved future coverage only — not
+a blocker.
 
 ### Other non-blocking items
 
