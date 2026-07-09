@@ -413,6 +413,7 @@ create a new job.
 | **Bare domain rows (URL-report mode)** | Uses URL scan on `http://{domain}/` |
 | **When not to use** | Near quota limit, held domains, or when refresh is sufficient |
 | **Pending** | May return `vt_scan_pending` — prior VT evidence is preserved |
+| **Completedness (MDI-62)** | Uses the same completed-report standard as Refresh Report for URL evidence. If VirusTotal has not returned a completed report yet, MDI keeps the row pending/partial with a Refresh Report follow-up rather than treating incomplete `0/0` data as clean. |
 
 Use sparingly on high-priority items. Prefer **Refresh Report** when an
 existing report may still be useful.
