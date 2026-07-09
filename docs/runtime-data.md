@@ -291,12 +291,25 @@ current session even if disk persistence fails.
 ### MDI-15 refresh/rescan actions
 
 Manual refresh/scan updates the **existing job in-place** (same `job_id`).
-After each action batch completes:
 
-1. Result rows updated in memory
-2. `mdi_latest_job.json` overwritten with full updated job snapshot
-3. One **aggregate-only** record appended to `vt_usage_history.jsonl` with
+**Per-row persistence (MDI-64):** During a bulk refresh/scan action, each
+completed row outcome is written to `mdi_latest_job.json` immediately after
+quota increment and in-memory row update. This uses the same atomic
+`.tmp` + `os.replace()` path as batch-end persistence. If the backend restarts
+mid-action, rows persisted before the restart remain completed; remaining
+eligible rows can be reprocessed manually. Automatic action resume is not
+implemented.
+
+After the full action batch completes:
+
+1. Final cleanup persist clears `action_in_progress` and ephemeral phase fields
+2. One **aggregate-only** record appended to `vt_usage_history.jsonl` with
    `operation: "refresh"` or `operation: "force_scan"`
+
+Usage history JSONL remains **batch-level** for actions — a mid-action crash may
+under-count history entries even when per-row job snapshots were saved. The
+advisory client-side completion summary (e.g. MDI-63 selected-pending) is
+ephemeral and may be unavailable after reload.
 
 Action batches do not create a new job. Saved `use_domain_reports` and
 `stale_threshold_days` from the original job are preserved.

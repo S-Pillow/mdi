@@ -458,6 +458,21 @@ class ActionStats:
     live_check_error_count: int = 0
 
 
+async def _persist_job_after_action_row(
+    job: InMemoryJob,
+    job_file: Optional[Path] = None,
+) -> None:
+    """Persist job snapshot after each completed bulk-action row (MDI-64)."""
+    try:
+        await job_persistence.write_latest_job(job, job_file=job_file)
+    except Exception as exc:
+        logger.error(
+            "Failed to persist MDI job after action row for job %s: %s",
+            job.job_id,
+            exc,
+        )
+
+
 async def _run_items(
     job: InMemoryJob,
     items: List[MdiResultItem],
@@ -520,16 +535,16 @@ async def _run_items(
                 stats.scan_failed_count += 1
                 job.vt_scan_failed_count += 1
 
+        if action == "refresh":
+            job.vt_refresh_count += 1
+
+        await _persist_job_after_action_row(job, job_file=job_file)
+
     stats.live_check_count = job.live_check_count - lc_before
     stats.live_check_error_count = job.live_check_error_count - lce_before
 
     job.last_action_at = time.time()
     job.completed_at = job.last_action_at
-
-    try:
-        await job_persistence.write_latest_job(job, job_file=job_file)
-    except Exception as exc:
-        logger.error("persist after action failed: %s", exc)
 
     return stats
 
@@ -650,7 +665,6 @@ async def run_refresh_action(
             daily_file=daily_file,
             job_file=job_file,
         )
-        job.vt_refresh_count += stats.items_completed
         _append_action_history(
             job,
             "refresh",
