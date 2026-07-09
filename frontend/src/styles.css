@@ -1351,6 +1351,11 @@ body {
   font-size: 11px;
   line-height: 1.35;
 }
+.results-job-context-last-action {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .results-start-new-btn {
   flex-shrink: 0;
 }

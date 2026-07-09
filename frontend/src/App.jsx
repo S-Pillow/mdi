@@ -357,6 +357,20 @@ function formatActionSummaryMessage(summary) {
   return `Action complete — ${detail}.`
 }
 
+function formatRecoveredLastActionMessage(summary) {
+  const message = formatActionSummaryMessage(summary)
+  return message ? `Last action: ${message}` : null
+}
+
+function shouldShowRecoveredLastAction({ job, restoredFromSession, actionInProgress, actionMessage }) {
+  if (!restoredFromSession) return false
+  if (actionInProgress || job?.action_in_progress) return false
+  if (job?.current_phase) return false
+  if (actionMessage) return false
+  if (job?.status !== 'done' && job?.status !== 'error') return false
+  return !!formatActionSummaryMessage(job?.last_action_summary)
+}
+
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
 function isExportFlagged(r) {
   if (isRowHeld(r)) return false
@@ -2838,6 +2852,7 @@ function ResultsJobContextBar({
   restoredFromSession,
   onStartNewScan,
   actionInProgress,
+  actionMessage,
 }) {
   const resultCount = job?.results?.length ?? 0
   const lookupCount = job?.lookups_used ?? 0
@@ -2848,6 +2863,14 @@ function ResultsJobContextBar({
     : jobError
       ? 'Clear this error and return to input.'
       : `${resultCount.toLocaleString()} result${resultCount !== 1 ? 's' : ''}`
+  const recoveredLastAction = shouldShowRecoveredLastAction({
+    job,
+    restoredFromSession,
+    actionInProgress,
+    actionMessage,
+  })
+    ? formatRecoveredLastActionMessage(job?.last_action_summary)
+    : null
 
   return (
     <div className={`results-job-context-bar${restoredFromSession ? ' recovered' : ''}`} role="region" aria-label="Results job context">
@@ -2856,6 +2879,9 @@ function ResultsJobContextBar({
         <span className="results-job-context-helper">
           {isRunning ? 'Wait for this job to finish before starting another scan.' : helper}
         </span>
+        {recoveredLastAction && (
+          <span className="results-job-context-last-action">{recoveredLastAction}</span>
+        )}
       </div>
       <button
         type="button"
@@ -2917,6 +2943,7 @@ function TriageWorkspace({
           restoredFromSession={false}
           onStartNewScan={onStartNewScan}
           actionInProgress={actionInProgress}
+          actionMessage={actionMessage}
         />
         <div className="submit-error-banner" role="alert">
           <span style={{ color: 'var(--risk-critical)', fontSize: 12, fontWeight: 600 }}>⛔ Submit error: {jobError}</span>
@@ -2964,6 +2991,7 @@ function TriageWorkspace({
         restoredFromSession={restoredFromSession}
         onStartNewScan={onStartNewScan}
         actionInProgress={actionInProgress}
+        actionMessage={actionMessage}
       />
 
       {job && formatJobRanWithSummary(job) && (
