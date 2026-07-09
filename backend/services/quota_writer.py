@@ -244,6 +244,12 @@ def build_usage_history_record(
     error_item_count: Optional[int] = None,
     held_count: Optional[int] = None,
     error_code_counts: Optional[Dict[str, int]] = None,
+    action_summary_scope: Optional[str] = None,
+    summary_items_processed: Optional[int] = None,
+    summary_items_completed: Optional[int] = None,
+    summary_items_still_pending: Optional[int] = None,
+    summary_items_failed: Optional[int] = None,
+    summary_items_quota_blocked: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Build a metadata-only usage history record.
@@ -305,4 +311,16 @@ def build_usage_history_record(
         record["held_count"] = held_count
     if error_code_counts is not None:
         record["error_code_counts"] = error_code_counts
+    if action_summary_scope is not None:
+        record["action_summary_scope"] = action_summary_scope
+    if summary_items_processed is not None:
+        record["items_processed"] = summary_items_processed
+    if summary_items_completed is not None:
+        record["summary_items_completed"] = summary_items_completed
+    if summary_items_still_pending is not None:
+        record["items_still_pending"] = summary_items_still_pending
+    if summary_items_failed is not None:
+        record["items_failed"] = summary_items_failed
+    if summary_items_quota_blocked is not None:
+        record["items_quota_blocked"] = summary_items_quota_blocked
     return record

@@ -435,7 +435,7 @@ class TestSelectedPendingConfirm:
 
         async def capture_run(job_obj, eligible, action, **kwargs):
             seen.append(job_obj.current_phase)
-            return ActionStats(items_completed=1, quota_units=1)
+            return ActionStats(items_processed=1, items_completed=1, quota_units=1)
 
         with patch("services.job_actions.resolve_job", new=AsyncMock(return_value=job)), \
              patch.object(job_actions, "_run_items", new=capture_run):

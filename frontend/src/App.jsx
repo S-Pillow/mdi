@@ -325,6 +325,38 @@ function countSelectedPendingRefreshable(results, selectedIds) {
   ).length
 }
 
+function formatActionSummaryParts(summary) {
+  if (!summary) return null
+  const parts = []
+  if (summary.items_completed > 0) parts.push(`${summary.items_completed} completed`)
+  if (summary.items_still_pending > 0) parts.push(`${summary.items_still_pending} still pending`)
+  if (summary.items_failed > 0) parts.push(`${summary.items_failed} failed`)
+  if (summary.items_skipped > 0 && summary.scope === 'selected_pending') {
+    parts.push(`${summary.items_skipped} selected row(s) skipped`)
+  }
+  if (summary.items_quota_blocked > 0) parts.push(`${summary.items_quota_blocked} quota-blocked`)
+  return parts
+}
+
+function formatActionSummaryMessage(summary) {
+  if (!summary || summary.status !== 'completed') return null
+  const parts = formatActionSummaryParts(summary)
+  const detail = parts.length ? parts.join('; ') : 'no row outcomes recorded'
+  if (summary.action === 'refresh' && summary.scope === 'pending') {
+    return `Refresh Pending complete — ${detail}.`
+  }
+  if (summary.action === 'refresh' && summary.scope === 'selected_pending') {
+    return `Refresh Selected Pending complete — ${detail}.`
+  }
+  if (summary.action === 'refresh') {
+    return `Refresh complete — ${detail}.`
+  }
+  if (summary.action === 'scan') {
+    return `Scan complete — ${detail}.`
+  }
+  return `Action complete — ${detail}.`
+}
+
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
 function isExportFlagged(r) {
   if (isRowHeld(r)) return false
@@ -3665,6 +3697,11 @@ export default function App() {
         refreshQuota()
         if (rowActionPendingRef.current) {
           rowActionPendingRef.current = false
+          const serverSummary = formatActionSummaryMessage(data.last_action_summary)
+          if (serverSummary) {
+            pendingRefreshBaselineRef.current = null
+            setActionMessage(serverSummary)
+          } else {
           const baseline = pendingRefreshBaselineRef.current
           pendingRefreshBaselineRef.current = null
           if (baseline && Array.isArray(baseline.positions)) {
@@ -3702,6 +3739,7 @@ export default function App() {
             setActionMessage(summary)
           } else {
             setActionMessage('VT action completed. Results updated.')
+          }
           }
         }
       }

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from models import MdiResultItem
 
@@ -65,6 +65,7 @@ class InMemoryJob:
     action_in_progress: bool = False
     last_action_type: Optional[str] = None
     last_action_at: Optional[float] = None
+    last_action_summary: Optional[Dict[str, Any]] = None
     vt_refresh_count: int = 0
     vt_scan_requested_count: int = 0
     vt_scan_failed_count: int = 0

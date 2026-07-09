@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from models import (
+    ActionSummary,
     Freshness,
     InputType,
     JobActionEstimateResponse,
@@ -35,7 +36,11 @@ from models import (
 from services import job_persistence, job_store, live_check, quota_writer, triage_rules, vt_service
 from services.job_store import InMemoryJob, get_job, get_job_sync, register_recovered_job
 from services.live_check import LiveCheckResult
-from services.pending_analysis import is_pending_refresh_eligible
+from services.pending_analysis import (
+    has_completed_vt_scan,
+    is_pending_analysis,
+    is_pending_refresh_eligible,
+)
 from services.quota_writer import QuotaLockTimeout, read_remaining_quota
 from services.vt_service import VtLookupResult
 
@@ -450,12 +455,67 @@ async def reprocess_item_after_vt(
 @dataclass
 class ActionStats:
     items_attempted: int = 0
+    items_processed: int = 0
     items_completed: int = 0
+    items_still_pending: int = 0
+    items_failed: int = 0
+    items_quota_blocked: int = 0
     quota_units: int = 0
     errors_count: int = 0
     scan_failed_count: int = 0
     live_check_count: int = 0
     live_check_error_count: int = 0
+
+
+def _classify_action_row_outcome(result: MdiResultItem) -> str:
+    """Classify a processed row outcome for MDI-65 action summaries."""
+    if has_completed_vt_scan(result):
+        return "completed"
+    if is_pending_analysis(result):
+        return "still_pending"
+    return "failed"
+
+
+def _record_row_outcome(stats: ActionStats, outcome: str) -> None:
+    if outcome == "completed":
+        stats.items_completed += 1
+    elif outcome == "still_pending":
+        stats.items_still_pending += 1
+    else:
+        stats.items_failed += 1
+
+
+def _build_action_summary(
+    job: InMemoryJob,
+    action: str,
+    scope: RefreshScanScope,
+    selection: EligibilityResult,
+    stats: ActionStats,
+    *,
+    positions: Optional[List[int]] = None,
+) -> ActionSummary:
+    scope_val = scope.value if hasattr(scope, "value") else str(scope)
+    items_requested = len(positions) if positions else None
+    return ActionSummary(
+        action=action,
+        scope=scope_val,
+        status="completed",
+        items_requested=items_requested,
+        items_eligible=len(selection.eligible),
+        items_skipped=selection.skipped_count,
+        items_processed=stats.items_processed,
+        items_completed=stats.items_completed,
+        items_still_pending=stats.items_still_pending,
+        items_failed=stats.items_failed,
+        items_quota_blocked=stats.items_quota_blocked,
+        quota_units_consumed=stats.quota_units,
+        skipped_reasons_summary=dict(selection.skipped_reasons),
+        completed_at=time.time(),
+    )
+
+
+def _set_action_summary(job: InMemoryJob, summary: ActionSummary) -> None:
+    job.last_action_summary = summary.model_dump(mode="json")
 
 
 async def _persist_job_after_action_row(
@@ -493,10 +553,12 @@ async def _run_items(
         except QuotaLockTimeout:
             logger.warning("Quota lock timeout before %s for job %s", action, job.job_id)
             stats.errors_count += 1
+            stats.items_quota_blocked += 1
             continue
 
         if remaining <= 0:
             stats.errors_count += 1
+            stats.items_quota_blocked += 1
             continue
 
         if action == "refresh":
@@ -527,7 +589,8 @@ async def _run_items(
 
         updated = await reprocess_item_after_vt(job, result, vt_result)
         job.results[result.input_normalized] = updated
-        stats.items_completed += 1
+        stats.items_processed += 1
+        _record_row_outcome(stats, _classify_action_row_outcome(updated))
 
         if vt_result.error:
             stats.errors_count += 1
@@ -566,9 +629,9 @@ def _append_action_history(
     record = quota_writer.build_usage_history_record(
         job_id=job.job_id,
         items_attempted=stats.items_attempted,
-        items_completed=stats.items_completed,
+        items_completed=stats.items_processed,
         quota_units_consumed=stats.quota_units,
-        quota_blocked_count=0,
+        quota_blocked_count=stats.items_quota_blocked,
         errors_count=stats.errors_count,
         held_skipped_count=selection.skipped_reasons.get("held", 0),
         processing_options_summary={
@@ -581,21 +644,27 @@ def _append_action_history(
         live_check_error_count=stats.live_check_error_count,
         operation=operation,
         skipped_count=selection.skipped_count,
-        refresh_count=stats.items_completed if action == "refresh" else 0,
+        refresh_count=stats.items_processed if action == "refresh" else 0,
         scan_requested_count=stats.items_attempted if action == "scan" else 0,
         scan_completed_count=(
-            stats.items_completed - stats.scan_failed_count if action == "scan" else 0
+            stats.items_processed - stats.scan_failed_count if action == "scan" else 0
         ),
         scan_failed_count=stats.scan_failed_count,
         rescan_selected_count=rescan_selected,
         rescan_stale_count=rescan_stale,
+        action_summary_scope=scope.value if hasattr(scope, "value") else str(scope),
+        summary_items_processed=stats.items_processed,
+        summary_items_completed=stats.items_completed,
+        summary_items_still_pending=stats.items_still_pending,
+        summary_items_failed=stats.items_failed,
+        summary_items_quota_blocked=stats.items_quota_blocked,
     )
     quota_writer.append_usage_history(record, history_file)
     if stats.quota_units > 0:
         quota_writer.update_daily_history(
             stats.quota_units,
             daily_file,
-            items_processed=stats.items_completed,
+            items_processed=stats.items_processed,
         )
 
 
@@ -665,6 +734,15 @@ async def run_refresh_action(
             daily_file=daily_file,
             job_file=job_file,
         )
+        summary = _build_action_summary(
+            job,
+            "refresh",
+            request.scope,
+            selection,
+            stats,
+            positions=request.positions,
+        )
+        _set_action_summary(job, summary)
         _append_action_history(
             job,
             "refresh",
@@ -706,6 +784,15 @@ async def run_scan_action(
             daily_file=daily_file,
             job_file=job_file,
         )
+        summary = _build_action_summary(
+            job,
+            "scan",
+            request.scope,
+            selection,
+            stats,
+            positions=request.positions,
+        )
+        _set_action_summary(job, summary)
         _append_action_history(
             job,
             "scan",

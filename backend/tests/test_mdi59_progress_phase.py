@@ -162,7 +162,7 @@ def _make_done_job(items: list[MdiResultItem], *, job_id: str = "mdi59-job") -> 
 
 
 def _ok_stats() -> ActionStats:
-    return ActionStats(items_attempted=1, items_completed=1, quota_units=1)
+    return ActionStats(items_attempted=1, items_processed=1, items_completed=1, quota_units=1)
 
 
 # ── Defaults / schema ─────────────────────────────────────────────────────────

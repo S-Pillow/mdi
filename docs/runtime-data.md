@@ -314,6 +314,15 @@ ephemeral and may be unavailable after reload.
 Action batches do not create a new job. Saved `use_domain_reports` and
 `stale_threshold_days` from the original job are preserved.
 
+**Server-side action summary (MDI-65):** After a bulk refresh/scan action
+completes, `last_action_summary` on the job records authoritative outcome
+counts (`items_completed`, `items_still_pending`, `items_failed`,
+`items_skipped`, `items_quota_blocked`, etc.). Exposed via
+`GET /api/mdi/jobs/latest` and persisted in `mdi_latest_job.json`. Action
+history JSONL receives additive summary fields. No partial/in-progress summary
+in v1; no automatic resume. Client-derived completion summaries remain as
+fallback when `last_action_summary` is absent.
+
 **Test isolation (MDI-14A + MDI-15):** All backend tests redirect runtime paths
 via `backend/tests/conftest.py` autouse fixture — live files are never touched.
 

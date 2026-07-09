@@ -1388,13 +1388,17 @@ Rescan actions show a confirmation modal with quota estimate before submitting.
 | `action_in_progress` | job | True while refresh/scan batch running |
 | `last_action_type` | job | `refresh` or `scan` |
 | `last_action_at` | job | Unix timestamp of last action completion |
+| `last_action_summary` | job | MDI-65 authoritative bulk-action outcome counts (`ActionSummary`) |
 | `vt_refresh_count` | job | Cumulative manual refreshes |
 | `vt_scan_requested_count` | job | Cumulative scan requests |
 | `vt_scan_failed_count` | job | Cumulative scan failures |
 
 Usage history action aggregates: `refresh_count`, `scan_requested_count`,
 `scan_completed_count`, `scan_failed_count`, `rescan_selected_count`,
-`rescan_stale_count`, `operation` (`refresh` | `force_scan`).
+`rescan_stale_count`, `operation` (`refresh` | `force_scan`). MDI-65 adds
+optional additive fields: `action_summary_scope`, `items_processed`,
+`summary_items_completed`, `items_still_pending`, `items_failed`,
+`items_quota_blocked`.
 
 ### MDI-29 recovered job settings vs editable UI state
 

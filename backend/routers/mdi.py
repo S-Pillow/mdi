@@ -67,6 +67,7 @@ from models import (
     JobActionAcceptedResponse,
     JobActionEstimateResponse,
     JobActionRequest,
+    ActionSummary,
     JobStatusResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -564,6 +565,9 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
     results_ordered = [
         job.results[k] for k in job.item_order if k in job.results
     ]
+    last_summary = None
+    if job.last_action_summary:
+        last_summary = ActionSummary.model_validate(job.last_action_summary)
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,
@@ -593,6 +597,7 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         action_in_progress=job.action_in_progress,
         last_action_type=job.last_action_type,
         last_action_at=job.last_action_at,
+        last_action_summary=last_summary,
         current_phase=job.current_phase,
         current_phase_detail=job.current_phase_detail,
         vt_refresh_count=job.vt_refresh_count,
@@ -866,6 +871,7 @@ async def schema_summary() -> Dict[str, Any]:
                 "triage_bucket", "recommended_action", "triage_confidence",
                 "evidence_status", "vt_mode_used", "live_status",
             ],
+            "JobStatusResponse_top_fields": list(JobStatusResponse.model_fields.keys()),
             "MdiResultItem_top_fields": [
                 "input_original",
                 "input_normalized",

@@ -416,7 +416,7 @@ finished analysis — **GET-only**; no URL submit and no Request New Scan.
 | **Mixed selection** | Non-pending selected rows are skipped; estimate/modal shows eligible and skipped counts |
 | **Confirmation** | Modal shows eligible count, skipped reasons, and quota impact before starting |
 | **Phase label** | `Refresh Pending in progress…` or `Refresh Selected Pending in progress…` |
-| **Completion** | Advisory client summary after action (completed / still pending / failed; selected non-pending skipped when applicable) |
+| **Completion** | Server-side `last_action_summary` on the job after action (MDI-65); client-derived fallback for older jobs or pending refresh scopes without summary |
 
 Use **Refresh Selected Pending** when you need quota control over a subset of
 pending rows. Use **Refresh Pending** when every pending row in the job should be

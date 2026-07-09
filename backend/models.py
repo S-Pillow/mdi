@@ -959,6 +959,57 @@ class JobActionAcceptedResponse(BaseModel):
     quota_remaining: int
 
 
+class ActionSummary(BaseModel):
+    """MDI-65: authoritative server-side outcome summary for a completed bulk action."""
+    action: str = Field(..., description="[display] refresh or scan.")
+    scope: str = Field(
+        ...,
+        description="[display] selected, pending, selected_pending, or stale.",
+    )
+    status: str = Field(
+        "completed",
+        description="[display] Final action status; v1 only exposes completed.",
+    )
+    items_requested: Optional[int] = Field(
+        None,
+        description="[display] Selected positions count when scope uses positions.",
+    )
+    items_eligible: int = Field(
+        0, description="[display] Rows queued for processing."
+    )
+    items_skipped: int = Field(
+        0, description="[display] Pre-action eligibility skips."
+    )
+    items_processed: int = Field(
+        0, description="[display] Rows that reached the reprocess path."
+    )
+    items_completed: int = Field(
+        0,
+        description="[display] Rows with completed VT evidence after action.",
+    )
+    items_still_pending: int = Field(
+        0, description="[display] Processed rows still pending-analysis."
+    )
+    items_failed: int = Field(
+        0,
+        description="[display] Processed rows with no completed evidence after action.",
+    )
+    items_quota_blocked: int = Field(
+        0,
+        description="[display] Rows not attempted due to quota guard or lock timeout.",
+    )
+    quota_units_consumed: int = Field(
+        0, description="[display] VT quota units consumed by this action."
+    )
+    skipped_reasons_summary: Dict[str, int] = Field(
+        default_factory=dict,
+        description="[display] Pre-action skip reason counts.",
+    )
+    completed_at: float = Field(
+        ..., description="[display] Unix timestamp when action summary was finalized."
+    )
+
+
 # ─── Export API models (MDI-16) ───────────────────────────────────────────────
 
 
@@ -1180,6 +1231,13 @@ class JobStatusResponse(BaseModel):
     )
     last_action_at: Optional[float] = Field(
         None, description="[audit] Unix timestamp of last refresh/scan completion."
+    )
+    last_action_summary: Optional[ActionSummary] = Field(
+        None,
+        description=(
+            "[display] MDI-65 authoritative outcome summary for the last completed "
+            "bulk refresh/scan action."
+        ),
     )
     # ── MDI-59 progress phase ───────────────────────────────────────────────────
     current_phase: Optional[str] = Field(
