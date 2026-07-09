@@ -591,6 +591,7 @@ async def _poll_url_report_after_scan(
     url_id = _vt_url_id(url_target)
     calls = 0
     last_status = 0
+    saw_incomplete_200 = False
 
     for _ in range(MAX_SCAN_POLL_ATTEMPTS):
         await _VT_LIMITER.acquire()
@@ -604,11 +605,19 @@ async def _poll_url_report_after_scan(
             return None, _vt_error("vt_connection", f"Poll connection error: {exc}", retriable=True), calls
 
         if resp.status_code == 200:
-            return resp.json(), None, calls
+            body = resp.json()
+            parsed = parse_vt_response(body, VtModeUsed.URL_REPORT)
+            if report_is_completed(parsed):
+                return body, None, calls
+            saw_incomplete_200 = True
+            continue
         if resp.status_code == 401:
             return None, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
         if resp.status_code == 429:
             return None, _vt_error("vt_429", "VT rate limit reached during poll.", retriable=True), calls
+
+    if saw_incomplete_200:
+        return None, _pending_error(_PENDING_NOT_READY_MSG), calls
 
     return None, _vt_error(
         "vt_scan_pending",
@@ -904,10 +913,17 @@ async def request_new_scan(
     report, poll_err, poll_calls = await _poll_url_report_after_scan(vt_target, headers)
     calls += poll_calls
     if poll_err:
+        if poll_err.code == "vt_scan_pending":
+            return _pending_result(vt_mode, poll_err, calls)
         return VtLookupResult(vt_mode_used=vt_mode, error=poll_err, calls_made=calls)
 
     result = parse_vt_response(report, vt_mode, stale_threshold_days)
     result.calls_made = calls
+
+    # MDI-62: same completedness gate as fetch_report / refresh_report.
+    if vt_mode == VtModeUsed.URL_REPORT and not report_is_completed(result):
+        return _pending_result(vt_mode, _pending_error(_PENDING_NOT_READY_MSG), calls)
+
     return result
 
 

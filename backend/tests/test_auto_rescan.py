@@ -532,6 +532,47 @@ def test_vt_scan_pending_preserves_prior_vt_no_loop(tmp_path):
     assert any(e.code == "vt_scan_pending" for e in (result.errors or []))
 
 
+def test_url_auto_rescan_incomplete_200_not_clean(tmp_path):
+    """MDI-62: URL auto-rescan must not treat incomplete 200 URL object as clean."""
+    _make_job(
+        "j-url-inc",
+        [("https://url-stale.example/path", "https://url-stale.example/path", InputType.URL)],
+        auto_rescan_stale=True,
+    )
+    post_count = 0
+    empty_pending = {
+        "data": {
+            "attributes": {
+                "last_analysis_stats": {
+                    "malicious": 0, "suspicious": 0, "harmless": 0,
+                    "undetected": 0, "timeout": 0,
+                },
+                "times_submitted": 1,
+            }
+        }
+    }
+
+    async def _vt_side(method, url, **kwargs):
+        nonlocal post_count
+        if method == "POST" and url.endswith("/urls"):
+            post_count += 1
+            return _mock_resp(200, {"data": {"id": "url-id"}})
+        if method == "GET" and "/urls/" in url:
+            if post_count == 0:
+                return _mock_resp(200, _vt_body(malicious=2, age_days=30))
+            return _mock_resp(200, empty_pending)
+        return _mock_resp(404)
+
+    _process_with_vt_mock("j-url-inc", tmp_path, _vt_side)
+    job = job_store.get_job_sync("j-url-inc")
+    assert post_count == 1
+    assert job.auto_rescan_failed_count == 1
+    result = job.results["https://url-stale.example/path"]
+    assert result.vt_hits == 2
+    assert result.triage_bucket != TriageBucket.CLEAN
+    assert any(e.code == "vt_scan_pending" for e in (result.errors or []))
+
+
 def test_scan_hard_failure_increments_failed_count(tmp_path):
     _make_job(
         "j-fail",
