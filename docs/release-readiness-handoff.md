@@ -43,9 +43,42 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-66: `2b699be44438e0792f7f5ad717efce4c93379964` | Static bundle: `index-DV3vjFvI.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | MDI-65: `2a44e4f9e3ff09fd90bab964213ae8f747a604e5` | `/opt/mdi/backend`; server-side action completion summaries (`last_action_summary`); unchanged by MDI-66 frontend-only deploy |
+| Frontend | MDI-59B: `2e49592b6d655cc094b5a91ba024947ebe66635e` | Static bundle: `index-DKlAU_IN.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
+| MDI backend | MDI-65: `2a44e4f9e3ff09fd90bab964213ae8f747a604e5` | `/opt/mdi/backend`; server-side action completion summaries (`last_action_summary`); unchanged by MDI-59B frontend-only deploy |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-59B (2026-07-09T14:42:39 UTC) deployed **frontend-only** from `main` @
+`2e49592b6d655cc094b5a91ba024947ebe66635e` on host `srv766238`
+(`https://forgeforward.app/tools/mdi/`). Frontend built and rsynced
+(`rsync -a --delete`) to `/var/www/html/tools/mdi/`; old bundle
+`index-DV3vjFvI.js` **removed**; new bundles `index-DKlAU_IN.js` /
+`index-YEpmU4YE.css`; backend **unchanged** at `2a44e4f` (MDI-65);
+`mdi-backend.service` **not** restarted; nginx **active**, **not** reloaded;
+VT Bulk Check **untouched**. Backup:
+`/root/backups/mdi-59b-pre-deploy-frontend-20260709T144105Z/`. Previous
+frontend `index-DV3vjFvI.js` / `index-YEpmU4YE.css`.
+
+Implementation/merge: branch `feature/mdi-59b-phase-label-refinement`;
+commit `2e49592b6d655cc094b5a91ba024947ebe66635e` (`refine progress phase
+labels`); previous `main` before merge
+`b20eb0362421116cace4f66d69a7221283292595`; fast-forward merge; files changed:
+`frontend/src/App.jsx` only; no backend, runtime, quota, docs, nginx/systemd,
+secrets, or dist artifacts in merge; `main`/`origin` include MDI-59B. Frontend
+build after merge succeeded (`index-DKlAU_IN.js` — 258.01 kB,
+`index-YEpmU4YE.css` — 46.08 kB); backend safety tests **71 passed**; dist not
+committed to git.
+
+MDI-59B refines frontend-only phase label copy/mapping: `refresh_report`
+default `Refreshing report…`; selected-scope `refresh_report` →
+`Refreshing selected report(s)…`; selected-scope `request_new_scan` →
+`Rescan Selected in progress…`; during manual actions action banner remains
+primary phase surface and VT Usage panel shows `Working…` (not duplicate phase
+text); progress remains indeterminate; during initial job processing VT Usage
+panel keeps specific phase labels and initial loading strip can show phase-aware
+copy such as `Checking VirusTotal…`. MDI-65 completion summaries unchanged.
+MDI-66 recovered last-action summary unchanged. Backend phase tokens unchanged.
+No quota, VT, persistence, or backend behavior changes. Browser/static smoke
+**accepted** (2026-07-09) — see below.
 
 MDI-66 (2026-07-09T13:20:59 UTC) deployed **frontend-only** from `main` @
 `2b699be44438e0792f7f5ad717efce4c93379964` on host `srv766238`
@@ -326,6 +359,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-64 | Per-row job persistence during bulk refresh/scan actions — **merged, backend-deployed, live smoke-accepted, closed** |
 | MDI-65 | Server-side action completion counters (`last_action_summary`) — **merged, full-stack deployed, live smoke-accepted, closed** |
 | MDI-66 | Cold-recovery last action summary UX — **merged, frontend-deployed, browser/static smoke-accepted, closed** |
+| MDI-59B | Progress phase label refinement — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live selected refresh/rescan smoke) |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -344,6 +378,8 @@ MDI-64 commit on `main`: `2460866` (persist action rows during bulk operations).
 MDI-65 commit on `main`: `2a44e4f` (add server action completion summary).
 
 MDI-66 commit on `main`: `2b699be` (show recovered last action summary).
+
+MDI-59B commit on `main`: `2e49592` (refine progress phase labels).
 
 ### MDI export contract series (MDI-54)
 
@@ -456,7 +492,7 @@ MDI currently supports:
 - Server-side action completion summaries (MDI-65): final action summaries persisted as `last_action_summary` on the job; exposed through `GET /api/mdi/jobs/{id}` and `GET /api/mdi/jobs/latest`; additive history fields (`action_summary_scope`, `items_processed`, `summary_items_completed`, `items_still_pending`, `items_failed`, `items_quota_blocked`); frontend prefers server summary during in-session action completion polling; client-derived fallback when summary absent; no interrupted/in-progress summaries in v1; no automatic resume
 - Cold-recovery last action summary (MDI-66): recovered terminal jobs with completed `last_action_summary` show `Last action: …` in recovery banner (`↩ Recovered previous job` preserved); uses MDI-65 formatter; does not imply new quota use or action on reload; in-session action summary and client fallback unchanged
 - Pending Analysis filter card (MDI-57B)
-- Phase-aware progress UX (MDI-59): backend `current_phase` / `current_phase_detail` on job status; phase labels for enrichment, VT, live-check, Cloudflare rank, finalization, and manual actions; honest indeterminate progress outside VT item-check phase; recovered terminal jobs do not show active phase
+- Phase-aware progress UX (MDI-59; label refinement MDI-59B): backend `current_phase` / `current_phase_detail` on job status; phase labels for enrichment, VT, live-check, Cloudflare rank, finalization, and manual actions; honest indeterminate progress outside VT item-check phase; recovered terminal jobs do not show active phase; MDI-59B frontend-only copy refinements — `refresh_report` default `Refreshing report…`; selected-scope refresh `Refreshing selected report(s)…`; selected-scope rescan `Rescan Selected in progress…`; during manual actions VT Usage panel shows `Working…` (action banner remains primary phase surface); initial-job loading strip shows phase-aware copy such as `Checking VirusTotal…`; MDI-65/66 summaries unchanged; backend phase tokens unchanged
 - bulk actions
 - CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
@@ -531,6 +567,43 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-64 Per-row job persistence during bulk refresh/scan actions | Accepted — backend-deployed, **live smoke accepted** (selected Refresh Report, 2 rows, +2 VT lookups) |
 | MDI-65 Server-side action completion counters (`last_action_summary`) | Accepted — full-stack deployed, **live smoke accepted** (selected Refresh Report, 2 rows, +2 VT lookups) |
 | MDI-66 Cold-recovery last action summary UX | Accepted — frontend-deployed, **browser/static smoke accepted** (recovered job shows last-action line) |
+| MDI-59B Progress phase label refinement | Accepted — frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved; no live action smoke) |
+
+**MDI-59B frontend-only deploy and browser/static smoke acceptance (2026-07-09):**
+
+Frontend-only deploy on `srv766238` at `2026-07-09T14:42:39Z`: frontend
+`2e49592` → `/var/www/html/tools/mdi/` (from `index-DV3vjFvI.js` /
+`index-YEpmU4YE.css`); new bundles `index-DKlAU_IN.js` /
+`index-YEpmU4YE.css`; backend **unchanged** at `2a44e4f` (MDI-65);
+`mdi-backend.service` **not** restarted; nginx **active**, **not** reloaded;
+VT Bulk Check **untouched**. Backup:
+`/root/backups/mdi-59b-pre-deploy-frontend-20260709T144105Z/`. Rollback:
+`rsync -a --delete /root/backups/mdi-59b-pre-deploy-frontend-20260709T144105Z/ /var/www/html/tools/mdi/`.
+
+Pre-deploy verification: frontend build succeeded (`index-DKlAU_IN.js` —
+258.01 kB, `index-YEpmU4YE.css` — 46.08 kB); `rsync` exit code 0; dist not
+committed; `/api/mdi/version` → backend `2a44e4f`; usage **17 used / 483
+remaining**; latest job `181b4d9e-ca54-4bd3-bb6b-5a321ea0b3ba`, `status=done`,
+`action_in_progress=false`, `current_phase=null`; runtime/quota files unchanged
+during deploy.
+
+**MDI-59B browser/static smoke acceptance (2026-07-09):**
+
+GET/static only — no POST, no VT quota. Loaded
+`https://forgeforward.app/tools/mdi/?_deploy=mdi59b&v=2e49592`; MDI-59B JS
+bundle `index-DKlAU_IN.js` confirmed. Job `181b4d9e-ca54-4bd3-bb6b-5a321ea0b3ba`
+recovered. Recovery banner: `↩ Recovered previous job`. MDI-66 last-action line
+preserved: `Last action: Refresh complete — 2 completed.` Rows visible:
+`https://www.google.com/`, ForgeForward MDI-63 smoke domain. API calls observed:
+GET `/api/mdi/usage`, GET `/api/mdi/jobs/latest` only. No action started. No
+live selected refresh or rescan performed.
+
+Post-deploy: `/tools/mdi/` → 200, references `index-DKlAU_IN.js` /
+`index-YEpmU4YE.css`; old JS `index-DV3vjFvI.js` references 0; usage unchanged
+**17/483** (`mutated=false`); VT quota consumed **0**; runtime metadata
+unchanged (`mdi_latest_job.json` 6932, `vt_usage.json` 52,
+`vt_usage_history.jsonl` 65580, `vt_daily_history.json` 2940,
+`vt_usage.lock` 0).
 
 **MDI-66 frontend-only deploy and browser/static smoke acceptance (2026-07-09):**
 
@@ -1438,6 +1511,9 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Bulk Refresh Pending (MDI-57B) refreshes **all** pending rows only | **Resolved by MDI-63 (2026-07-09)** — selected-subset via `scope=selected_pending` and **Refresh Selected Pending (N)** |
 | Bulk Refresh Pending uses batch-end persistence only (same as Rescan Stale) | **Resolved by MDI-64 (2026-07-09)** — bulk actions now persist row outcomes after each completed action row; usage history JSONL remains batch-level |
 | Mid-action progress for Refresh Pending shows phase label but remains indeterminate (no per-item numerator) | Acceptable — by design for MDI-59 v1 |
+| Duplicate phase text in VT Usage panel during manual actions | **Resolved by MDI-59B (2026-07-09)** — panel shows `Working…`; action banner remains primary phase surface |
+| Generic `refresh_report` label for stale scope (if used) | Acceptable — remains `Refreshing report…`; MDI-59B selected-scope refinements apply to selected refresh/rescan only |
+| Live selected-refresh/rescan phase banner copy (MDI-59B) | Source-verified only — not production-action-smoked in MDI-59B deploy |
 | Progress phase (`current_phase`) is ephemeral — may be lost on backend restart or page reload mid-job/action | Acceptable — consistent with existing in-flight job behavior |
 | No per-row progress, ETA, or server completion counters in MDI-59 | **Resolved by MDI-65 (2026-07-09)** — server-side `last_action_summary` at action completion; no per-row progress/ETA in v1 |
 | Manual Request New Scan completedness on incomplete VT URL poll responses | **Resolved by MDI-62 (2026-07-09)** — URL scan polling applies MDI-57A completed-report gate; incomplete objects are pending/partial, not clean or `0/0` |
@@ -1527,12 +1603,18 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-64 | Per-row job persistence during bulk refresh/scan actions | **Closed** — merged, backend-deployed, live smoke-accepted (2026-07-09) |
 | MDI-65 | Server-side action completion counters (`last_action_summary`) | **Closed** — merged, full-stack deployed, live smoke-accepted (2026-07-09) |
 | MDI-66 | Cold-recovery last action summary UX | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09) |
+| MDI-59B | Progress phase label refinement | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 
-Production backend is at MDI-65 `2a44e4f`; production frontend is MDI-66
-`index-DV3vjFvI.js` / `index-YEpmU4YE.css`. MDI-66 carryforward: no
-interrupted/in-progress summaries; no automatic resume; no new backend schema;
-no MDI-59 phase refinement; no automated frontend tests; cached browsers may
-require hard refresh (JS and CSS bundle hashes changed). MDI-65 carryforward:
+Production backend is at MDI-65 `2a44e4f`; production frontend is MDI-59B
+`index-DKlAU_IN.js` / `index-YEpmU4YE.css`. MDI-59B carryforward: no backend
+phase token changes; no per-row progress; no `current_phase_detail`;
+`refresh_report` for stale scope (if used) remains generic `Refreshing report…`;
+phases remain ephemeral on mid-action reload; no automated frontend tests; live
+selected-refresh/rescan banner behavior source-verified only, not
+production-action-smoked. MDI-66 carryforward: no interrupted/in-progress
+summaries; no automatic resume; no new backend schema; no automated frontend
+tests; cached browsers may require hard refresh (JS bundle hash changed). MDI-65
+carryforward:
 no `items_not_changed` or position lists; dashboard unchanged; client fallback
 when `last_action_summary` absent; `summary_items_completed` = completed VT
 evidence; legacy history `items_completed` = processed rows. MDI-64
