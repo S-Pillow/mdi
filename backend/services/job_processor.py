@@ -75,6 +75,7 @@ from services import (
     vt_service,
 )
 from services.domain_enrichment import EnrichmentResult
+from services.error_taxonomy import error_blocks_triage
 from services.live_check import LiveCheckResult
 
 logger = logging.getLogger("mdi.job_processor")
@@ -407,10 +408,14 @@ async def _run_items(job: job_store.InMemoryJob, *, usage_file: Optional[Path]) 
 
         # Build triage input from VT result + existing item fields (age, live status).
         # Preserve any enrichment errors accumulated by the pre-enrichment pass.
+        # MDI-57A: warning-severity VT outcomes (vt_scan_pending — URL submitted,
+        # analysis not ready) do not force ERROR status; the row stays DONE with
+        # the warning attached so triage can classify it as pending-analysis.
         vt_error = [vt_result.error] if vt_result.error else []
         enrichment_errors = list(result.errors or [])
         errors = enrichment_errors + vt_error
-        processing_status = MdiProcessingStatus.ERROR if vt_result.error else MdiProcessingStatus.DONE
+        vt_blocks = vt_result.error is not None and error_blocks_triage(vt_result.error)
+        processing_status = MdiProcessingStatus.ERROR if vt_blocks else MdiProcessingStatus.DONE
 
         inp = triage_rules.TriageInput(
             domain_hold_has_hold=False,

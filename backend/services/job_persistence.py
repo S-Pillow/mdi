@@ -145,7 +145,9 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
         estimated_requests=int(data.get("estimated_requests", 0)),
         lookups_used=int(data.get("lookups_used", 0)),
         use_domain_reports=bool(data.get("use_domain_reports", False)),
-        stale_threshold_days=int(data.get("stale_threshold_days", 5)),
+        # MDI-57A: legacy recovered jobs missing a saved threshold fall back to
+        # the system default (30). Saved thresholds are always preserved.
+        stale_threshold_days=int(data.get("stale_threshold_days", 30)),
         auto_rescan_stale=bool(data.get("auto_rescan_stale", False)),
         max_auto_rescans=int(data.get("max_auto_rescans", 3)),
         cloudflare_rank_lookup_enabled=bool(data.get("cloudflare_rank_lookup_enabled", False)),

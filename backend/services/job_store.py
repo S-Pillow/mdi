@@ -42,7 +42,7 @@ class InMemoryJob:
     estimated_requests: int = 0       # pre-submit conservative estimate
     lookups_used: int = 0             # actual VT API calls consumed
     use_domain_reports: bool = False
-    stale_threshold_days: int = 7
+    stale_threshold_days: int = 30
     auto_rescan_stale: bool = False
     max_auto_rescans: int = 3
     cloudflare_rank_lookup_enabled: bool = False

@@ -600,9 +600,9 @@ class TestSuspiciousPriorityStructure:
 class TestSchemaSummaryAlignment:
     """Sanity check that models.py default constants match triage_rules defaults."""
 
-    def test_default_stale_threshold_days_is_7(self):
+    def test_default_stale_threshold_days_is_30(self):
         inp = TriageInput()
-        assert inp.stale_threshold_days == 7
+        assert inp.stale_threshold_days == 30
 
     def test_triage_confidence_has_clean(self):
         from models import TriageConfidence

@@ -93,9 +93,10 @@ class TestEstimateCallsForItem:
     """Direct tests of the shared estimate_calls_for_item formula."""
 
     def test_domain_url_mode_min_max(self):
+        """MDI-57A: submit-only — URL-report path worst case is 2 (GET + POST)."""
         c_min, c_max = estimate_calls_for_item(InputType.DOMAIN, use_domain_reports=False)
         assert c_min == 1
-        assert c_max == 3
+        assert c_max == 2
 
     def test_domain_domain_report_mode(self):
         c_min, c_max = estimate_calls_for_item(InputType.DOMAIN, use_domain_reports=True)
@@ -103,15 +104,16 @@ class TestEstimateCallsForItem:
         assert c_max == 1
 
     def test_url_url_mode(self):
+        """MDI-57A: new URL worst case is 2 calls (no immediate re-fetch)."""
         c_min, c_max = estimate_calls_for_item(InputType.URL, use_domain_reports=False)
         assert c_min == 1
-        assert c_max == 3
+        assert c_max == 2
 
     def test_url_domain_report_mode_flag_ignored(self):
         """use_domain_reports only applies to DOMAIN items; URL items are unaffected."""
         c_min, c_max = estimate_calls_for_item(InputType.URL, use_domain_reports=True)
         assert c_min == 1
-        assert c_max == 3
+        assert c_max == 2
 
 
 class TestEstimateJob:
@@ -141,7 +143,7 @@ class TestEstimateJob:
         item = self._make_item(InputType.DOMAIN)
         result = estimate_job([item], use_domain_reports=False)
         assert result["estimated_vt_calls_min"] == 1
-        assert result["estimated_vt_calls_max"] == 3
+        assert result["estimated_vt_calls_max"] == 2
         assert result["domain_count"] == 1
         assert result["url_count"] == 0
         assert result["domain_report_mode_count"] == 0
@@ -159,7 +161,7 @@ class TestEstimateJob:
         item = self._make_item(InputType.URL, "http://example.com/path")
         result = estimate_job([item], use_domain_reports=False)
         assert result["estimated_vt_calls_min"] == 1
-        assert result["estimated_vt_calls_max"] == 3
+        assert result["estimated_vt_calls_max"] == 2
         assert result["url_count"] == 1
         assert result["domain_count"] == 0
 
@@ -172,27 +174,27 @@ class TestEstimateJob:
                             input_type=InputType.URL, position=5 + i) for i in range(1, 4)]
         )
         result = estimate_job(items, use_domain_reports=False)
-        # 5 domains × 3 + 3 URLs × 3 = 24 max; min = 8
+        # MDI-57A: 5 domains × 2 + 3 URLs × 2 = 16 max; min = 8
         assert result["estimated_vt_calls_min"] == 8
-        assert result["estimated_vt_calls_max"] == 24
+        assert result["estimated_vt_calls_max"] == 16
         assert result["domain_count"] == 5
         assert result["url_count"] == 3
 
     def test_duration_formula_single_item(self):
         # MDI-11A: enrichment_min=0 (best case), enrichment_max=N×1.1 (worst case)
-        # VT: (1-1)×15=0 min, (3-1)×15=30 max
+        # VT (MDI-57A): (1-1)×15=0 min, (2-1)×15=15 max
         item = self._make_item(InputType.DOMAIN, "a.com")
         result = estimate_job([item], use_domain_reports=False)
         enrichment_max = 1 * RDAP_ESTIMATE_SECONDS_PER_ITEM  # 1.1
         assert result["estimated_duration_seconds_min"] == pytest.approx(0.0)   # VT min + enrichment_min(0)
-        assert result["estimated_duration_seconds_max"] == pytest.approx(30.0 + enrichment_max)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(15.0 + enrichment_max)
         assert result["estimated_enrichment_lookups"] == 1
         assert result["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
         assert result["estimated_enrichment_duration_seconds_max"] == pytest.approx(enrichment_max)
 
     def test_duration_formula_two_items(self):
         # MDI-11A: enrichment_min=0, enrichment_max=2×1.1=2.2
-        # VT: calls_min=2, calls_max=6 → (2-1)×15=15, (6-1)×15=75
+        # VT (MDI-57A): calls_min=2, calls_max=4 → (2-1)×15=15, (4-1)×15=45
         items = [
             self._make_item(InputType.DOMAIN, "a.com"),
             self._make_item(InputType.DOMAIN, "b.com"),
@@ -200,7 +202,7 @@ class TestEstimateJob:
         result = estimate_job(items, use_domain_reports=False)
         enrichment_max = 2 * RDAP_ESTIMATE_SECONDS_PER_ITEM  # 2.2
         assert result["estimated_duration_seconds_min"] == pytest.approx(15.0)  # VT min + enrichment_min(0)
-        assert result["estimated_duration_seconds_max"] == pytest.approx(75.0 + enrichment_max)
+        assert result["estimated_duration_seconds_max"] == pytest.approx(45.0 + enrichment_max)
         assert result["estimated_enrichment_lookups"] == 2
         assert result["estimated_enrichment_duration_seconds_min"] == pytest.approx(0.0)
         assert result["estimated_enrichment_duration_seconds_max"] == pytest.approx(enrichment_max)
@@ -252,7 +254,7 @@ class TestEstimateEndpoint:
         resp = _post_estimate("example.com", use_domain_reports=False)
         assert resp["accepted_count"] == 1
         assert resp["estimated_vt_calls_min"] == 1
-        assert resp["estimated_vt_calls_max"] == 3
+        assert resp["estimated_vt_calls_max"] == 2
         assert resp["domain_count"] == 1
         assert resp["url_count"] == 0
         assert resp["url_report_mode_count"] == 1
@@ -269,7 +271,7 @@ class TestEstimateEndpoint:
         resp = _post_estimate("https://example.com/path")
         assert resp["accepted_count"] == 1
         assert resp["estimated_vt_calls_min"] == 1
-        assert resp["estimated_vt_calls_max"] == 3
+        assert resp["estimated_vt_calls_max"] == 2
         assert resp["url_count"] == 1
         assert resp["domain_count"] == 0
 
@@ -280,20 +282,20 @@ class TestEstimateEndpoint:
         assert resp["domain_count"] == 2
         assert resp["url_count"] == 1
         assert resp["estimated_vt_calls_min"] == 3
-        assert resp["estimated_vt_calls_max"] == 9
+        assert resp["estimated_vt_calls_max"] == 6
 
     def test_duplicates_counted_once(self):
         resp = _post_estimate("example.com\nexample.com\nexample.com")
         assert resp["accepted_count"] == 1
         assert resp["duplicate_count"] == 2
-        assert resp["estimated_vt_calls_max"] == 3  # only 1 item
+        assert resp["estimated_vt_calls_max"] == 2  # only 1 item
 
     def test_invalid_items_rejected_not_counted(self):
         # ftp:// is an unsupported scheme — parser rejects it cleanly
         resp = _post_estimate("ftp://bad-scheme.example\nexample.com")
         assert resp["rejected_count"] >= 1
         assert resp["accepted_count"] == 1
-        assert resp["estimated_vt_calls_max"] == 3  # only valid item counted
+        assert resp["estimated_vt_calls_max"] == 2  # only valid item counted
 
     def test_paste_input_held_skipped_count_always_zero(self):
         """For paste input, hold status is NOT_CHECKED — held_skipped_count must be 0."""
@@ -321,7 +323,7 @@ class TestEstimateEndpoint:
         old_env = os.environ.get("VT_USAGE_FILE")
         try:
             os.environ["VT_USAGE_FILE"] = str(usage_file)
-            # 1 domain in URL mode = max 3 calls; 1 remaining → exceeds
+            # 1 domain in URL mode = max 2 calls; 1 remaining → exceeds
             resp = _post_estimate("example.com")
             assert resp["will_exceed_quota"] is True
             assert resp["quota_headroom"] < 0
@@ -351,7 +353,7 @@ class TestEstimateEndpoint:
         old_env = os.environ.get("VT_USAGE_FILE")
         try:
             os.environ["VT_USAGE_FILE"] = str(usage_file)
-            # 1 domain URL mode = max 3 calls; headroom = 10 - 3 = 7
+            # 1 domain URL mode = max 2 calls; headroom = 10 - 2 = 8
             resp = _post_estimate("example.com")
             assert resp["quota_remaining_now"] == 10
             assert resp["quota_headroom"] == 10 - resp["estimated_vt_calls_max"]
@@ -516,11 +518,11 @@ class TestRegressionExistingEndpoints:
         assert resp.status_code == 200
         assert "enums" in resp.json()
 
-    def test_schema_summary_stale_threshold_constant_is_7(self):
-        """MDI-09A: schema-summary must report STALE_THRESHOLD_DAYS=7 to match PRD and Pydantic defaults."""
+    def test_schema_summary_stale_threshold_constant_is_30(self):
+        """MDI-57A: schema-summary must report STALE_THRESHOLD_DAYS=30 to match Pydantic defaults."""
         resp = client.get("/api/mdi/schema-summary")
         assert resp.status_code == 200
-        assert resp.json()["constants"]["STALE_THRESHOLD_DAYS"] == 7
+        assert resp.json()["constants"]["STALE_THRESHOLD_DAYS"] == 30
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -529,15 +531,15 @@ class TestRegressionExistingEndpoints:
 
 class TestMdi09SettingsDefaults:
     """
-    Verify stale_threshold_days default is 7 and use_domain_reports affects
-    estimates correctly.  No VT calls, no external calls, no runtime file writes.
+    Verify stale_threshold_days default is 30 (MDI-57A) and use_domain_reports
+    affects estimates correctly.  No VT calls, no external calls, no runtime file writes.
     """
 
-    def test_estimate_default_stale_threshold_is_7(self):
-        """Omitting stale_threshold_days from /estimate request → backend uses 7."""
+    def test_estimate_default_stale_threshold_is_30(self):
+        """Omitting stale_threshold_days from /estimate request → backend uses 30."""
         from models import EstimateRequest
         req = EstimateRequest(raw_input="example.com")
-        assert req.stale_threshold_days == 7
+        assert req.stale_threshold_days == 30
 
     def test_estimate_endpoint_accepts_omitted_stale_threshold(self):
         """POST /estimate without stale_threshold_days returns 200 and accepted_count ≥ 1."""
@@ -547,15 +549,15 @@ class TestMdi09SettingsDefaults:
         assert data["accepted_count"] >= 1
         assert data["external_calls_made"] is False
 
-    def test_url_mode_bare_domain_estimate_max_3_calls(self):
-        """use_domain_reports=False: bare domain estimate max = 3 (URL-report path)."""
+    def test_url_mode_bare_domain_estimate_max_2_calls(self):
+        """MDI-57A: use_domain_reports=False: bare domain estimate max = 2 (URL-report path)."""
         resp = client.post("/api/mdi/jobs/estimate", json={
             "raw_input": "single-domain.com",
             "use_domain_reports": False,
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert data["estimated_vt_calls_max"] == 3
+        assert data["estimated_vt_calls_max"] == 2
         assert data["domain_count"] == 1
 
     def test_domain_mode_bare_domain_estimate_max_1_call(self):
@@ -572,8 +574,8 @@ class TestMdi09SettingsDefaults:
     def test_url_item_always_url_report_path_regardless_of_mode(self):
         """
         Full URL items (InputType.URL) always use the URL-report path, regardless
-        of use_domain_reports.  The URL-report path estimates up to 3 calls
-        (1 GET + 1 submit + 1 re-fetch if URL not yet cached on VT).
+        of use_domain_reports.  The URL-report path estimates up to 2 calls
+        (1 GET + 1 submit-only if URL not yet cached on VT — MDI-57A).
         domain-report mode only reduces calls for bare domains (InputType.DOMAIN).
         """
         for mode in (True, False):
@@ -583,8 +585,8 @@ class TestMdi09SettingsDefaults:
             })
             assert resp.status_code == 200
             data = resp.json()
-            # max is 3 for URL items in both modes (URL-report path)
-            assert data["estimated_vt_calls_max"] == 3, f"mode={mode}"
+            # max is 2 for URL items in both modes (URL-report path)
+            assert data["estimated_vt_calls_max"] == 2, f"mode={mode}"
             assert data["url_count"] == 1, f"mode={mode}"
 
     def test_estimate_and_submit_request_fields_match(self):
@@ -604,22 +606,22 @@ class TestMdi09SettingsDefaults:
             f"Estimate/submit settings mismatch: estimate={est_fields} submit={sub_fields}"
         )
 
-    def test_stale_threshold_default_7_in_job_submit_request(self):
+    def test_stale_threshold_default_30_in_job_submit_request(self):
         from models import JobSubmitRequest
         req = JobSubmitRequest(raw_input="example.com")
-        assert req.stale_threshold_days == 7
+        assert req.stale_threshold_days == 30
 
-    def test_stale_threshold_default_7_in_mdi_job_options(self):
+    def test_stale_threshold_default_30_in_mdi_job_options(self):
         from models import MdiJobOptions
         opts = MdiJobOptions()
-        assert opts.stale_threshold_days == 7
+        assert opts.stale_threshold_days == 30
 
-    def test_stale_threshold_default_7_in_memory_job(self):
+    def test_stale_threshold_default_30_in_memory_job(self):
         from services.job_store import InMemoryJob
         import time
         job = InMemoryJob(job_id="test-default-stale", status="queued",
                           submitted_at=time.time())
-        assert job.stale_threshold_days == 7
+        assert job.stale_threshold_days == 30
 
     def test_use_domain_reports_stored_in_job_status_response(self):
         """
@@ -1070,7 +1072,7 @@ class TestMdi51UploadHoldAwareEstimate:
         assert body["accepted_count"] == 2
         assert body["held_skipped_count"] == 0
         assert body["eligible_vt_count"] == 2
-        assert body["estimated_vt_calls_max"] == 6
+        assert body["estimated_vt_calls_max"] == 4
 
     def test_client_hold_excluded(self):
         items = [
@@ -1080,7 +1082,7 @@ class TestMdi51UploadHoldAwareEstimate:
         body = _post_upload_estimate(items)
         assert body["held_skipped_count"] == 1
         assert body["eligible_vt_count"] == 1
-        assert body["estimated_vt_calls_max"] == 3
+        assert body["estimated_vt_calls_max"] == 2
 
     def test_server_hold_excluded(self):
         items = [_held_item("held-server.example", "serverHold")]
@@ -1106,7 +1108,7 @@ class TestMdi51UploadHoldAwareEstimate:
         assert body["accepted_count"] == 4
         assert body["held_skipped_count"] == 2
         assert body["eligible_vt_count"] == 2
-        assert body["estimated_vt_calls_max"] == 6
+        assert body["estimated_vt_calls_max"] == 4
 
     def test_all_held_zero_vt_no_quota_block(self, tmp_path):
         items = [_held_item(f"held{i}.example", "clientHold", position=i) for i in range(1, 6)]
@@ -1197,4 +1199,5 @@ class TestMdi51aPipeDelimiterEstimate:
         assert body["accepted_count"] == 285
         assert body["held_skipped_count"] == 67
         assert body["eligible_vt_count"] == 218
-        assert body["estimated_vt_calls_max"] == 654
+        # MDI-57A: 218 eligible × 2 calls max (submit-only URL path)
+        assert body["estimated_vt_calls_max"] == 436

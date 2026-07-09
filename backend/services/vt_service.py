@@ -5,7 +5,7 @@ Provides:
   - AsyncMinIntervalLimiter  — 15s rate limit (4 req/min, VT free tier)
   - _vt_request()            — single mockable HTTP entry point for all VT calls
   - _build_vt_target()       — translate MDI normalized form → VT lookup target
-  - fetch_report()           — fetch URL or domain report; handle 404→submit→refetch
+  - fetch_report()           — fetch URL or domain report; URL 404→submit-only (MDI-57A)
   - parse_vt_response()      — report JSON → VtLookupResult
   - classify_freshness()     — last_analysis_date timestamp → Freshness enum
   - classify_triage()        — vt_hits/suspicious → TriageBucket + triage fields
@@ -54,9 +54,18 @@ logger = logging.getLogger("mdi.vt_service")
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
 
 # Stale threshold in days — report older than this is STALE.
-# Default is 7 days (corrected MDI-09 / MDI-09A); aligns with Pydantic model defaults.
-DEFAULT_STALE_THRESHOLD_DAYS: int = 7
-VERY_STALE_THRESHOLD_DAYS: int = 30
+# Default is 30 days (MDI-57A); aligns with Pydantic model defaults.
+DEFAULT_STALE_THRESHOLD_DAYS: int = 30
+
+# Very-stale boundary scales with the operator threshold (MDI-57A):
+#   very_stale_after_days = max(2 * stale_threshold_days, VERY_STALE_MIN_DAYS)
+# With threshold 30 → boundary 60; threshold 7 → boundary 30; threshold 45 → 90.
+VERY_STALE_MIN_DAYS: int = 30
+
+
+def very_stale_after_days(stale_threshold_days: int) -> int:
+    """Return the age in days beyond which a report is VERY_STALE."""
+    return max(2 * stale_threshold_days, VERY_STALE_MIN_DAYS)
 
 
 # ── Rate limiter ───────────────────────────────────────────────────────────────
@@ -328,18 +337,21 @@ def classify_freshness(
     """
     Map VT last_analysis_date → Freshness enum.
 
-    Bands (matching MdiResultItem Freshness doc):
-      FRESH      — < stale_threshold_days (default 5)
-      STALE      — 5–30 days
-      VERY_STALE — > 30 days
+    Bands (MDI-57A):
+      FRESH      — age < stale_threshold_days
+      STALE      — stale_threshold_days ≤ age ≤ very_stale_after_days(threshold)
+      VERY_STALE — age > very_stale_after_days(threshold)
       NEVER_SCANNED — None / null
+
+    very_stale_after_days = max(2 × stale_threshold_days, 30).
+    Default threshold 30 → fresh < 30 d, stale 30–60 d, very stale > 60 d.
     """
     if not last_analysis_ts:
         return Freshness.NEVER_SCANNED
     age_days = (time.time() - last_analysis_ts) / 86400
     if age_days < stale_threshold_days:
         return Freshness.FRESH
-    if age_days <= VERY_STALE_THRESHOLD_DAYS:
+    if age_days <= very_stale_after_days(stale_threshold_days):
         return Freshness.STALE
     return Freshness.VERY_STALE
 
@@ -377,16 +389,44 @@ def classify_triage(result: VtLookupResult) -> Tuple[
 
 # ── Core fetch functions ───────────────────────────────────────────────────────
 
+def report_is_completed(result: "VtLookupResult") -> bool:
+    """
+    True only when the parsed VT report is a provably completed analysis:
+    a last_analysis_date is present AND at least one engine reported.
+
+    A 200 URL report with empty/zero engine stats and no scan date is a
+    URL object whose analysis has not completed — it is NOT clean evidence.
+    """
+    return result.vt_scan_date is not None and result.vt_total_engines > 0
+
+
+def _pending_error(message: str) -> MdiError:
+    """Build the vt_scan_pending WARNING attached to pending-analysis rows."""
+    return _vt_error("vt_scan_pending", message, retriable=True)
+
+
+_PENDING_SUBMITTED_MSG = (
+    "URL submitted to VirusTotal for analysis; no URL report is available yet. "
+    "This is not a clean result. Use Refresh Report later (1 VT call)."
+)
+_PENDING_NOT_READY_MSG = (
+    "VirusTotal has this URL but analysis is not complete; no usable engine "
+    "results yet. This is not a clean result. Use Refresh Report later (1 VT call)."
+)
+
+
 async def _fetch_url_report(
     url_target: str,
     headers: Dict[str, str],
 ) -> Tuple[Optional[Dict[str, Any]], Optional[MdiError], int]:
     """
-    Fetch a VT URL analysis report.
-    Handles 404 → submit → re-fetch flow (up to 3 API calls).
+    Fetch a VT URL analysis report (submit-only flow, MDI-57A).
+
+    404 → POST submit → STOP (no immediate re-fetch). A new URL costs
+    exactly 2 VT calls (GET + POST) and returns a vt_scan_pending WARNING.
 
     Returns: (report_dict, error, calls_made)
-    error is None on success.
+    error is None on success (report present, completedness checked by caller).
     """
     url_id = _vt_url_id(url_target)
     calls = 0
@@ -405,7 +445,7 @@ async def _fetch_url_report(
         return resp.json(), None, calls
 
     if resp.status_code == 404:
-        # Submit URL for analysis
+        # No URL report exists for this exact URL. Not clean — submit and stop.
         await _VT_LIMITER.acquire()
         try:
             submit = await _vt_request("POST", f"{VT_BASE_URL}/urls", headers=headers, data={"url": url_target})
@@ -423,22 +463,9 @@ async def _fetch_url_report(
                 f"VT URL submit returned HTTP {submit.status_code}.",
             ), calls
 
-        # Re-fetch after submit
-        await _VT_LIMITER.acquire()
-        try:
-            resp2 = await _vt_request("GET", f"{VT_BASE_URL}/urls/{url_id}", headers=headers)
-            calls += 1
-        except httpx.TimeoutException:
-            return None, _vt_error("vt_timeout", "VT re-fetch timed out.", retriable=True), calls
-        except Exception as exc:
-            return None, _vt_error("vt_connection", f"Re-fetch connection error: {exc}", retriable=True), calls
-
-        if resp2.status_code == 200:
-            return resp2.json(), None, calls
-        return None, _vt_error(
-            "vt_server_error",
-            f"VT re-fetch returned HTTP {resp2.status_code}.",
-        ), calls
+        # Submit accepted: VT returns an analysis id, not a completed report.
+        # MDI-57A: stop here. The operator refreshes later (1 call) when ready.
+        return None, _pending_error(_PENDING_SUBMITTED_MSG), calls
 
     if resp.status_code == 401:
         return None, _vt_error("vt_auth", "VT API key is invalid or missing.", retriable=False), calls
@@ -713,6 +740,29 @@ async def _request_domain_rescan(
     return result
 
 
+def _pending_result(
+    vt_mode: VtModeUsed,
+    pending_error: MdiError,
+    calls: int,
+) -> VtLookupResult:
+    """
+    Build the submitted/pending-analysis lookup result (MDI-57A).
+
+    Truthful state: no engine evidence, NEVER_SCANNED freshness, empty ratio
+    (never a visible 0/0), vt_scan_pending WARNING attached.
+    """
+    return VtLookupResult(
+        vt_total_engines=0,
+        vt_hits=0,
+        vt_ratio="",
+        vt_scan_date=None,
+        freshness=Freshness.NEVER_SCANNED,
+        vt_mode_used=vt_mode,
+        error=pending_error,
+        calls_made=calls,
+    )
+
+
 def scan_quota_estimate_for_mode(vt_mode: VtModeUsed) -> Tuple[int, int]:
     """Return conservative (min, max) VT quota units for a manual scan/rescan."""
     if vt_mode == VtModeUsed.DOMAIN_REPORT:
@@ -754,15 +804,22 @@ async def fetch_report(
         report, error, calls = await _fetch_url_report(vt_target, headers)
 
     if error:
-        err_result = VtLookupResult(
+        if error.code == "vt_scan_pending":
+            return _pending_result(vt_mode, error, calls)
+        return VtLookupResult(
             vt_mode_used=vt_mode,
             error=error,
             calls_made=calls,
         )
-        return err_result
 
     result = parse_vt_response(report, vt_mode, stale_threshold_days)
     result.calls_made = calls
+
+    # MDI-57A: a 200 URL report without provable completed analysis
+    # (no scan date / no engine results) is pending, never clean.
+    if vt_mode == VtModeUsed.URL_REPORT and not report_is_completed(result):
+        return _pending_result(vt_mode, _pending_error(_PENDING_NOT_READY_MSG), calls)
+
     return result
 
 
@@ -798,6 +855,12 @@ async def refresh_report(
 
     result = parse_vt_response(report, vt_mode, stale_threshold_days)
     result.calls_made = calls
+
+    # MDI-57A: refreshing a pending row whose analysis is still not complete
+    # must stay pending, not become clean.
+    if vt_mode == VtModeUsed.URL_REPORT and not report_is_completed(result):
+        return _pending_result(vt_mode, _pending_error(_PENDING_NOT_READY_MSG), calls)
+
     return result
 
 

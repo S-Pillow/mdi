@@ -111,7 +111,7 @@ class TriageInput:
     age_bucket: AgeBucket = AgeBucket.UNKNOWN
     errors: List[MdiError] = field(default_factory=list)
     created_at: Optional[datetime] = None
-    stale_threshold_days: int = 7
+    stale_threshold_days: int = 30
 
 
 @dataclass
@@ -255,6 +255,20 @@ def _pending_sub(inp: TriageInput) -> List[str]:
     return [
         "Item has not been processed yet.",
         "Submit a new job or retry when quota is available.",
+    ]
+
+
+def _has_scan_pending_warning(errors: List[MdiError]) -> bool:
+    """True when a vt_scan_pending warning is attached (MDI-57A submitted state)."""
+    return any((e.code or "") == "vt_scan_pending" for e in (errors or []))
+
+
+def _pending_analysis_reason() -> List[str]:
+    """Reason for a URL submitted to VT whose analysis is not ready (MDI-57A)."""
+    return [
+        "URL was submitted to VirusTotal for analysis.",
+        "A VT URL report is not available yet — this is not a clean result.",
+        "Use Refresh Report later (1 VT call) to fetch the completed report.",
     ]
 
 
@@ -437,6 +451,18 @@ def decide(inp: TriageInput) -> TriageDecision:
         )
 
     # ── Priority 11: Pending / Unknown ────────────────────────────────────────
+    # MDI-57A: URL submitted to VT, analysis not ready → Refresh Report later.
+    # Never recommend Request New Scan here (the URL is already submitted) and
+    # never imply the row is clean.
+    if _has_scan_pending_warning(inp.errors):
+        return TriageDecision(
+            triage_bucket=TriageBucket.PENDING,
+            triage_confidence=TriageConfidence.UNKNOWN,
+            recommended_action=RecommendedAction.REFRESH_REPORT,
+            evidence_status=EvidenceStatus.PARTIAL,
+            triage_reason=_pending_analysis_reason(),
+        )
+
     return TriageDecision(
         triage_bucket=TriageBucket.PENDING,
         triage_confidence=TriageConfidence.UNKNOWN,

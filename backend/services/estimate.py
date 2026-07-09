@@ -53,6 +53,14 @@ LIVE_CHECK_NOTE: str = (
     "The exact count is not known until VT processing completes."
 )
 
+# MDI-57A: submit-only URL behavior note (shown when URL-report-mode items exist)
+URL_SUBMIT_NOTE: str = (
+    "The initial URL check may submit unknown URLs to VirusTotal (2 calls max: "
+    "GET + submit). Submitted URLs appear as Pending VT analysis — not clean — "
+    "and may need a later 1-call Refresh Report per row. "
+    "No automatic pending refresh occurs."
+)
+
 AUTO_RESCAN_URL_QUOTA_PER_ITEM_MAX: int = 4
 AUTO_RESCAN_DOMAIN_QUOTA_PER_ITEM_MAX: int = 5
 
@@ -143,14 +151,17 @@ def estimate_calls_for_item(input_type: InputType, use_domain_reports: bool) -> 
     Best case (calls_min): the VT report already exists and is returned immediately.
       - 1 GET call regardless of item type or mode.
 
-    Worst case (calls_max): the report is missing (404), requiring a submit + refetch.
+    Worst case (calls_max) — MDI-57A submit-only behavior:
       - domain in domain-report mode: 1 call (domain reports do not require submit).
-      - bare domain in URL-report mode: 3 calls (GET → 404 → POST submit → GET again).
-      - full URL in URL-report mode:    3 calls (GET → 404 → POST submit → GET again).
+      - bare domain in URL-report mode: 2 calls (GET → 404 → POST submit, then stop).
+      - full URL in URL-report mode:    2 calls (GET → 404 → POST submit, then stop).
+
+    Submitted URLs become pending-analysis rows; a later operator-triggered
+    Refresh Report costs 1 additional call per row and is NOT included here.
     """
     if input_type == InputType.DOMAIN and use_domain_reports:
         return 1, 1
-    return 1, 3
+    return 1, 2
 
 
 def estimate_job(
@@ -249,6 +260,7 @@ def estimate_job(
         "job_state_note": JOB_STATE_NOTE,
         "enrichment_note": ENRICHMENT_NOTE,
         "enrichment_warning": warning,
+        "url_submit_note": URL_SUBMIT_NOTE if url_report_mode_count > 0 else "",
         # MDI-12: live-check estimate (always 0 — flagged count unknown before VT)
         "estimated_live_check_count": 0,
         "live_check_note": LIVE_CHECK_NOTE,

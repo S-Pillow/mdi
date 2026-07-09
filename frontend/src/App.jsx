@@ -93,7 +93,7 @@ const MAX_ITEMS = 500
 /** Editable next-run settings defaults (must match useState initial values). */
 const DEFAULT_SETTINGS = {
   use_domain_reports: false,
-  stale_threshold_days: 7,
+  stale_threshold_days: 30,
   auto_rescan_stale: false,
   max_auto_rescans: 3,
   cloudflare_rank_lookup_enabled: true,
@@ -739,11 +739,17 @@ function formatCalculatedAge(createdAt, now = new Date()) {
   const months = totalMonths % 12
   return months > 0 ? `${years}y ${months}m` : `${years}y`
 }
+/** MDI-57A: URL submitted to VT, analysis not complete — no usable engine evidence. */
+function isPendingAnalysis(r) {
+  if ((r?.vt_total_engines ?? 0) > 0 || r?.vt_scan_date) return false
+  return Boolean(r?.errors?.some(e => e?.code === 'vt_scan_pending'))
+}
 function formatVtRatio(r) {
+  if (isPendingAnalysis(r)) return 'Pending'
   if (r?.vt_ratio) return r.vt_ratio
   if (r?.vt_hits != null && r?.vt_total_engines != null) {
-    const pct = r.vt_total_engines > 0 ? ` (${((r.vt_hits / r.vt_total_engines) * 100).toFixed(1)}%)` : ''
-    return `${r.vt_hits} / ${r.vt_total_engines}${pct}`
+    if (!(r.vt_total_engines > 0)) return '—'
+    return `${r.vt_hits} / ${r.vt_total_engines} (${((r.vt_hits / r.vt_total_engines) * 100).toFixed(1)}%)`
   }
   return '—'
 }
@@ -1284,7 +1290,7 @@ function CollapsibleSettingsPanel({
               </div>
             </div>
             <p style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4 }}>
-              VT reports older than this are classified Stale. Default: 7 days. No quota consumed by this setting alone.
+              VT reports older than this are classified Stale. Default: 30 days. Very stale begins after 2× this value (minimum 30 days — with the default, over 60 days). No quota consumed by this setting alone.
             </p>
           </div>
         </div>
@@ -2049,6 +2055,9 @@ function EstimatePanel({ estimate, error, stale, minimized }) {
         <p className="estimate-held-note">
           {held_skipped_count} domain{held_skipped_count === 1 ? '' : 's'} on hold from uploaded metadata — excluded from VT estimate and quota blocking.
         </p>
+      )}
+      {estimate.url_submit_note && (
+        <p className="estimate-held-note">{estimate.url_submit_note}</p>
       )}
     </div>
   )
@@ -2935,6 +2944,20 @@ function DetailDrawer({
             </span>
           </div>
         </div>
+
+        {/* 2. VT SUMMARY — pending analysis (MDI-57A) */}
+        {isPendingAnalysis(r) && (
+          <div className="detail-section">
+            <div className="detail-section-label">2. VT Summary</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="badge badge-pending">Pending VT analysis</span>
+            </div>
+            <p className="detail-empty-note" style={{ marginTop: 6 }}>
+              This URL was submitted to VirusTotal, but a URL report is not available yet.
+              This is not a clean result. Use Refresh Report later (1 VT call) to fetch the completed report.
+            </p>
+          </div>
+        )}
 
         {/* 2. VT SUMMARY */}
         {vtTotal > 0 && (

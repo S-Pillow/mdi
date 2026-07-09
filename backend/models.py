@@ -513,7 +513,7 @@ class MdiJobOptions(BaseModel):
         description="[workflow] Run WHOIS/RDAP lookup for each item."
     )
     stale_threshold_days: int = Field(
-        7,
+        30,
         ge=1,
         le=90,
         description="[workflow] Reports older than this many days are classified as stale."
@@ -1065,7 +1065,7 @@ class JobSubmitRequest(BaseModel):
         description="[workflow] Use VT domain reports for bare domains.",
     )
     stale_threshold_days: int = Field(
-        7, ge=1, le=90,
+        30, ge=1, le=90,
         description="[workflow] Reports older than this many days are STALE.",
     )
     auto_rescan_stale: bool = Field(
@@ -1235,11 +1235,12 @@ class EstimateRequest(BaseModel):
         False,
         description=(
             "[workflow] When True, bare domains use the VT domain-report endpoint "
-            "(1 call max). When False, bare domains use the URL-report path (up to 3 calls)."
+            "(1 call max). When False, bare domains use the URL-report path (up to 2 calls: "
+            "GET, then POST submit-only if VT has no report)."
         ),
     )
     stale_threshold_days: int = Field(
-        7,
+        30,
         ge=1,
         le=90,
         description="[workflow] Informational only for estimate; affects VT freshness at job time.",
@@ -1322,7 +1323,7 @@ class EstimateResponse(BaseModel):
     url_report_mode_count: int = Field(
         ...,
         description=(
-            "[display] Items that will use the VT URL-report path (up to 3 calls each). "
+            "[display] Items that will use the VT URL-report path (up to 2 calls each). "
             "Includes full URLs and bare domains when use_domain_reports=False."
         ),
     )
@@ -1339,7 +1340,9 @@ class EstimateResponse(BaseModel):
         ...,
         description=(
             "[display] Conservative estimate: no cached reports. "
-            "Domain-mode items = 1 call; URL-mode items = 3 calls (GET + POST submit + GET)."
+            "Domain-mode items = 1 call; URL-mode items = 2 calls (GET + POST submit-only). "
+            "Submitted URLs become pending-analysis rows; a later operator Refresh Report "
+            "costs 1 call per pending row and is not included in this estimate."
         ),
     )
     auto_rescan_estimated_quota_min: int = Field(
@@ -1450,6 +1453,15 @@ class EstimateResponse(BaseModel):
     enrichment_note: str = Field(
         "",
         description="[display] MDI-11: informational note about RDAP/WHOIS enrichment overhead.",
+    )
+    url_submit_note: str = Field(
+        "",
+        description=(
+            "[display] MDI-57A: non-empty when URL-report-mode items are present. "
+            "Explains that unknown URLs are submitted to VT (submit-only, 2 calls max), "
+            "become pending-analysis rows, and need a later 1-call Refresh Report. "
+            "No automatic pending refresh occurs."
+        ),
     )
     enrichment_warning: str = Field(
         "",

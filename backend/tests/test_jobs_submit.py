@@ -269,13 +269,13 @@ def test_submit_job_counts_are_correct():
 
 
 def test_submit_job_estimated_requests_url_mode():
-    """URL-report mode: each domain item = 3 estimated requests."""
+    """URL-report mode (MDI-57A): each domain item = 2 estimated requests."""
     resp = client.post("/api/mdi/jobs/submit", json={
         "raw_input": "test1.com\ntest2.com",
         "use_domain_reports": False,
     })
     data = resp.json()
-    assert data["estimated_requests"] == 6   # 2 domains × 3 in URL-mode
+    assert data["estimated_requests"] == 4   # 2 domains × 2 in URL-mode (submit-only)
 
 
 def test_submit_job_estimated_requests_domain_mode():
@@ -445,15 +445,13 @@ def test_quota_increment_after_successful_call(tmp_path):
 
 
 def test_quota_increment_url_404_flow(tmp_path):
-    """URL 404→submit→refetch flow increments quota by 3."""
+    """MDI-57A: URL 404→submit-only flow increments quota by exactly 2 (no re-fetch)."""
     job_id = "test-quota-404-" + str(time.time_ns())
     _make_job(job_id, [("new-url.com", "new-url.com", InputType.URL)],)
 
-    body = _vt_report_body(malicious=0, age_days=1)
     responses = [
         _mock_resp(404, {}),
-        _mock_resp(200, {"data": {"id": "x"}}),
-        _mock_resp(200, body),
+        _mock_resp(200, {"data": {"id": "x", "type": "analysis"}}),
     ]
     idx = 0
 
@@ -471,9 +469,9 @@ def test_quota_increment_url_404_flow(tmp_path):
         _run(job_processor.process_job(job_id, usage_file=usage_file, job_file=tmp_path / "mdi_latest_job.json"))
 
     data = json.loads(usage_file.read_text())
-    assert data["daily_lookups_used"] == 3
+    assert data["daily_lookups_used"] == 2
     job = job_store.get_job_sync(job_id)
-    assert job.lookups_used == 3
+    assert job.lookups_used == 2
 
 
 def test_quota_hard_stop_mid_run(tmp_path):
@@ -849,8 +847,8 @@ def test_regression_usage_endpoint_still_works():
 
 # ── MDI-09 settings defaults in submit endpoint ────────────────────────────────
 
-def test_submit_default_stale_threshold_is_7():
-    """POST /api/mdi/jobs/submit without stale_threshold_days → status shows 7."""
+def test_submit_default_stale_threshold_is_30():
+    """MDI-57A: POST /api/mdi/jobs/submit without stale_threshold_days → status shows 30."""
     resp = client.post("/api/mdi/jobs/submit", json={"raw_input": "example.com"})
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]
@@ -858,7 +856,7 @@ def test_submit_default_stale_threshold_is_7():
     status = client.get(f"/api/mdi/jobs/{job_id}")
     assert status.status_code == 200
     data = status.json()
-    assert data["stale_threshold_days"] == 7
+    assert data["stale_threshold_days"] == 30
 
 
 def test_submit_use_domain_reports_stored(tmp_path):

@@ -311,45 +311,43 @@ def test_fetch_report_bare_domain_url_mode_target():
     assert "/domains/" not in call_url
 
 
-# ── fetch_report: 404 → submit → refetch ──────────────────────────────────────
+# ── fetch_report: 404 → submit-only (MDI-57A) ─────────────────────────────────
 
-def test_fetch_report_url_404_submit_refetch():
-    """URL 404 → submit → re-fetch → success consumes 3 calls."""
-    scan_ts = int(time.time()) - 86400
-    success_body = _vt_url_report(malicious=0, last_analysis_date=scan_ts)
-
-    call_responses = [
-        _mock_resp(404, {}),                             # 1st GET → not found
-        _mock_resp(200, {"data": {"id": "url-abc"}}),   # POST submit → accepted
-        _mock_resp(200, success_body),                   # 2nd GET → result
-    ]
-    call_idx = 0
+def test_fetch_report_url_404_submit_only_pending():
+    """URL 404 → POST submit → STOP. Exactly 2 calls, pending result, not clean."""
+    calls_log = []
 
     async def multi_response(method, url, *, headers, data=None):
-        nonlocal call_idx
-        resp = call_responses[call_idx]
-        call_idx += 1
-        return resp
+        calls_log.append((method, url))
+        if method == "GET":
+            return _mock_resp(404, {"error": {"code": "NotFoundError"}})
+        # POST submit returns an analysis id, not a completed URL report.
+        return _mock_resp(200, {"data": {"id": "u-abc123-1720000000", "type": "analysis"}})
 
     with _patch_limiter(), \
          patch("services.vt_service._vt_request", new=multi_response), \
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
         result = _run(vt_svc.fetch_report("http://unknown.com/", InputType.URL))
 
-    assert result.error is None
-    assert result.calls_made == 3
-    assert result.vt_malicious == 0
+    assert result.calls_made == 2
+    assert len(calls_log) == 2, "No third GET after submit (submit-only)"
+    assert calls_log[0][0] == "GET"
+    assert calls_log[1][0] == "POST"
+    # Pending state — never clean
+    assert result.error is not None
+    assert result.error.code == "vt_scan_pending"
+    assert result.error.severity == "warning"
+    assert result.vt_total_engines == 0
+    assert result.vt_ratio == ""       # no visible 0/0
+    assert result.vt_scan_date is None
+    assert result.freshness == Freshness.NEVER_SCANNED
 
 
 def test_fetch_report_url_404_submit_quota_count():
-    """URL 404 → submit → re-fetch: quota increment should account for 3 calls."""
-    scan_ts = int(time.time()) - 3600
-    success_body = _vt_url_report(malicious=1, last_analysis_date=scan_ts)
-
+    """URL 404 → submit-only: quota increment accounts for exactly 2 calls."""
     responses = [
         _mock_resp(404, {}),
-        _mock_resp(200, {"data": {"id": "x"}}),
-        _mock_resp(200, success_body),
+        _mock_resp(200, {"data": {"id": "x", "type": "analysis"}}),
     ]
     idx = 0
 
@@ -363,8 +361,9 @@ def test_fetch_report_url_404_submit_quota_count():
          patch.dict(os.environ, {"VT_API_KEY": "testkey"}):
         result = _run(vt_svc.fetch_report("http://another.com/", InputType.URL))
 
-    assert result.calls_made == 3
-    assert result.vt_malicious == 1
+    assert result.calls_made == 2
+    assert result.error is not None
+    assert result.error.code == "vt_scan_pending"
 
 
 # ── fetch_report: error paths ──────────────────────────────────────────────────

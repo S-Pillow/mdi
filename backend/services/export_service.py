@@ -211,6 +211,21 @@ def format_checked_as(result: MdiResultItem) -> str:
     return "not_checked_error"
 
 
+def _is_pending_analysis(result: MdiResultItem) -> bool:
+    """
+    MDI-57A: True for a URL submitted to VT whose analysis is not complete.
+    Identified by the vt_scan_pending warning (or PENDING bucket in URL mode)
+    with no completed scan evidence saved on the row.
+    """
+    if _vt_export_has_scan(result):
+        return False
+    if result.vt_mode_used != VtModeUsed.URL_REPORT:
+        return False
+    if any((e.code or "") == "vt_scan_pending" for e in (result.errors or [])):
+        return True
+    return result.triage_bucket == TriageBucket.PENDING
+
+
 def format_export_result(result: MdiResultItem) -> str:
     if (
         result.processing_status == MdiProcessingStatus.HOLD_SKIPPED
@@ -228,6 +243,9 @@ def format_export_result(result: MdiResultItem) -> str:
     if _vt_export_has_scan(result):
         flagging = (result.vt_hits or 0) + (result.vt_suspicious or 0)
         return "flagged" if flagging >= 1 else "clean"
+    # MDI-57A: submitted/pending URL analysis — explicit, never clean/error.
+    if _is_pending_analysis(result):
+        return "pending_analysis"
     if result.errors:
         return "error"
     return "unknown"
@@ -536,6 +554,8 @@ def _result_json(result: MdiResultItem) -> Dict[str, Any]:
         "domain_hold_has_hold": hold.has_hold if hold else False,
         "domain_hold_source": hold_source,
         "triage_reason": list(result.triage_reason),
+        # MDI-57A: explicit flag — URL submitted to VT, analysis not complete.
+        "pending_analysis": _is_pending_analysis(result),
         "error_codes": [err.code for err in result.errors],
         "errors": _sanitize_errors(result.errors),
         "vt_engine_results": result.vt_engine_results,

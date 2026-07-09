@@ -96,7 +96,7 @@ from services.job_store import (
     InMemoryJob, create_job, get_job,
     get_latest_completed_job_sync, register_recovered_job,
 )
-from services import dashboard, export_service, job_actions, job_persistence, job_processor
+from services import dashboard, export_service, job_actions, job_persistence, job_processor, vt_service
 from services.job_store import InMemoryJob
 from services.quota_lock import QuotaLockTimeout
 from services.quota_writer import read_remaining_quota
@@ -325,6 +325,7 @@ async def estimate(req: EstimateRequest) -> EstimateResponse:
         job_state_note=est["job_state_note"],
         enrichment_note=est["enrichment_note"],
         enrichment_warning=est["enrichment_warning"],
+        url_submit_note=est["url_submit_note"],
         estimated_live_check_count=est["estimated_live_check_count"],
         live_check_note=est["live_check_note"],
         external_calls_made=False,
@@ -893,6 +894,6 @@ async def schema_summary() -> Dict[str, Any]:
             "RATE_LIMIT_PER_MIN": 4,
             "MAX_AUTO_RESCANS_PER_RUN": 25,
             "AUTO_RESCAN_THRESHOLD_DAYS": 7,
-            "STALE_THRESHOLD_DAYS": 7,
+            "STALE_THRESHOLD_DAYS": vt_service.DEFAULT_STALE_THRESHOLD_DAYS,
         },
     }
