@@ -75,8 +75,7 @@ phases: `refresh_report`, `refresh_pending`, `request_new_scan`, `rescan_stale`
 Frontend shows phase-aware labels and honest indeterminate progress outside the
 VT item-check phase. Job/action smoke was **not** run — GET/API/static
 verification only. Operator visual phase observation can occur on the next
-natural job/action. MDI-57B live Refresh Pending smoke remains a separate
-quota-approved task.
+natural job/action. MDI-57B live Refresh Pending smoke **accepted** (2026-07-09).
 
 MDI-57B (2026-07-09T02:41–02:42 UTC) deployed **full-stack** from `main` @
 `d001df62bfe9ec0b272efc5a7a527ef83f363537` on host `srv766238`. Backend files
@@ -95,8 +94,8 @@ MDI-57B extends existing `POST /api/mdi/jobs/{job_id}/refresh` with
 `scope="pending"` so operators can bulk-refresh all pending-analysis URL rows
 (1 VT lookup each, GET-only `refresh_report()`, no URL submit, no Request New
 Scan). UI adds **Refresh Pending (N)** bulk control and a **Pending Analysis**
-filter card. Live Refresh Pending smoke was **not** run — quota approval
-pending.
+filter card. Live Refresh Pending smoke **accepted** on 2026-07-09 (see smoke
+history below).
 
 MDI-57A (2026-07-09T00:45–00:47 UTC) deployed **full-stack** from `main` @
 `f886ceb8c2900e4999329260c99868fd5ab9fd72` on host `srv766238`. Backend files
@@ -182,7 +181,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | Ticket | Outcome |
 |---|---|
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default — **merged, full-stack deployed, production-verified, smoke-accepted, closed** |
-| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter — **merged, full-stack deployed, safe-verified, closed** (live Refresh Pending smoke pending explicit quota approval) |
+| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter — **merged, full-stack deployed, safe-verified, live smoke-accepted, closed** |
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase — **merged, full-stack deployed, GET/static verified, closed** (job/action smoke not run; operator visual optional on next natural job/action) |
 | MDI-61 | Date-drift test fix for `test_age_bucket_very_new` — **merged, test-only, no deploy required, closed** |
 
@@ -368,7 +367,7 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-54B XLSX export with result-based row coloring | Accepted |
 | MDI-59A stale action flag persistence/recovery fix | Accepted (API-verified; operator Start New Scan visual confirmation pending) |
 | MDI-57A submit-only pending URL state, 30-day stale default, pending-analysis triage + export, updated estimate model | Accepted — full-stack deployed, production-verified, operator smoke-accepted |
-| MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified; **live Refresh Pending smoke not run — quota approval pending** |
+| MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified, **live Refresh Pending smoke accepted** |
 | MDI-59 Progress-phase UX — phase-aware job/action progress labels | Accepted — full-stack deployed, GET/API/static verified; **job/action smoke not run — GET/static verification only** |
 
 **MDI-59 production deploy and safe verification (2026-07-09T03:47–03:48 UTC):**
@@ -466,16 +465,42 @@ rows remain Pending VT analysis; refresh 404 does not auto-submit; Pending
 Analysis filter card available; completion summary is client-derived and
 advisory.
 
-**Smoke status:** quota-approved live Refresh Pending smoke was **not** run
-(no explicit quota approval in the deployment prompt). No POST/job action was
-performed during deploy. First real Refresh Pending on a pending row will be
-the live functional verification.
+**MDI-57B live Refresh Pending smoke acceptance (2026-07-09):**
 
-Recommended smoke (when approved): prefer an existing production job with
-exactly **1** pending URL row; estimate should show 1 VT lookup; expected usage
-delta **+1**; verify no URL submit / no Request New Scan; verify
-completed/still-pending/failed outcomes. Avoid creating a new unknown URL
-unless separately approved (~2 calls to create pending + 1 to refresh).
+Quota-approved live smoke on `srv766238` at production commit
+`43934287f31784f2364a88496da7a77d88f7dca3`. Job
+`379b41f8-d2d2-41f0-bf51-2d2bd20e3108`; pending eligible count **1**; row
+`https://forgeforward.app/tools/cn_domain_categorizer/` (URL,
+`vt_scan_pending`, `triage_bucket=pending`, `recommended_action=refresh_report`,
+`evidence_status=partial`, `freshness=never_scanned`, no VT engines / no scan
+date).
+
+Estimate: `POST /api/mdi/jobs/{job_id}/refresh` with
+`{"scope":"pending","estimate_only":true}` → `eligible_count=1`,
+`pending_eligible_count=1`, `estimated_quota_max=1`, `will_exceed_quota=false`.
+
+Action: `POST /api/mdi/jobs/{job_id}/refresh` with
+`{"scope":"pending","estimate_only":false,"confirm":true}` → accepted,
+`items_queued=1`; completed on first poll; `action_in_progress=false`;
+`current_phase=null`; `vt_refresh_count=1`.
+
+Usage: pre-smoke **6 used / 494 remaining** → post-smoke **7 used / 493
+remaining** (delta **+1**; quota cap respected).
+
+Row outcome: VT report completed — `triage_bucket` pending → **clean**;
+`recommended_action` refresh_report → **no_action_based_on_vt**; `vt_ratio` no
+engines → **0/92**; `vt_scan_date` null → **2026-07-09T04:13:36Z**;
+`vt_scan_pending` cleared; `evidence_status` partial → **complete**;
+`freshness` never_scanned → **fresh**. Final state was a completed
+zero-detection VT report, not a pending `0/0` clean misread.
+
+Safety: GET-only Refresh Report behavior; no URL submit; no Request New Scan; no
+scan endpoint called. Expected runtime mtime updates on `vt_usage.json` and
+`mdi_latest_job.json` from the approved action. No deploy/restart/nginx reload;
+VT Bulk Check untouched.
+
+**Deploy smoke status (2026-07-09T02:41–02:42 UTC):** no POST/job action during
+deploy; live functional verification completed by the smoke above.
 
 Runtime/quota safety: all five runtime files identical size/mtime before and
 after deploy; usage remained **3/500**; no runtime JSON edit; no quota reset;
@@ -985,7 +1010,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Progress phase (`current_phase`) is ephemeral — may be lost on backend restart or page reload mid-job/action | Acceptable — consistent with existing in-flight job behavior |
 | No per-row progress, ETA, server completion counters, or Manual Request New Scan completedness check in MDI-59 | Acceptable — explicitly out of scope; future backlog if needed |
 | Client-derived Refresh Pending completion summary is advisory | Acceptable — may miscount rare failure shapes |
-| Live Refresh Pending production smoke | **Pending** — explicit quota approval required; prefer 1 existing pending row (+1 VT call) |
+| Live Refresh Pending production smoke (MDI-57B) | **Resolved** (2026-07-09) — 1 pending URL, usage +1, row completed to clean `0/92`; GET-only refresh; job `379b41f8-…` |
 | Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Resolved by MDI-61 (2026-07-09)** — fixture date `2026-05-30` aged out of VERY_NEW; test now rewrites date to yesterday in memory before parsing; no fixture CSV change; full backend suite green at 1021 passed |
 | Pre–MDI-59: misleading job progress (`0%` during enrichment; `100%` during live-check/CF/finalization) | **Resolved by MDI-59 (2026-07-09)** — phase-aware labels and honest indeterminate progress outside VT phase |
 | Selected-subset Refresh Pending | **Future backlog** — not part of MDI-57B/59 scope |
@@ -1057,12 +1082,11 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | Ticket | Scope | Status |
 |---|---|---|
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default | **Closed** — merged, full-stack deployed, production-verified, smoke-accepted (2026-07-09) |
-| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | **Closed** — merged, full-stack deployed, safe-verified (2026-07-09); live Refresh Pending smoke pending explicit quota approval |
+| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | **Closed** — merged, full-stack deployed, safe-verified, live smoke-accepted (2026-07-09) |
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase | **Closed** — merged, full-stack deployed, GET/static verified (2026-07-09); job/action smoke not run |
 | MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09) |
 
-Production is at MDI-59 `4393428`. MDI-57B live Refresh Pending smoke remains a
-separate quota-approved task. Selected-subset Refresh Pending, per-row
+Production is at MDI-59 `4393428`. Selected-subset Refresh Pending, per-row
 persistence, improved server-side completion counters, and Manual Request New
 Scan completedness remain **future backlog only — not started**.
 
