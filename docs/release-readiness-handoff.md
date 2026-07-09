@@ -43,9 +43,29 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-57A: `f886ceb8c2900e4999329260c99868fd5ab9fd72` | Static bundle: `index-BlibenHD.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/`; previous `index-DRQeaMJN.js` removed |
-| MDI backend | MDI-57A: `f886ceb8c2900e4999329260c99868fd5ab9fd72` | `/opt/mdi/backend`; submit-only pending URL behavior, 30-day stale default, very-stale boundary scaling, pending-analysis triage + export, updated estimate model; previous backend `32148c1` (MDI-59A) |
+| Frontend | MDI-57B: `d001df62bfe9ec0b272efc5a7a527ef83f363537` | Static bundle: `index-p3SY0k4J.js`, `index-BQreofYY.css` at `/var/www/html/tools/mdi/`; previous `index-BlibenHD.js` removed |
+| MDI backend | MDI-57B: `d001df62bfe9ec0b272efc5a7a527ef83f363537` | `/opt/mdi/backend`; Bulk Refresh Pending (`scope=pending`), shared pending-analysis helper, Pending Analysis filter; previous backend `f886ceb8` (MDI-57A) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-57B (2026-07-09T02:41–02:42 UTC) deployed **full-stack** from `main` @
+`d001df62bfe9ec0b272efc5a7a527ef83f363537` on host `srv766238`. Backend files
+copied: `models.py`, `services/pending_analysis.py` (**new**),
+`services/export_service.py`, `services/job_actions.py`, `routers/mdi.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**
+at 2026-07-09T02:42:04 UTC; frontend built and rsynced (`rsync -av --delete`)
+to `/var/www/html/tools/mdi/`; old bundle `index-BlibenHD.js` **removed**;
+nginx **not** reloaded; VT Bulk Check **untouched**. Backups: backend
+`/root/backups/mdi-57b-pre-deploy-backend-20260709T024112Z/`, frontend
+`/root/backups/mdi-57b-pre-deploy-frontend-20260709T024112Z/`. Previous
+production: backend `f886ceb8` (MDI-57A), frontend `index-BlibenHD.js` /
+`index-BQreofYY.css`.
+
+MDI-57B extends existing `POST /api/mdi/jobs/{job_id}/refresh` with
+`scope="pending"` so operators can bulk-refresh all pending-analysis URL rows
+(1 VT lookup each, GET-only `refresh_report()`, no URL submit, no Request New
+Scan). UI adds **Refresh Pending (N)** bulk control and a **Pending Analysis**
+filter card. Live Refresh Pending smoke was **not** run — quota approval
+pending.
 
 MDI-57A (2026-07-09T00:45–00:47 UTC) deployed **full-stack** from `main` @
 `f886ceb8c2900e4999329260c99868fd5ab9fd72` on host `srv766238`. Backend files
@@ -131,14 +151,16 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | Ticket | Outcome |
 |---|---|
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default — **merged, full-stack deployed, production-verified, smoke-accepted, closed** |
+| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter — **merged, full-stack deployed, safe-verified, closed** (live Refresh Pending smoke pending explicit quota approval) |
 | MDI-61 | Date-drift test fix for `test_age_bucket_very_new` — **merged, test-only, no deploy required, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
+MDI-57B commit on `main`: `d001df6` (add bulk refresh pending action).
+
 MDI-61 commit on `main`: `3818b13` (fix age bucket date drift test).
 
-MDI-57B (bulk Refresh Pending action) and MDI-59 (progress-phase UX) remain
-separate future backlog items — not started.
+MDI-59 (progress-phase UX) remains a separate future backlog item — not started.
 
 ### MDI export contract series (MDI-54)
 
@@ -244,6 +266,8 @@ MDI currently supports:
 - Refresh Report
 - Request New Scan
 - pending-analysis URL state (MDI-57A): new unknown URLs are submit-only (2 VT calls); pending rows show `Pending VT analysis`, `Refresh Report` recommended action, and partial evidence — not `0/0` or clean; `pending_analysis` export field
+- Bulk Refresh Pending (MDI-57B): `scope=pending` on existing refresh endpoint; **Refresh Pending (N)** bulk control; 1 VT lookup per pending URL; GET-only; no URL submit / no Request New Scan
+- Pending Analysis filter card (MDI-57B)
 - bulk actions
 - CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
@@ -311,6 +335,67 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-54B XLSX export with result-based row coloring | Accepted |
 | MDI-59A stale action flag persistence/recovery fix | Accepted (API-verified; operator Start New Scan visual confirmation pending) |
 | MDI-57A submit-only pending URL state, 30-day stale default, pending-analysis triage + export, updated estimate model | Accepted — full-stack deployed, production-verified, operator smoke-accepted |
+| MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified; **live Refresh Pending smoke not run — quota approval pending** |
+
+**MDI-57B production deploy and safe verification (2026-07-09T02:41–02:42 UTC):**
+
+Full-stack deploy on `srv766238`: backend `d001df6` → `/opt/mdi/backend` (from
+`f886ceb8` / MDI-57A); frontend `index-p3SY0k4J.js` / `index-BQreofYY.css` via
+`rsync -av --delete` from `/root/mdi/frontend/dist/` to
+`/var/www/html/tools/mdi/`; old bundle `index-BlibenHD.js` removed. Backend
+files copied: `models.py`, `services/pending_analysis.py` (**new**),
+`services/export_service.py`, `services/job_actions.py`, `routers/mdi.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**
+at 2026-07-09T02:42:04 UTC; nginx **not** reloaded; VT Bulk Check **untouched**.
+Backups: `/root/backups/mdi-57b-pre-deploy-backend-20260709T024112Z/`
+(`pending_analysis.py` was not present pre-deploy — recorded as new),
+`/root/backups/mdi-57b-pre-deploy-frontend-20260709T024112Z/`.
+
+Pre-deploy verification: focused backend tests **129 passed**; full backend
+suite **1046 passed**; frontend build succeeded (`index-p3SY0k4J.js`).
+
+Safe API verification (read-only): `/api/mdi/health` → 200, commit
+`d001df62bfe9ec0b272efc5a7a527ef83f363537`; `/api/mdi/version` → 200, same
+commit; `/api/mdi/usage` → 200, `daily_lookups_used=3`, `remaining=497`
+(unchanged from pre-deploy); `/api/mdi/jobs/latest` → 200, `status=done`,
+`action_in_progress=false`; OpenAPI `RefreshScanScope` includes `selected`,
+`stale`, **`pending`**.
+
+UI/static verification: production `index.html` references `index-p3SY0k4J.js`
+and `index-BQreofYY.css`; JS bundle contains `Refresh Pending`,
+`Pending Analysis`, `Refresh Pending VT Analysis`, `1 VT lookup per pending`,
+`Confirm Refresh Pending`, `Refresh Pending in progress`, and no-new-scan
+warning copy fragments; no progress-phase UI.
+
+Behavior deployed: existing `POST /api/mdi/jobs/{job_id}/refresh` accepts
+`scope="pending"`; selects all eligible pending-analysis URL rows; 1 VT lookup
+per row; estimate blocks if quota would be exceeded; per-row quota guard during
+async action; partial completion allowed; GET-only `refresh_report()`; no URL
+submit; no Request New Scan; completed rows re-triage normally; still-pending
+rows remain Pending VT analysis; refresh 404 does not auto-submit; Pending
+Analysis filter card available; completion summary is client-derived and
+advisory.
+
+**Smoke status:** quota-approved live Refresh Pending smoke was **not** run
+(no explicit quota approval in the deployment prompt). No POST/job action was
+performed during deploy. First real Refresh Pending on a pending row will be
+the live functional verification.
+
+Recommended smoke (when approved): prefer an existing production job with
+exactly **1** pending URL row; estimate should show 1 VT lookup; expected usage
+delta **+1**; verify no URL submit / no Request New Scan; verify
+completed/still-pending/failed outcomes. Avoid creating a new unknown URL
+unless separately approved (~2 calls to create pending + 1 to refresh).
+
+Runtime/quota safety: all five runtime files identical size/mtime before and
+after deploy; usage remained **3/500**; no runtime JSON edit; no quota reset;
+no external API calls; no VT quota consumed by deploy; VT Bulk Check untouched.
+
+Rollback (documented; not executed): restore from
+`/root/backups/mdi-57b-pre-deploy-backend-20260709T024112Z/`; remove new
+`/opt/mdi/backend/services/pending_analysis.py`; restore frontend from
+`/root/backups/mdi-57b-pre-deploy-frontend-20260709T024112Z/`; restart
+`mdi-backend.service`; verify `/api/mdi/version` returns `f886ceb8`.
 
 **MDI-57A production deploy and smoke acceptance (2026-07-09T00:45–00:47 UTC):**
 
@@ -804,11 +889,16 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
 | Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
 | Post–MDI-59A: disk `mdi_latest_job.json` may still show the stale `action_in_progress=true` while API returns `false` | Acceptable — operator unblock via API; optional runtime cleanup ticket for disk/API alignment; next refresh/scan should persist `false` to disk |
-| No bulk Refresh Pending action (MDI-57B) | Acceptable — operators must refresh individual pending URL rows one at a time via Row More Actions → Refresh Report |
+| Bulk Refresh Pending (MDI-57B) refreshes **all** pending rows only — no selected pending subset in v1 | Acceptable — by design for v1 |
+| Bulk Refresh Pending uses batch-end persistence only (same as Rescan Stale) | Acceptable — crash mid-batch can lose in-loop updates; same pattern as existing actions |
+| Mid-action progress for Refresh Pending is indeterminate | Acceptable — MDI-59 progress-phase UX remains future backlog |
+| Client-derived Refresh Pending completion summary is advisory | Acceptable — may miscount rare failure shapes |
+| Live Refresh Pending production smoke | **Pending** — explicit quota approval required; prefer 1 existing pending row (+1 VT call) |
 | Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Resolved by MDI-61 (2026-07-09)** — fixture date `2026-05-30` aged out of VERY_NEW; test now rewrites date to yesterday in memory before parsing; no fixture CSV change; full backend suite green at 1021 passed |
 | Progress-phase UX (MDI-59) — per-item progress indicators during job execution | **Future backlog** — not started; separate ticket required |
-| Manual Request New Scan completedness check | **Future backlog** — not part of MDI-57A scope |
-| Pending URL rows require operator-initiated Refresh Report; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
+| Manual Request New Scan completedness check | **Future backlog** — not part of MDI-57A/57B scope |
+| Pending URL rows require operator-initiated Refresh Report / Refresh Pending; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
+| Refresh 404 on pending URL does not auto-submit | Acceptable — by design |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -872,12 +962,12 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | Ticket | Scope | Status |
 |---|---|---|
 | MDI-57A | Submit-only pending URL state, VT response-shape verification, 30-day stale default | **Closed** — merged, full-stack deployed, production-verified, smoke-accepted (2026-07-09) |
-| MDI-57B | Bulk Refresh Pending action — refresh all pending URL rows in one operation | **Future backlog** — not started |
+| MDI-57B | Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | **Closed** — merged, full-stack deployed, safe-verified (2026-07-09); live Refresh Pending smoke pending explicit quota approval |
 | MDI-59 | Progress-phase UX — per-item progress indicators during job execution | **Future backlog** — not started |
-| MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09); production remains at MDI-57A `f886ceb8` |
+| MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09) |
 
-MDI-57B and MDI-59 are **documented backlog only — not started**. Do not
-conflate with MDI-57A closure.
+MDI-59 is **documented backlog only — not started**. Do not conflate with
+MDI-57A/57B closure. Production is at MDI-57B `d001df6`.
 
 ### Other non-blocking items
 
