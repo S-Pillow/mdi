@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import {
+  formatActionSummaryMessage,
+  getInitialJobLoadingMessage,
+  getVtUsageStatusLine,
+  isActionPhase,
+  phaseLabel,
+} from './mdiDisplay.js'
+import ResultsJobContextBar from './ResultsJobContextBar.jsx'
 
 // ── Icons (inline SVG — no external icon library) ────────────────────────────
 
@@ -323,52 +331,6 @@ function countSelectedPendingRefreshable(results, selectedIds) {
   return (results || []).filter(
     r => selectedIds.has(r.position) && isPendingAnalysis(r) && canRefreshRow(r),
   ).length
-}
-
-function formatActionSummaryParts(summary) {
-  if (!summary) return null
-  const parts = []
-  if (summary.items_completed > 0) parts.push(`${summary.items_completed} completed`)
-  if (summary.items_still_pending > 0) parts.push(`${summary.items_still_pending} still pending`)
-  if (summary.items_failed > 0) parts.push(`${summary.items_failed} failed`)
-  if (summary.items_skipped > 0 && summary.scope === 'selected_pending') {
-    parts.push(`${summary.items_skipped} selected row(s) skipped`)
-  }
-  if (summary.items_quota_blocked > 0) parts.push(`${summary.items_quota_blocked} quota-blocked`)
-  return parts
-}
-
-function formatActionSummaryMessage(summary) {
-  if (!summary || summary.status !== 'completed') return null
-  const parts = formatActionSummaryParts(summary)
-  const detail = parts.length ? parts.join('; ') : 'no row outcomes recorded'
-  if (summary.action === 'refresh' && summary.scope === 'pending') {
-    return `Refresh Pending complete — ${detail}.`
-  }
-  if (summary.action === 'refresh' && summary.scope === 'selected_pending') {
-    return `Refresh Selected Pending complete — ${detail}.`
-  }
-  if (summary.action === 'refresh') {
-    return `Refresh complete — ${detail}.`
-  }
-  if (summary.action === 'scan') {
-    return `Scan complete — ${detail}.`
-  }
-  return `Action complete — ${detail}.`
-}
-
-function formatRecoveredLastActionMessage(summary) {
-  const message = formatActionSummaryMessage(summary)
-  return message ? `Last action: ${message}` : null
-}
-
-function shouldShowRecoveredLastAction({ job, restoredFromSession, actionInProgress, actionMessage }) {
-  if (!restoredFromSession) return false
-  if (actionInProgress || job?.action_in_progress) return false
-  if (job?.current_phase) return false
-  if (actionMessage) return false
-  if (job?.status !== 'done' && job?.status !== 'error') return false
-  return !!formatActionSummaryMessage(job?.last_action_summary)
 }
 
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
@@ -1751,42 +1713,6 @@ function InputTabsPanel({
   )
 }
 
-// ── MDI-59 progress phase labels (MDI-59B copy refinement) ───────────────────
-
-const PHASE_LABELS = {
-  enriching: 'Enriching domain data…',
-  checking_virustotal: 'Checking VirusTotal…',
-  checking_live_site: 'Checking live site status…',
-  checking_cloudflare_rank: 'Checking Cloudflare rank…',
-  finalizing: 'Finalizing results…',
-  refresh_report: 'Refreshing report…',
-  refresh_pending: 'Refresh Pending in progress…',
-  refresh_selected_pending: 'Refresh Selected Pending in progress…',
-  request_new_scan: 'Request New Scan in progress…',
-  rescan_stale: 'Rescan Stale in progress…',
-}
-
-function phaseLabel(phase, context = null) {
-  if (!phase) return null
-  if (phase === 'refresh_report' && context?.scope === 'selected') {
-    return 'Refreshing selected report(s)…'
-  }
-  if (phase === 'request_new_scan' && context?.scope === 'selected') {
-    return 'Rescan Selected in progress…'
-  }
-  return PHASE_LABELS[phase] || null
-}
-
-function isActionPhase(phase) {
-  return (
-    phase === 'refresh_report'
-    || phase === 'refresh_pending'
-    || phase === 'refresh_selected_pending'
-    || phase === 'request_new_scan'
-    || phase === 'rescan_stale'
-  )
-}
-
 // ── VT Usage & Status panel ───────────────────────────────────────────────────
 
 function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
@@ -1806,17 +1732,13 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const manualActionPhase = !!job?.action_in_progress && isActionPhase(phase)
   // Only show phase while the job/action is actually active (avoid stale recovered copy)
   const showActivePhase = !!phase && (isRunning || !!job?.action_in_progress)
-  // MDI-59B: action banner is primary during manual actions; avoid duplicate phase copy here
-  const phaseCopy = showActivePhase && !manualActionPhase ? phaseLabel(phase) : null
   const vtPhaseMeaningful = isRunning && phase === 'checking_virustotal'
   const outsideVtPhase = isRunning && phase && phase !== 'checking_virustotal'
   const indeterminateProgress = outsideVtPhase || manualActionPhase
   const isRecoveredPreviousDay = isPreviousUtcQuotaDayJob(job, quotaDateUtc)
   const runSectionLabel = isRecoveredPreviousDay ? 'Recovered job' : 'Current run'
   const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' && !showActivePhase ? 'var(--risk-clean)' : 'var(--accent-blue)'
-  const statusLine = manualActionPhase
-    ? 'Working…'
-    : (phaseCopy || (isRunning ? 'Processing…' : job?.status?.toUpperCase()))
+  const statusLine = getVtUsageStatusLine(job)
 
   return (
     <div className="vt-usage-panel">
@@ -2855,57 +2777,6 @@ function ResultsTable({
   )
 }
 
-function ResultsJobContextBar({
-  job,
-  jobError,
-  restoredFromSession,
-  onStartNewScan,
-  actionInProgress,
-  actionMessage,
-}) {
-  const resultCount = job?.results?.length ?? 0
-  const lookupCount = job?.lookups_used ?? 0
-  const isRunning = job?.status === 'queued' || job?.status === 'running' || actionInProgress
-  const title = restoredFromSession ? '↩ Recovered previous job' : jobError ? 'Run error' : 'Results ready'
-  const helper = restoredFromSession
-    ? `${resultCount.toLocaleString()} result${resultCount !== 1 ? 's' : ''} · Completed previous UTC day · ${lookupCount.toLocaleString()} VT lookup${lookupCount !== 1 ? 's' : ''} on this job`
-    : jobError
-      ? 'Clear this error and return to input.'
-      : `${resultCount.toLocaleString()} result${resultCount !== 1 ? 's' : ''}`
-  const recoveredLastAction = shouldShowRecoveredLastAction({
-    job,
-    restoredFromSession,
-    actionInProgress,
-    actionMessage,
-  })
-    ? formatRecoveredLastActionMessage(job?.last_action_summary)
-    : null
-
-  return (
-    <div className={`results-job-context-bar${restoredFromSession ? ' recovered' : ''}`} role="region" aria-label="Results job context">
-      <div className="results-job-context-copy">
-        <span className="results-job-context-title">{title}</span>
-        <span className="results-job-context-helper">
-          {isRunning ? 'Wait for this job to finish before starting another scan.' : helper}
-        </span>
-        {recoveredLastAction && (
-          <span className="results-job-context-last-action">{recoveredLastAction}</span>
-        )}
-      </div>
-      <button
-        type="button"
-        className="btn btn-primary results-start-new-btn"
-        onClick={onStartNewScan}
-        disabled={isRunning}
-        aria-label="Start a new MDI scan"
-        title={isRunning ? 'Wait for this job to finish before starting another scan.' : 'Clear displayed results and return to input'}
-      >
-        Start New Scan
-      </button>
-    </div>
-  )
-}
-
 // ── Triage workspace (replaces JobSection) ────────────────────────────────────
 
 function TriageWorkspace({
@@ -3106,9 +2977,7 @@ function TriageWorkspace({
       {/* Loading state */}
       {allResults.length === 0 && isRunning && (
         <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-          {job?.status === 'queued'
-            ? 'Queued — waiting to start…'
-            : (phaseLabel(job?.current_phase) || 'Processing… results will appear as they complete.')}
+          {getInitialJobLoadingMessage(job, { isRunning, hasResults: allResults.length > 0 })}
         </div>
       )}
     </>
