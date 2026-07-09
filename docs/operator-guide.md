@@ -399,6 +399,30 @@ automated enforcement actions do not appear in the drawer.
 Refresh updates the **current job in place** (same `job_id`). It does not
 create a new job.
 
+### Refresh Pending (MDI-57B) and Refresh Selected Pending (MDI-63)
+
+For URL rows in **Pending VT analysis** state (submitted to VirusTotal, no
+completed engine evidence yet), bulk refresh actions check whether VT has
+finished analysis — **GET-only**; no URL submit and no Request New Scan.
+
+| Control | Scope | Behavior |
+|---|---|---|
+| **Refresh Pending (N)** | All pending-eligible rows in the job | `scope=pending`; refreshes every pending URL row |
+| **Refresh Selected Pending (N)** | Selected rows only | `scope=selected_pending` with checked row positions; refreshes only selected pending-eligible rows; **skips** selected clean/held/domain/non-pending rows without failing the whole action |
+
+| Aspect | Detail |
+|---|---|
+| **Typical cost** | **1 VT lookup per pending-eligible row** refreshed (not per selected row) |
+| **Mixed selection** | Non-pending selected rows are skipped; estimate/modal shows eligible and skipped counts |
+| **Confirmation** | Modal shows eligible count, skipped reasons, and quota impact before starting |
+| **Phase label** | `Refresh Pending in progress…` or `Refresh Selected Pending in progress…` |
+| **Completion** | Advisory client summary after action (completed / still pending / failed; selected non-pending skipped when applicable) |
+
+Use **Refresh Selected Pending** when you need quota control over a subset of
+pending rows. Use **Refresh Pending** when every pending row in the job should be
+checked. Row-level **Refresh report** remains ordinary Refresh Report for any
+eligible selected row (`scope=selected`).
+
 ---
 
 ## 11. Request New Scan

@@ -43,9 +43,34 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-59: `43934287f31784f2364a88496da7a77d88f7dca3` | Static bundle: `index-6YooG29_.js`, `index-DMlC-T_G.css` at `/var/www/html/tools/mdi/`; unchanged by MDI-62 |
-| MDI backend | MDI-62: `77e53b84d5adb84b0757899d47d390d4b92fb6c0` | `/opt/mdi/backend`; Manual Request New Scan URL completedness gate; previous backend `4393428` (MDI-59) |
+| Frontend | MDI-63: `c85deb375847dfe298d480fd24103991793d0bb0` | Static bundle: `index-D5iaDgAn.js`, `index-DMlC-T_G.css` at `/var/www/html/tools/mdi/` |
+| MDI backend | MDI-63: `c85deb375847dfe298d480fd24103991793d0bb0` | `/opt/mdi/backend`; selected-subset Refresh Pending (`scope=selected_pending`); previous backend `77e53b8` (MDI-62) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-63 (2026-07-09T08:59:05 UTC) deployed **full-stack** from `main` @
+`c85deb375847dfe298d480fd24103991793d0bb0` on host `srv766238`. Backend files
+copied: `models.py`, `routers/mdi.py`, `services/job_actions.py`;
+`build_info.json` updated (`built_at_utc=2026-07-09T08:59:05Z`);
+`mdi-backend.service` **restarted** and **active**; frontend built and rsynced
+(`rsync -a --delete`) to `/var/www/html/tools/mdi/`; old bundle
+`index-6YooG29_.js` **removed**; nginx **not** reloaded; VT Bulk Check
+**untouched**. Backups: backend
+`/root/backups/mdi-63-pre-deploy-backend-20260709T085537Z/`, frontend
+`/var/www/html/tools/mdi.bak-20260709T085537Z/`. Previous production: backend
+`77e53b84d5adb84b0757899d47d390d4b92fb6c0` (MDI-62), frontend
+`index-6YooG29_.js` / `index-DMlC-T_G.css`.
+
+Implementation/merge: branch `feature/mdi-63-selected-refresh-pending`; commit
+`c85deb375847dfe298d480fd24103991793d0bb0` (`add selected refresh pending
+action`); previous `main` before merge `ac9cf983ff6aced63f9d8855da6d152da73f153d`;
+fast-forward merge; `main`/`origin` include MDI-63.
+
+MDI-63 adds `scope=selected_pending` on existing `POST …/refresh` with required
+`positions`; queues only selected pending-analysis URL rows; skips selected
+non-pending rows; preserves all-pending Refresh Pending (`scope=pending`) and
+ordinary selected Refresh Report (`scope=selected`). Frontend bulk control:
+**Refresh Selected Pending (N)**. Phase label: `Refresh Selected Pending in
+progress…`. Live smoke **accepted** (2026-07-09) — see below.
 
 MDI-62 (2026-07-09T06:26–06:27 UTC) deployed **backend-only** from `main` @
 `77e53b84d5adb84b0757899d47d390d4b92fb6c0` on host `srv766238`. Backend files
@@ -213,6 +238,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase — **merged, full-stack deployed, GET/static verified, closed** (job/action smoke not run; operator visual optional on next natural job/action) |
 | MDI-61 | Date-drift test fix for `test_age_bucket_very_new` — **merged, test-only, no deploy required, closed** |
 | MDI-62 | Manual Request New Scan URL completedness gate — **merged, backend-deployed, GET-verified, live smoke-accepted, closed** |
+| MDI-63 | Selected-subset Refresh Pending (`scope=selected_pending`), **Refresh Selected Pending (N)** bulk control — **merged, full-stack deployed, live smoke-accepted, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -223,6 +249,8 @@ MDI-59 commit on `main`: `4393428` (add mdi progress phase labels).
 MDI-61 commit on `main`: `3818b13` (fix age bucket date drift test).
 
 MDI-62 commit on `main`: `77e53b8` (fix manual scan completedness gate).
+
+MDI-63 commit on `main`: `c85deb3` (add selected refresh pending action).
 
 ### MDI export contract series (MDI-54)
 
@@ -330,6 +358,7 @@ MDI currently supports:
 - Manual Request New Scan URL completedness (MDI-62): scan polling applies the same completed-report standard as MDI-57A fetch/refresh; incomplete VT URL objects are pending/partial with Refresh Report follow-up — not clean or visible `0/0`; poll loop uses existing 2–4 VT call budget; domain rescan path unchanged
 - pending-analysis URL state (MDI-57A): new unknown URLs are submit-only (2 VT calls); pending rows show `Pending VT analysis`, `Refresh Report` recommended action, and partial evidence — not `0/0` or clean; `pending_analysis` export field
 - Bulk Refresh Pending (MDI-57B): `scope=pending` on existing refresh endpoint; **Refresh Pending (N)** bulk control; 1 VT lookup per pending URL; GET-only; no URL submit / no Request New Scan
+- Selected-subset Refresh Pending (MDI-63): `scope=selected_pending` on existing refresh endpoint with required `positions`; **Refresh Selected Pending (N)** bulk control; queues only selected pending-eligible URL rows; skips selected non-pending rows; 1 VT lookup per eligible row; GET-only; preserves MDI-57B all-pending and ordinary selected Refresh Report behavior
 - Pending Analysis filter card (MDI-57B)
 - Phase-aware progress UX (MDI-59): backend `current_phase` / `current_phase_detail` on job status; phase labels for enrichment, VT, live-check, Cloudflare rank, finalization, and manual actions; honest indeterminate progress outside VT item-check phase; recovered terminal jobs do not show active phase
 - bulk actions
@@ -402,6 +431,48 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified, **live Refresh Pending smoke accepted** |
 | MDI-59 Progress-phase UX — phase-aware job/action progress labels | Accepted — full-stack deployed, GET/API/static verified; **job/action smoke not run — GET/static verification only** |
 | MDI-62 Manual Request New Scan URL completedness gate | Accepted — backend-deployed, GET/API verified, **live smoke accepted** (Outcome A completed report) |
+| MDI-63 Selected-subset Refresh Pending (`scope=selected_pending`) | Accepted — full-stack deployed, **live smoke accepted** (mixed selection; 1 pending refreshed, 1 clean skipped) |
+
+**MDI-63 production deploy and live smoke acceptance (2026-07-09):**
+
+Full-stack deploy on `srv766238` at `2026-07-09T08:59:05Z`: backend `c85deb3` →
+`/opt/mdi/backend` (from `77e53b8` / MDI-62); frontend `index-D5iaDgAn.js` /
+`index-DMlC-T_G.css` → `/var/www/html/tools/mdi/` (from `index-6YooG29_.js`).
+Pre-deploy GET verification: usage **9 used / 491 remaining**; latest job
+`status=done`, `action_in_progress=false`, `phase=None`. Post-deploy GET
+verification: `/api/mdi/health` and `/api/mdi/version` → commit `c85deb3`;
+usage unchanged at deploy time.
+
+**MDI-63 live Refresh Selected Pending smoke acceptance (2026-07-09):**
+
+Quota before smoke (pre-setup): **9 used / 491 remaining**. Setup job
+`181b4d9e-ca54-4bd3-bb6b-5a321ea0b3ba` (2 URLs: `https://www.google.com/` clean,
+`https://forgeforward.app/mdi63-smoke-pending-test-20260709` pending) consumed
+**+3** quota (12/488). Mixed selection: rows **1** (clean) and **2** (pending)
+selected.
+
+Estimate: `POST …/refresh` with
+`{"scope":"selected_pending","positions":[1,2],"estimate_only":true}` →
+`eligible_count=1`, `skipped_count=1` (`not_pending: 1`),
+`pending_eligible_count=1`, `estimated_quota_max=1`, `will_exceed_quota=false`.
+
+UI: **Refresh Selected Pending (1)** enabled with both rows selected; modal
+copy confirmed selected-pending-only, 1 lookup, 1 skipped non-pending, GET-only,
+no submit/scan. Phase label observed: **Refresh Selected Pending in progress…**
+(completion was fast). Completion summary:
+`Refresh Selected Pending complete — 1 of 1 URLs now have completed VT reports;
+0 still pending; 0 failed. 1 selected non-pending row(s) were skipped.`
+
+Action result: pending row **2** refreshed to clean `0/92`; clean row **1**
+unchanged `0/92` (not rescanned). Final job: `status=done`,
+`action_in_progress=false`, `phase=None`. All-pending estimate after smoke:
+`eligible_count=0` (Refresh Pending control disabled — MDI-57B path intact).
+
+Quota after smoke: **13 used / 487 remaining** (+4 total from pre-smoke start:
++3 setup job, +1 selected-pending refresh). MDI-63 action alone: **+1** lookup.
+Runtime files updated only by approved smoke (`mdi_latest_job.json`,
+`vt_usage.json`, `vt_usage_history.jsonl`, `vt_daily_history.json` mtimes/sizes
+as expected).
 
 **MDI-62 production deploy and safe verification (2026-07-09T06:26–06:27 UTC):**
 
@@ -1128,7 +1199,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
 | Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
 | Post–MDI-59A: disk `mdi_latest_job.json` may still show the stale `action_in_progress=true` while API returns `false` | Acceptable — operator unblock via API; optional runtime cleanup ticket for disk/API alignment; next refresh/scan should persist `false` to disk |
-| Bulk Refresh Pending (MDI-57B) refreshes **all** pending rows only — no selected pending subset in v1 | Acceptable — by design for v1 |
+| Bulk Refresh Pending (MDI-57B) refreshes **all** pending rows only | **Resolved by MDI-63 (2026-07-09)** — selected-subset via `scope=selected_pending` and **Refresh Selected Pending (N)** |
 | Bulk Refresh Pending uses batch-end persistence only (same as Rescan Stale) | Acceptable — crash mid-batch can lose in-loop updates; same pattern as existing actions |
 | Mid-action progress for Refresh Pending shows phase label but remains indeterminate (no per-item numerator) | Acceptable — by design for MDI-59 v1 |
 | Progress phase (`current_phase`) is ephemeral — may be lost on backend restart or page reload mid-job/action | Acceptable — consistent with existing in-flight job behavior |
@@ -1141,7 +1212,8 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Live Refresh Pending production smoke (MDI-57B) | **Resolved** (2026-07-09) — 1 pending URL, usage +1, row completed to clean `0/92`; GET-only refresh; job `379b41f8-…` |
 | Pre-existing date-drift test: `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` | **Resolved by MDI-61 (2026-07-09)** — fixture date `2026-05-30` aged out of VERY_NEW; test now rewrites date to yesterday in memory before parsing; no fixture CSV change; full backend suite green at 1021 passed |
 | Pre–MDI-59: misleading job progress (`0%` during enrichment; `100%` during live-check/CF/finalization) | **Resolved by MDI-59 (2026-07-09)** — phase-aware labels and honest indeterminate progress outside VT phase |
-| Selected-subset Refresh Pending | **Future backlog** — not part of MDI-57B/59 scope |
+| Live Refresh Selected Pending production smoke (MDI-63) | **Resolved** (2026-07-09) — mixed selection 2 rows; 1 pending refreshed, 1 clean skipped; usage +1 for action (+3 setup job); job `181b4d9e-…` |
+| Client-derived Refresh Selected Pending completion summary is advisory | Acceptable — same MDI-57B pattern; may miscount rare failure shapes |
 | Per-row persistence during bulk actions | **Future backlog** — not part of MDI-57B/59 scope |
 | Improved server-side completion counters | **Future backlog** — not part of MDI-57B/59/62 scope |
 | Manual Request New Scan completedness check | **Resolved by MDI-62 (2026-07-09)** — backend-deployed, GET-verified, live smoke accepted (Outcome A) |
@@ -1214,13 +1286,13 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-59 | Progress-phase UX — phase-aware job/action progress labels, honest indeterminate progress outside VT phase | **Closed** — merged, full-stack deployed, GET/static verified (2026-07-09); job/action smoke not run |
 | MDI-61 | `test_upload_parser.py::TestUploadParserCSV::test_age_bucket_very_new` fixture date-drift fix | **Closed** — merged, test-only, no deployment required (2026-07-09) |
 | MDI-62 | Manual Request New Scan URL completedness gate | **Closed** — merged, backend-deployed, GET-verified, live smoke-accepted (2026-07-09); Outcome A completed report; Outcome B not observed |
+| MDI-63 | Selected-subset Refresh Pending (`scope=selected_pending`) | **Closed** — merged, full-stack deployed, live smoke-accepted (2026-07-09) |
 
-Production backend is at MDI-62 `77e53b8`; production frontend remains MDI-59
-`4393428` (`index-6YooG29_.js` / `index-DMlC-T_G.css`). Selected-subset Refresh
-Pending, per-row persistence, and improved server-side completion counters remain
-**future backlog only — not started**. Optional Outcome B incomplete/pending
-Manual Request New Scan smoke remains quota-approved future coverage only — not
-a blocker.
+Production backend and frontend are at MDI-63 `c85deb3`
+(`index-D5iaDgAn.js` / `index-DMlC-T_G.css`). Per-row persistence and improved
+server-side completion counters remain **future backlog only — not started**.
+Optional Outcome B incomplete/pending Manual Request New Scan smoke remains
+quota-approved future coverage only — not a blocker.
 
 ### Other non-blocking items
 
