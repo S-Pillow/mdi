@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -255,9 +256,13 @@ class TestUploadParserCSV:
         assert double.age_bucket == AgeBucket.MATURE
 
     def test_age_bucket_very_new(self):
-        # new-domain.io created 2026-05-30 → < 30 days → VERY_NEW
-        data = FIXTURES / "sample_dns_form.csv"
-        result = parse_upload(data.read_bytes(), "sample_dns_form.csv")
+        # new-domain.io: rewrite the fixture's fixed create date to yesterday so
+        # the row is always < 30 days old (VERY_NEW) regardless of calendar drift.
+        raw = (FIXTURES / "sample_dns_form.csv").read_bytes()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        data = raw.replace(b"2026-05-30", yesterday.encode())
+        assert data != raw, "fixture no longer contains the expected new-domain.io create date"
+        result = parse_upload(data, "sample_dns_form.csv")
         new_d = next((i for i in result.accepted if i.input_normalized == "new-domain.io"), None)
         assert new_d is not None
         assert new_d.age_bucket == AgeBucket.VERY_NEW
