@@ -68,6 +68,9 @@ class InMemoryJob:
     vt_refresh_count: int = 0
     vt_scan_requested_count: int = 0
     vt_scan_failed_count: int = 0
+    # ── MDI-59 progress phase (in-memory display; not required on disk) ────────
+    current_phase: Optional[str] = None
+    current_phase_detail: Optional[str] = None
     # ── MDI-15A auto-rescan (initial job processing only) ─────────────────────
     auto_rescan_attempted_count: int = 0
     auto_rescan_completed_count: int = 0

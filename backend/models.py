@@ -1173,6 +1173,18 @@ class JobStatusResponse(BaseModel):
     last_action_at: Optional[float] = Field(
         None, description="[audit] Unix timestamp of last refresh/scan completion."
     )
+    # ── MDI-59 progress phase ───────────────────────────────────────────────────
+    current_phase: Optional[str] = Field(
+        None,
+        description=(
+            "[display] Stable progress-phase token while a job or manual action runs "
+            "(e.g. enriching, checking_virustotal, refresh_pending). Null when idle/terminal."
+        ),
+    )
+    current_phase_detail: Optional[str] = Field(
+        None,
+        description="[display] Optional short human detail for the current phase; usually null.",
+    )
     vt_refresh_count: int = Field(
         0, description="[display] Cumulative manual refresh operations on this job."
     )

@@ -546,8 +546,10 @@ async def _clear_action_in_progress_and_persist(
     *,
     job_file: Optional[Path] = None,
 ) -> None:
-    """Clear action_in_progress and persist terminal job state (MDI-59A)."""
+    """Clear action_in_progress/phase and persist terminal job state (MDI-59A/59)."""
     job.action_in_progress = False
+    job.current_phase = None
+    job.current_phase_detail = None
     try:
         await job_persistence.write_latest_job(job, job_file=job_file)
     except Exception as exc:
@@ -556,6 +558,23 @@ async def _clear_action_in_progress_and_persist(
             job.job_id,
             exc,
         )
+
+
+def _set_action_phase(job: InMemoryJob, action: str, scope: RefreshScanScope) -> None:
+    """Set MDI-59 current_phase for a manual refresh/scan action."""
+    if action == "refresh":
+        if scope == RefreshScanScope.PENDING:
+            job.current_phase = "refresh_pending"
+        else:
+            job.current_phase = "refresh_report"
+    elif action == "scan":
+        if scope == RefreshScanScope.STALE:
+            job.current_phase = "rescan_stale"
+        else:
+            job.current_phase = "request_new_scan"
+    else:
+        job.current_phase = None
+    job.current_phase_detail = None
 
 
 async def run_refresh_action(
@@ -575,6 +594,7 @@ async def run_refresh_action(
     selection = select_eligible_items(job, request.scope, request.positions, "refresh")
     job.action_in_progress = True
     job.last_action_type = "refresh"
+    _set_action_phase(job, "refresh", request.scope)
     try:
         stats = await _run_items(
             job,
@@ -616,6 +636,7 @@ async def run_scan_action(
     selection = select_eligible_items(job, request.scope, request.positions, "scan")
     job.action_in_progress = True
     job.last_action_type = "scan"
+    _set_action_phase(job, "scan", request.scope)
     try:
         stats = await _run_items(
             job,

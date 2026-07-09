@@ -1700,6 +1700,34 @@ function InputTabsPanel({
   )
 }
 
+// ── MDI-59 progress phase labels ──────────────────────────────────────────────
+
+const PHASE_LABELS = {
+  enriching: 'Enriching domain data…',
+  checking_virustotal: 'Checking VirusTotal…',
+  checking_live_site: 'Checking live site status…',
+  checking_cloudflare_rank: 'Checking Cloudflare rank…',
+  finalizing: 'Finalizing results…',
+  refresh_report: 'Refresh Report in progress…',
+  refresh_pending: 'Refresh Pending in progress…',
+  request_new_scan: 'Request New Scan in progress…',
+  rescan_stale: 'Rescan Stale in progress…',
+}
+
+function phaseLabel(phase) {
+  if (!phase) return null
+  return PHASE_LABELS[phase] || null
+}
+
+function isActionPhase(phase) {
+  return (
+    phase === 'refresh_report'
+    || phase === 'refresh_pending'
+    || phase === 'request_new_scan'
+    || phase === 'rescan_stale'
+  )
+}
+
 // ── VT Usage & Status panel ───────────────────────────────────────────────────
 
 function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
@@ -1715,9 +1743,18 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
   const queued    = Math.max(0, attempted - completed)
   const pct       = attempted > 0 ? Math.round((completed / attempted) * 100) : 0
   const isRunning = job?.status === 'running' || job?.status === 'queued'
+  const phase = job?.current_phase || null
+  // Only show phase while the job/action is actually active (avoid stale recovered copy)
+  const showActivePhase = !!phase && (isRunning || !!job?.action_in_progress)
+  const phaseCopy = showActivePhase ? phaseLabel(phase) : null
+  const vtPhaseMeaningful = isRunning && phase === 'checking_virustotal'
+  const outsideVtPhase = isRunning && phase && phase !== 'checking_virustotal'
+  const indeterminateProgress = outsideVtPhase || (!!job?.action_in_progress && isActionPhase(phase))
   const isRecoveredPreviousDay = isPreviousUtcQuotaDayJob(job, quotaDateUtc)
   const runSectionLabel = isRecoveredPreviousDay ? 'Recovered job' : 'Current run'
-  const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' ? 'var(--risk-clean)' : 'var(--accent-blue)'
+  const progressColor = job?.status === 'error' ? 'var(--risk-critical)' : job?.status === 'done' && !showActivePhase ? 'var(--risk-clean)' : 'var(--accent-blue)'
+  const statusLine = phaseCopy
+    || (isRunning ? 'Processing…' : job?.status?.toUpperCase())
 
   return (
     <div className="vt-usage-panel">
@@ -1766,19 +1803,36 @@ function VtUsagePanel({ quota, quotaLoading, job, jobId }) {
               <span className="cr-stat-lbl">Queued</span>
             </div>
             <div className="cr-stat" style={{ flex: 1 }}>
-              <span className="cr-stat-val">{pct}<span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-faint)' }}>%</span></span>
-              <span className="cr-stat-lbl">Progress</span>
+              <span className="cr-stat-val">
+                {indeterminateProgress
+                  ? '—'
+                  : <>{pct}<span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-faint)' }}>%</span></>}
+              </span>
+              <span className="cr-stat-lbl">{vtPhaseMeaningful ? 'VT progress' : 'Progress'}</span>
             </div>
           </div>
-          {attempted > 0 && (
+          {(attempted > 0 || showActivePhase) && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-faint)', marginBottom: 3 }}>
-                <span>{isRunning ? 'Processing…' : job?.status?.toUpperCase()}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{completed} / {attempted}</span>
+                <span>{statusLine}</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {indeterminateProgress
+                    ? (vtPhaseMeaningful ? `${completed} / ${attempted}` : 'Working…')
+                    : `${completed} / ${attempted}`}
+                </span>
               </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${pct}%`, background: progressColor }} />
+              <div className={`progress-track${indeterminateProgress ? ' indeterminate' : ''}`}>
+                {indeterminateProgress ? (
+                  <div className="progress-fill progress-indeterminate" style={{ background: progressColor }} />
+                ) : (
+                  <div className="progress-fill" style={{ width: `${pct}%`, background: progressColor }} />
+                )}
               </div>
+              {outsideVtPhase && (
+                <p className="vt-phase-progress-note">
+                  Overall job still running — item % reflects VirusTotal checks only.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -3544,6 +3598,11 @@ export default function App() {
       }
       const actionDone = !data.action_in_progress
       if (actionDone) setActionInProgress(false)
+      // MDI-59: prefer backend phase labels for in-progress action banners
+      if (!actionDone && data.current_phase) {
+        const fromPhase = phaseLabel(data.current_phase)
+        if (fromPhase) setActionMessage(fromPhase)
+      }
       if ((data.status === 'done' || data.status === 'error') && actionDone) {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
         refreshQuota()
@@ -3655,11 +3714,16 @@ export default function App() {
       await startAction(actionModal.action, actionModal.scope, actionModal.positions)
       rowActionPendingRef.current = true
       setActionInProgress(true)
-      setActionMessage(
+      const fallbackPhase = isRefreshPending
+        ? 'refresh_pending'
+        : actionModal.action === 'scan'
+          ? (actionModal.scope === 'stale' ? 'rescan_stale' : 'request_new_scan')
+          : 'refresh_report'
+      setActionMessage(phaseLabel(fallbackPhase) || (
         isRefreshPending
           ? 'Refresh Pending in progress…'
           : `${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`
-      )
+      ))
       setActionModal(null)
       scheduleJobPoll(jobId)
       await pollJob(jobId)

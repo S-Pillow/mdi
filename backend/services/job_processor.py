@@ -141,11 +141,21 @@ async def process_job(
 
     try:
         # MDI-11: enrich all items with RDAP/WHOIS before VT processing
+        job.current_phase = "enriching"
+        job.current_phase_detail = None
         await _enrich_items(job)
+
+        job.current_phase = "checking_virustotal"
         await _run_items(job, usage_file=usage_file)
+
         # MDI-12: live HTTP check for flagged/suspicious items after VT
+        job.current_phase = "checking_live_site"
         await _live_check_items(job)
+
+        # Cloudflare phase is set inside _cloudflare_rank_items only when the pass runs
         await _cloudflare_rank_items(job)
+
+        job.current_phase = "finalizing"
         _apply_hold_impact_guidance(job)
     except Exception as exc:  # noqa: BLE001
         logger.exception("process_job: unexpected error in job %s: %s", job_id, exc)
@@ -154,6 +164,8 @@ async def process_job(
     else:
         job.status = "done"
     finally:
+        job.current_phase = None
+        job.current_phase_detail = None
         job.completed_at = time.time()
         # Order matters: metadata-only usage history first, full recovery snapshot second.
         _write_history(job, history_file=history_file, daily_file=daily_file)
@@ -592,6 +604,10 @@ async def _cloudflare_rank_items(job: job_store.InMemoryJob) -> None:
             job.job_id,
         )
         return
+
+    # MDI-59: only advertise this phase when the Cloudflare pass actually runs
+    job.current_phase = "checking_cloudflare_rank"
+    job.current_phase_detail = None
 
     state = cloudflare_radar.CloudflareJobState()
     domain_cache: Dict[str, cloudflare_radar.CloudflareRankResult] = {}

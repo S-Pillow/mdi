@@ -593,6 +593,8 @@ def _build_job_status_response(job: InMemoryJob) -> JobStatusResponse:
         action_in_progress=job.action_in_progress,
         last_action_type=job.last_action_type,
         last_action_at=job.last_action_at,
+        current_phase=job.current_phase,
+        current_phase_detail=job.current_phase_detail,
         vt_refresh_count=job.vt_refresh_count,
         vt_scan_requested_count=job.vt_scan_requested_count,
         vt_scan_failed_count=job.vt_scan_failed_count,

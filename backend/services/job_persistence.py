@@ -183,20 +183,32 @@ def deserialize_job(data: Dict[str, Any]) -> "job_store.InMemoryJob":  # type: i
 
 def sanitize_terminal_action_state(job: "job_store.InMemoryJob") -> "job_store.InMemoryJob":  # type: ignore[name-defined]
     """
-    Clear stale action_in_progress on terminal recovered jobs (MDI-59A).
+    Clear stale action_in_progress / phase on terminal recovered jobs (MDI-59A/59).
 
     A completed job must not remain UI-blocked because a prior refresh/scan
     persisted action_in_progress=true before the in-memory flag was cleared.
+    Terminal jobs must also never advertise an active progress phase.
     Does not modify queued/running jobs.
     """
-    if job.status in _TERMINAL_JOB_STATUSES and job.action_in_progress:
-        logger.info(
-            "sanitize_terminal_action_state: clearing stale action_in_progress "
-            "for terminal job %s (status=%s)",
-            job.job_id,
-            job.status,
-        )
-        job.action_in_progress = False
+    if job.status in _TERMINAL_JOB_STATUSES:
+        if job.action_in_progress:
+            logger.info(
+                "sanitize_terminal_action_state: clearing stale action_in_progress "
+                "for terminal job %s (status=%s)",
+                job.job_id,
+                job.status,
+            )
+            job.action_in_progress = False
+        if job.current_phase is not None or job.current_phase_detail is not None:
+            logger.info(
+                "sanitize_terminal_action_state: clearing stale current_phase "
+                "for terminal job %s (status=%s, phase=%s)",
+                job.job_id,
+                job.status,
+                job.current_phase,
+            )
+            job.current_phase = None
+            job.current_phase_detail = None
     return job
 
 
