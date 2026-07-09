@@ -35,6 +35,7 @@ from models import (
 from services import job_persistence, job_store, live_check, quota_writer, triage_rules, vt_service
 from services.job_store import InMemoryJob, get_job, get_job_sync, register_recovered_job
 from services.live_check import LiveCheckResult
+from services.pending_analysis import is_pending_refresh_eligible
 from services.quota_writer import QuotaLockTimeout, read_remaining_quota
 from services.vt_service import VtLookupResult
 
@@ -102,6 +103,10 @@ def select_eligible_items(
     Select items eligible for refresh or scan.
 
     action: "refresh" or "scan"
+    scope:
+      - selected: positions list
+      - stale: freshness in {stale, very_stale}
+      - pending: MDI-57A pending-analysis URL rows (refresh only)
     """
     out = EligibilityResult()
 
@@ -114,6 +119,24 @@ def select_eligible_items(
                 out.record_skip("invalid_position")
                 continue
             _evaluate_item(job, result, action, out)
+    elif scope == RefreshScanScope.PENDING:
+        # MDI-57B: Bulk Refresh Pending — refresh action only.
+        if action != "refresh":
+            out.record_skip("pending_scope_refresh_only")
+            return out
+        for normalized in job.item_order:
+            result = job.results.get(normalized)
+            if result is None:
+                continue
+            if not is_pending_refresh_eligible(result):
+                if _is_held(result):
+                    out.record_skip("held")
+                elif not result.input_normalized:
+                    out.record_skip("missing_input")
+                else:
+                    out.record_skip("not_pending")
+                continue
+            out.eligible.append(result)
     else:
         for normalized in job.item_order:
             result = job.results.get(normalized)
@@ -163,6 +186,7 @@ def estimate_action(
     q_min = q_max = 0
     url_scan_eligible_count = 0
     domain_rescan_eligible_count = 0
+    pending_eligible_count = 0
     for item in selection.eligible:
         cmin, cmax = _quota_per_item(action, job, item)
         q_min += cmin
@@ -172,6 +196,8 @@ def estimate_action(
                 domain_rescan_eligible_count += 1
             else:
                 url_scan_eligible_count += 1
+        if request.scope == RefreshScanScope.PENDING and action == "refresh":
+            pending_eligible_count += 1
 
     try:
         remaining = read_remaining_quota()
@@ -190,16 +216,24 @@ def estimate_action(
             message="Shared quota lock unavailable; try again shortly.",
             url_scan_eligible_count=url_scan_eligible_count,
             domain_rescan_eligible_count=domain_rescan_eligible_count,
+            pending_eligible_count=pending_eligible_count,
         )
 
     will_exceed = q_max > remaining
 
     scope_val = request.scope.value if hasattr(request.scope, "value") else str(request.scope)
     if selection.eligible:
-        msg = (
-            f"{action.capitalize()} will process {len(selection.eligible)} item(s); "
-            f"estimated {q_min}–{q_max} VT quota unit(s)."
-        )
+        if request.scope == RefreshScanScope.PENDING and action == "refresh":
+            msg = (
+                f"Refresh Pending will process {len(selection.eligible)} pending URL(s); "
+                f"estimated {q_min}–{q_max} VT quota unit(s) "
+                f"(1 lookup per pending URL)."
+            )
+        else:
+            msg = (
+                f"{action.capitalize()} will process {len(selection.eligible)} item(s); "
+                f"estimated {q_min}–{q_max} VT quota unit(s)."
+            )
         if action == "scan" and (url_scan_eligible_count or domain_rescan_eligible_count):
             parts = []
             if url_scan_eligible_count:
@@ -208,10 +242,19 @@ def estimate_action(
                 parts.append(f"{domain_rescan_eligible_count} domain rescan(s)")
             msg += f" Includes {' and '.join(parts)}."
     else:
-        msg = f"No eligible items for {action}."
+        if request.scope == RefreshScanScope.PENDING:
+            msg = "No pending URL rows eligible for Refresh Pending."
+        else:
+            msg = f"No eligible items for {action}."
 
     if will_exceed:
-        msg += f" Blocked: worst-case estimate ({q_max}) exceeds remaining quota ({remaining})."
+        if request.scope == RefreshScanScope.PENDING and action == "refresh":
+            msg += (
+                f" Insufficient quota. This action needs {q_max} lookups "
+                f"but only {remaining} remain today (UTC)."
+            )
+        else:
+            msg += f" Blocked: worst-case estimate ({q_max}) exceeds remaining quota ({remaining})."
 
     return JobActionEstimateResponse(
         job_id=job.job_id,
@@ -227,6 +270,7 @@ def estimate_action(
         message=msg,
         url_scan_eligible_count=url_scan_eligible_count,
         domain_rescan_eligible_count=domain_rescan_eligible_count,
+        pending_eligible_count=pending_eligible_count,
     )
 
 

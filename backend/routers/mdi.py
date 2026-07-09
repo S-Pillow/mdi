@@ -675,9 +675,10 @@ async def _handle_job_action(
 )
 async def refresh_job(job_id: str, req: JobActionRequest):
     """
-    Refresh existing VT reports for selected or stale rows (GET only).
+    Refresh existing VT reports for selected, stale, or pending-analysis rows (GET only).
 
     Updates the existing job in-place. No new job_id. Uses saved job options.
+    scope=pending (MDI-57B) refreshes all pending-analysis URL rows; no submit.
     """
     return await _handle_job_action(job_id, "refresh", req)
 

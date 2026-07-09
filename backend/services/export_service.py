@@ -28,6 +28,10 @@ from models import (
     VtModeUsed,
 )
 from services.job_store import InMemoryJob
+from services.pending_analysis import (
+    has_completed_vt_scan,
+    is_pending_analysis as _is_pending_analysis,
+)
 from services.vt_gui_url import vt_lookup_target_for_item
 
 CSV_HEADERS: List[str] = [
@@ -183,13 +187,7 @@ def _enum_value(value: Any) -> Any:
 
 def _vt_export_has_scan(result: MdiResultItem) -> bool:
     """True when saved row data includes a completed VT report lookup."""
-    if result.vt_mode_used not in (VtModeUsed.URL_REPORT, VtModeUsed.DOMAIN_REPORT):
-        return False
-    if result.vt_scan_date is not None:
-        return True
-    if (result.vt_total_engines or 0) > 0:
-        return True
-    return False
+    return has_completed_vt_scan(result)
 
 
 def format_checked_as(result: MdiResultItem) -> str:
@@ -209,21 +207,6 @@ def format_checked_as(result: MdiResultItem) -> str:
     ):
         return "not_checked_error"
     return "not_checked_error"
-
-
-def _is_pending_analysis(result: MdiResultItem) -> bool:
-    """
-    MDI-57A: True for a URL submitted to VT whose analysis is not complete.
-    Identified by the vt_scan_pending warning (or PENDING bucket in URL mode)
-    with no completed scan evidence saved on the row.
-    """
-    if _vt_export_has_scan(result):
-        return False
-    if result.vt_mode_used != VtModeUsed.URL_REPORT:
-        return False
-    if any((e.code or "") == "vt_scan_pending" for e in (result.errors or [])):
-        return True
-    return result.triage_bucket == TriageBucket.PENDING
 
 
 def format_export_result(result: MdiResultItem) -> str:

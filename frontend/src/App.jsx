@@ -262,6 +262,11 @@ function isRowHeld(r) {
 function isRowStale(r) {
   return STALE_FRESH_SET.has(r.freshness)
 }
+/** MDI-57A: URL submitted to VT, analysis not complete — no usable engine evidence. */
+function isPendingAnalysis(r) {
+  if ((r?.vt_total_engines ?? 0) > 0 || r?.vt_scan_date) return false
+  return Boolean(r?.errors?.some(e => e?.code === 'vt_scan_pending'))
+}
 function canScanRow(r, job) {
   if (isRowHeld(r) || !r.input_normalized) return false
   return r.input_type === 'url' || r.input_type === 'domain'
@@ -310,6 +315,9 @@ function countStaleScannable(results, job) {
 }
 function countSelectedScannable(results, selectedIds, job) {
   return (results || []).filter(r => selectedIds.has(r.position) && canScanRow(r, job)).length
+}
+function countPendingRefreshable(results) {
+  return (results || []).filter(r => isPendingAnalysis(r) && canRefreshRow(r)).length
 }
 
 function isFlagged(r)       { return FLAGGED_BUCKET_SET.has(r?.triage_bucket) }
@@ -636,6 +644,8 @@ function getVirtualBucketKey(r) {
   if (!r) return 'unknown'
   const bucket = r.triage_bucket
   if (bucket === 'held') return 'held'
+  // MDI-57B: pending-analysis URLs get their own filter, not Unknown / Errors.
+  if (isPendingAnalysis(r)) return 'pending_analysis'
   if (bucket === 'error' || bucket === 'unresolvable' || bucket === 'pending') return 'unknown'
   if (isFlagged(r)) {
     if (isLive(r) && isRecentAge(r)) return 'flr'
@@ -651,14 +661,15 @@ function getVirtualBucketKey(r) {
 
 const PRIORITY_RANK = {
   held:    1,
-  unknown: 2,
-  flr:     3,
-  fl:      4,
-  fr:      5,
-  fs:      6,
-  fnl:     7,
-  flagged: 8,
-  clean:   9,
+  pending_analysis: 2,
+  unknown: 3,
+  flr:     4,
+  fl:      5,
+  fr:      6,
+  fs:      7,
+  fnl:     8,
+  flagged: 9,
+  clean:   10,
 }
 const CONF_RANK = { high: 1, medium: 2, low: 3, clean: 4, unknown: 5 }
 
@@ -677,13 +688,14 @@ function comparePriority(a, b) {
 const FILTER_PREDICATES = {
   all:     () => true,
   held:    r => r?.triage_bucket === 'held',
+  pending_analysis: r => isPendingAnalysis(r),
   flr:     r => isFlagged(r) && isLive(r) && isRecentAge(r),
   fl:      r => isFlagged(r) && isLive(r),
   fr:      r => isFlagged(r) && isRecentAge(r),
   fs:      r => isFlagged(r) && isStaleFreshness(r),
   fnl:     r => isFlagged(r) && isNoLive(r),
   flagged: r => isFlagged(r),
-  unknown: r => ['error','unresolvable','pending'].includes(r?.triage_bucket),
+  unknown: r => ['error','unresolvable','pending'].includes(r?.triage_bucket) && !isPendingAnalysis(r),
   clean:   r => r?.triage_bucket === 'clean',
 }
 
@@ -696,7 +708,10 @@ function getFilterCount(results, filterKey) {
 }
 
 function getTriageCardCounts(results) {
-  const counts = { flr: 0, fl: 0, fr: 0, fs: 0, fnl: 0, flagged: 0, unknown: 0, clean: 0, held: 0 }
+  const counts = {
+    flr: 0, fl: 0, fr: 0, fs: 0, fnl: 0, flagged: 0,
+    pending_analysis: 0, unknown: 0, clean: 0, held: 0,
+  }
   for (const r of results) {
     const k = getVirtualBucketKey(r)
     if (k in counts) counts[k]++
@@ -739,11 +754,6 @@ function formatCalculatedAge(createdAt, now = new Date()) {
   const months = totalMonths % 12
   return months > 0 ? `${years}y ${months}m` : `${years}y`
 }
-/** MDI-57A: URL submitted to VT, analysis not complete — no usable engine evidence. */
-function isPendingAnalysis(r) {
-  if ((r?.vt_total_engines ?? 0) > 0 || r?.vt_scan_date) return false
-  return Boolean(r?.errors?.some(e => e?.code === 'vt_scan_pending'))
-}
 function formatVtRatio(r) {
   if (isPendingAnalysis(r)) return 'Pending'
   if (r?.vt_ratio) return r.vt_ratio
@@ -777,7 +787,8 @@ function bucketBadgeClass(bucket) {
 }
 function virtualBucketBadgeClass(key) {
   return { flr: 'badge-flr', fl: 'badge-fl', fr: 'badge-fr', fs: 'badge-fs', fnl: 'badge-fnl',
-    flagged: 'badge-malicious', clean: 'badge-clean', held: 'badge-held', unknown: 'badge-error' }[key] ?? 'badge-unresolvable'
+    flagged: 'badge-malicious', clean: 'badge-clean', held: 'badge-held',
+    pending_analysis: 'badge-pending', unknown: 'badge-error' }[key] ?? 'badge-unresolvable'
 }
 function liveBadgeClass(val) {
   if (LIVE_ACTIVE_SET.has(val)) return 'badge-live'
@@ -814,6 +825,7 @@ function triageColor(bucket) {
 const TRIAGE_CARDS = [
   { key: 'all',     label: 'All',                     color: 'var(--c-all)', filter: 'all' },
   { key: 'held',    label: 'Domain On Hold',          color: 'var(--c-held)', filter: 'held' },
+  { key: 'pending_analysis', label: 'Pending Analysis', color: 'var(--c-unk)', filter: 'pending_analysis' },
   { key: 'flr',     label: 'Flagged + Live + Recent', color: 'var(--c-flr)', filter: 'flr' },
   { key: 'fl',      label: 'Flagged + Live',          color: 'var(--c-fl)',  filter: 'fl'  },
   { key: 'fr',      label: 'Flagged + Recent',        color: 'var(--c-fr)',  filter: 'fr'  },
@@ -2098,21 +2110,38 @@ function TriageSummaryCards({ results, activeFilter, onFilterChange }) {
 
 // ── Action confirmation modal ─────────────────────────────────────────────────
 
-function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confirming }) {
+function ActionConfirmModal({ open, estimate, action, scope, onConfirm, onCancel, confirming }) {
   if (!open || !estimate) return null
   const isScan = action === 'scan'
+  const isRefreshPending = action === 'refresh' && scope === 'pending'
   const blocked = estimate.will_exceed_quota
   const skipSummary = estimate.skipped_reasons_summary
     ? Object.entries(estimate.skipped_reasons_summary).map(([k, v]) => `${k}: ${v}`).join(', ')
     : null
+  const n = estimate.eligible_count ?? 0
+  const remaining = estimate.quota_remaining ?? 0
+  const need = estimate.estimated_quota_max ?? n
+
+  let title = isScan ? 'Request New Scan' : 'Refresh VT Report'
+  if (isRefreshPending) title = 'Refresh Pending VT Analysis'
 
   return (
     <div className="action-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="action-modal-title">
       <div className="action-modal">
-        <h3 id="action-modal-title" className="action-modal-title">
-          {isScan ? 'Request New Scan' : 'Refresh VT Report'}
-        </h3>
-        <p className="action-modal-msg">{estimate.message}</p>
+        <h3 id="action-modal-title" className="action-modal-title">{title}</h3>
+        {isRefreshPending ? (
+          <div className="action-modal-msg">
+            <p>Refresh Pending checks whether VirusTotal has completed analysis for submitted URLs.</p>
+            <p>
+              This costs <strong>1 VT lookup per pending URL</strong>
+              {n > 0 ? ` (${n} URL${n === 1 ? '' : 's'} → up to ${n} lookup${n === 1 ? '' : 's'})` : ''}.
+            </p>
+            <p>Rows that are still not ready will remain <strong>Pending VT analysis</strong>.</p>
+            <p>This does <strong>not</strong> submit a new scan.</p>
+          </div>
+        ) : (
+          <p className="action-modal-msg">{estimate.message}</p>
+        )}
         <div className="action-modal-stats">
           <div><span>Eligible</span><strong>{estimate.eligible_count}</strong></div>
           <div><span>Skipped</span><strong>{estimate.skipped_count}</strong></div>
@@ -2130,7 +2159,11 @@ function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confi
           </p>
         )}
         {blocked && (
-          <p className="action-modal-warn">⛔ Insufficient quota for worst-case estimate. Action blocked.</p>
+          <p className="action-modal-warn">
+            {isRefreshPending
+              ? `Insufficient quota. This action needs ${need} lookups but only ${remaining} remain today (UTC).`
+              : '⛔ Insufficient quota for worst-case estimate. Action blocked.'}
+          </p>
         )}
         <div className="action-modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={confirming}>Cancel</button>
@@ -2150,7 +2183,7 @@ function ActionConfirmModal({ open, estimate, action, onConfirm, onCancel, confi
               onClick={onConfirm}
               disabled={confirming || blocked || estimate.eligible_count === 0}
             >
-              {confirming ? 'Starting…' : 'Confirm refresh'}
+              {confirming ? 'Starting…' : (isRefreshPending ? 'Confirm Refresh Pending' : 'Confirm refresh')}
             </button>
           )}
         </div>
@@ -2358,7 +2391,9 @@ function BulkControls({
   canExportSelected,
   canRescanSelected,
   canRescanStale,
+  canRefreshPending,
   staleCount,
+  pendingCount,
   actionInProgress,
   exportFormat,
   onExportFormatChange,
@@ -2367,8 +2402,14 @@ function BulkControls({
   onExportSelected,
   onRescanSelected,
   onRescanStale,
+  onRefreshPending,
 }) {
   const formatLabel = exportFormat === 'xlsx' ? 'XLSX' : 'CSV'
+  const refreshPendingTitle = actionInProgress
+    ? 'A refresh/scan action is already in progress'
+    : (canRefreshPending
+      ? `Refresh Pending — check whether VirusTotal has completed analysis for ${pendingCount} submitted URL(s) (1 VT lookup each)`
+      : 'No pending URL rows')
   return (
     <div className="bulk-controls">
       <span className="bulk-label">Bulk actions:</span>
@@ -2408,6 +2449,14 @@ function BulkControls({
         onClick={onExportSelected}
       >
         <IconUpload /> Export Selected
+      </button>
+      <button
+        className={canRefreshPending && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
+        disabled={!canRefreshPending || actionInProgress}
+        title={refreshPendingTitle}
+        onClick={onRefreshPending}
+      >
+        <IconRefresh /> Refresh Pending{pendingCount > 0 ? ` (${pendingCount})` : ''}
       </button>
       <button
         className={canRescanSelected && !actionInProgress ? 'btn btn-ghost btn-action-active' : 'btn-stub'}
@@ -2691,7 +2740,7 @@ function TriageWorkspace({
   selectedItem, onSelectItem,
   actionInProgress, actionMessage, exportMessage,
   exportFormat, onExportFormatChange,
-  onRescanSelected, onRescanStale,
+  onRescanSelected, onRescanStale, onRefreshPending,
   onExportAll, onExportFlagged, onExportSelected,
   onExportEvidence, onRefreshRow, onScanRow,
   onCloseDashboard,
@@ -2752,8 +2801,10 @@ function TriageWorkspace({
   const showCounters = lcc > 0 || lcsk > 0 || lce > 0 || rdap > 0
   const staleScannable = countStaleScannable(allResults, job)
   const selectedScannable = countSelectedScannable(allResults, selectedIds, job)
+  const pendingRefreshable = countPendingRefreshable(allResults)
   const canRescanSelected = isComplete && !actionInProgress && selectedScannable > 0
   const canRescanStale = isComplete && !actionInProgress && staleScannable > 0
+  const canRefreshPending = isComplete && !actionInProgress && pendingRefreshable > 0
   const flaggedCount = allResults.filter(isExportFlagged).length
   const canExportAll = isComplete && !actionInProgress && allResults.length > 0
   const canExportFlagged = isComplete && !actionInProgress && flaggedCount > 0
@@ -2810,7 +2861,9 @@ function TriageWorkspace({
           canExportSelected={canExportSelected}
           canRescanSelected={canRescanSelected}
           canRescanStale={canRescanStale}
+          canRefreshPending={canRefreshPending}
           staleCount={staleScannable}
+          pendingCount={pendingRefreshable}
           actionInProgress={actionInProgress}
           exportFormat={exportFormat}
           onExportFormatChange={onExportFormatChange}
@@ -2819,6 +2872,7 @@ function TriageWorkspace({
           onExportSelected={() => onExportSelected && onExportSelected([...selectedIds])}
           onRescanSelected={() => onRescanSelected && onRescanSelected([...selectedIds])}
           onRescanStale={() => onRescanStale && onRescanStale()}
+          onRefreshPending={() => onRefreshPending && onRefreshPending()}
         />
       )}
 
@@ -3299,6 +3353,8 @@ export default function App() {
   const pollRef = useRef(null)
   const pollJobRef = useRef(null)
   const rowActionPendingRef = useRef(false)
+  // MDI-57B: snapshot pending positions before Bulk Refresh Pending for completion summary.
+  const pendingRefreshBaselineRef = useRef(null)
 
   const [actionInProgress, setActionInProgress] = useState(false)
   const [actionMessage, setActionMessage]     = useState(null)
@@ -3493,7 +3549,40 @@ export default function App() {
         refreshQuota()
         if (rowActionPendingRef.current) {
           rowActionPendingRef.current = false
-          setActionMessage('VT action completed. Results updated.')
+          const baseline = pendingRefreshBaselineRef.current
+          pendingRefreshBaselineRef.current = null
+          if (baseline && Array.isArray(baseline.positions)) {
+            const results = data.results || []
+            const byPos = new Map(results.map(r => [r.position, r]))
+            let completed = 0
+            let stillPending = 0
+            let failed = 0
+            for (const pos of baseline.positions) {
+              const row = byPos.get(pos)
+              if (!row) {
+                failed += 1
+                continue
+              }
+              if (isPendingAnalysis(row)) {
+                stillPending += 1
+              } else if ((row.errors || []).some(e => {
+                const code = e?.code || ''
+                return code && code !== 'vt_scan_pending' && (
+                  e?.severity === 'error' || code.startsWith('vt_') || code === 'no_api_key' || code === 'auth_error'
+                )
+              }) && !(row.vt_total_engines > 0) && !row.vt_scan_date) {
+                failed += 1
+              } else {
+                completed += 1
+              }
+            }
+            const n = baseline.positions.length
+            setActionMessage(
+              `Refresh Pending complete — ${completed} of ${n} URLs now have completed VT reports; ${stillPending} still pending; ${failed} failed.`
+            )
+          } else {
+            setActionMessage('VT action completed. Results updated.')
+          }
         }
       }
     } catch (_) { /* ignore poll errors */ }
@@ -3554,15 +3643,29 @@ export default function App() {
     if (!actionModal) return
     setActionConfirming(true)
     try {
+      const isRefreshPending = actionModal.action === 'refresh' && actionModal.scope === 'pending'
+      if (isRefreshPending) {
+        const pendingRows = (job?.results || []).filter(r => isPendingAnalysis(r) && canRefreshRow(r))
+        pendingRefreshBaselineRef.current = {
+          positions: pendingRows.map(r => r.position),
+        }
+      } else {
+        pendingRefreshBaselineRef.current = null
+      }
       await startAction(actionModal.action, actionModal.scope, actionModal.positions)
       rowActionPendingRef.current = true
       setActionInProgress(true)
-      setActionMessage(`${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`)
+      setActionMessage(
+        isRefreshPending
+          ? 'Refresh Pending in progress…'
+          : `${actionModal.action === 'scan' ? 'Scan' : 'Refresh'} in progress…`
+      )
       setActionModal(null)
       scheduleJobPoll(jobId)
       await pollJob(jobId)
     } catch (err) {
       rowActionPendingRef.current = false
+      pendingRefreshBaselineRef.current = null
       setActionMessage(`Action failed: ${err.message}`)
     } finally {
       setActionConfirming(false)
@@ -3575,6 +3678,10 @@ export default function App() {
 
   function handleRescanStale() {
     openActionModal('scan', 'stale', null)
+  }
+
+  function handleRefreshPending() {
+    openActionModal('refresh', 'pending', null)
   }
 
   function handleDrawerRefresh(row) {
@@ -3875,6 +3982,7 @@ export default function App() {
               onExportFormatChange={setBulkExportFormat}
               onRescanSelected={handleRescanSelected}
               onRescanStale={handleRescanStale}
+              onRefreshPending={handleRefreshPending}
               onExportAll={handleExportAll}
               onExportFlagged={handleExportFlagged}
               onExportSelected={handleExportSelected}
@@ -3892,6 +4000,7 @@ export default function App() {
             open={!!actionModal}
             estimate={actionModal?.estimate}
             action={actionModal?.action}
+            scope={actionModal?.scope}
             onConfirm={confirmActionModal}
             onCancel={() => setActionModal(null)}
             confirming={actionConfirming}
