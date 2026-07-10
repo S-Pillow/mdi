@@ -43,9 +43,45 @@ Taste-only changes without supporting evidence belong in backlog.
 
 | Component | Production state | Notes |
 |---|---|---|
-| Frontend | MDI-59B: `2e49592b6d655cc094b5a91ba024947ebe66635e` | Static bundle: `index-DKlAU_IN.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | MDI-65: `2a44e4f9e3ff09fd90bab964213ae8f747a604e5` | `/opt/mdi/backend`; server-side action completion summaries (`last_action_summary`); unchanged by MDI-59B frontend-only deploy |
+| Frontend | MDI-67: `a761e1406f52290af6a6f6a8108024ff3427b32d` | Static bundle: `index-C-IhR_fD.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
+| MDI backend | MDI-65: `2a44e4f9e3ff09fd90bab964213ae8f747a604e5` | `/opt/mdi/backend`; server-side action completion summaries (`last_action_summary`); unchanged by MDI-67 frontend-only deploy |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-67 (2026-07-09T23:53:35 UTC) deployed **frontend-only** from `main` @
+`a761e1406f52290af6a6f6a8108024ff3427b32d` on host `srv766238`
+(`https://forgeforward.app/tools/mdi/`). Pre-deploy: `npm run test -- --run`
+**50 passed** (2 files); frontend built and rsynced (`rsync -a --delete`) to
+`/var/www/html/tools/mdi/`; old bundle `index-DKlAU_IN.js` **removed**; new
+bundles `index-C-IhR_fD.js` / `index-YEpmU4YE.css`; backend **unchanged** at
+`2a44e4f` (MDI-65); `mdi-backend.service` **not** restarted; nginx **active**,
+**not** reloaded; VT Bulk Check **untouched**. Backup:
+`/root/backups/mdi-67-pre-deploy-frontend-20260709T235325Z/`. Previous frontend
+`index-DKlAU_IN.js` / `index-YEpmU4YE.css`.
+
+Implementation/merge: branch `feature/mdi-67-frontend-ux-tests`; commit
+`a761e1406f52290af6a6f6a8108024ff3427b32d` (`add frontend ux regression
+tests`); previous `main` before merge
+`8af60084cc17d723ed9be44901624513673e3191`; fast-forward merge; files changed:
+`frontend/src/mdiDisplay.js`, `frontend/src/mdiDisplay.test.js`,
+`frontend/src/ResultsJobContextBar.jsx`, `frontend/src/ResultsJobContextBar.test.jsx`,
+`frontend/src/App.jsx`, `frontend/package.json`, `frontend/package-lock.json`,
+`frontend/vite.config.js` only; no backend, runtime, quota, docs, CI,
+nginx/systemd, secrets, or dist artifacts in merge; `main`/`origin` include
+MDI-67. Merge verification: `npm run test -- --run` **50 passed**; `npm run
+build` succeeded (`index-C-IhR_fD.js` — 258.29 kB, `index-YEpmU4YE.css` —
+46.08 kB); backend tests skipped (no backend files changed); dist not committed.
+
+MDI-67 adds automated frontend UX regression tests for manually smoke-tested
+MDI-59, MDI-59B, MDI-65, and MDI-66 display behavior. Vitest/jsdom/React
+Testing Library infrastructure; pure helper module `frontend/src/mdiDisplay.js`;
+47 helper unit tests; `ResultsJobContextBar` split to
+`frontend/src/ResultsJobContextBar.jsx` with 3 RTL tests; **50 tests** total
+across 2 files covering phase labels, action phase detection, VT Usage status
+line / `Working…` rule, MDI-65 action summary formatter, MDI-66 recovered
+summary gating and `Last action:` message, initial loading strip copy, and
+recovered banner DOM rendering. Production behavior unchanged; no Playwright; no
+CI workflow; no backend/API/runtime/quota changes. Browser/static smoke
+**accepted** (2026-07-09) — see below.
 
 MDI-59B (2026-07-09T14:42:39 UTC) deployed **frontend-only** from `main` @
 `2e49592b6d655cc094b5a91ba024947ebe66635e` on host `srv766238`
@@ -360,6 +396,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-65 | Server-side action completion counters (`last_action_summary`) — **merged, full-stack deployed, live smoke-accepted, closed** |
 | MDI-66 | Cold-recovery last action summary UX — **merged, frontend-deployed, browser/static smoke-accepted, closed** |
 | MDI-59B | Progress phase label refinement — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live selected refresh/rescan smoke) |
+| MDI-67 | Automated frontend UX regression tests — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live action smoke) |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -380,6 +417,8 @@ MDI-65 commit on `main`: `2a44e4f` (add server action completion summary).
 MDI-66 commit on `main`: `2b699be` (show recovered last action summary).
 
 MDI-59B commit on `main`: `2e49592` (refine progress phase labels).
+
+MDI-67 commit on `main`: `a761e14` (add frontend ux regression tests).
 
 ### MDI export contract series (MDI-54)
 
@@ -493,6 +532,7 @@ MDI currently supports:
 - Cold-recovery last action summary (MDI-66): recovered terminal jobs with completed `last_action_summary` show `Last action: …` in recovery banner (`↩ Recovered previous job` preserved); uses MDI-65 formatter; does not imply new quota use or action on reload; in-session action summary and client fallback unchanged
 - Pending Analysis filter card (MDI-57B)
 - Phase-aware progress UX (MDI-59; label refinement MDI-59B): backend `current_phase` / `current_phase_detail` on job status; phase labels for enrichment, VT, live-check, Cloudflare rank, finalization, and manual actions; honest indeterminate progress outside VT item-check phase; recovered terminal jobs do not show active phase; MDI-59B frontend-only copy refinements — `refresh_report` default `Refreshing report…`; selected-scope refresh `Refreshing selected report(s)…`; selected-scope rescan `Rescan Selected in progress…`; during manual actions VT Usage panel shows `Working…` (action banner remains primary phase surface); initial-job loading strip shows phase-aware copy such as `Checking VirusTotal…`; MDI-65/66 summaries unchanged; backend phase tokens unchanged
+- Automated frontend UX regression tests (MDI-67): Vitest/jsdom/React Testing Library; `frontend/src/mdiDisplay.js` pure helpers; 50 tests across `mdiDisplay.test.js` (47) and `ResultsJobContextBar.test.jsx` (3); covers MDI-59/59B phase labels and `Working…` rule, MDI-65 action summary formatter, MDI-66 recovered summary gating and banner DOM; run via `npm run test -- --run`; no Playwright; no CI wiring in v1
 - bulk actions
 - CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
@@ -523,7 +563,8 @@ stabilization evidence.
 ### Frontend Build History
 
 `npm run build` passed during the relevant frontend tickets including MDI-30B,
-MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
+MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38. MDI-67 adds `npm run test -- --run`
+(Vitest); **50 tests passed** at merge and deploy verification.
 
 ### Production Smoke History
 
@@ -568,6 +609,46 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38.
 | MDI-65 Server-side action completion counters (`last_action_summary`) | Accepted — full-stack deployed, **live smoke accepted** (selected Refresh Report, 2 rows, +2 VT lookups) |
 | MDI-66 Cold-recovery last action summary UX | Accepted — frontend-deployed, **browser/static smoke accepted** (recovered job shows last-action line) |
 | MDI-59B Progress phase label refinement | Accepted — frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved; no live action smoke) |
+| MDI-67 Automated frontend UX regression tests | Accepted — merged, frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved on current latest job; no live action smoke) |
+
+**MDI-67 frontend-only deploy and browser/static smoke acceptance (2026-07-09):**
+
+Frontend-only deploy on `srv766238` at `2026-07-09T23:53:35Z`: frontend
+`a761e14` → `/var/www/html/tools/mdi/` (from `index-DKlAU_IN.js` /
+`index-YEpmU4YE.css`); new bundles `index-C-IhR_fD.js` /
+`index-YEpmU4YE.css`; backend **unchanged** at `2a44e4f` (MDI-65);
+`mdi-backend.service` **not** restarted; nginx **active**, **not** reloaded;
+VT Bulk Check **untouched**. Backup:
+`/root/backups/mdi-67-pre-deploy-frontend-20260709T235325Z/`. Rollback:
+`rsync -a --delete /root/backups/mdi-67-pre-deploy-frontend-20260709T235325Z/ /var/www/html/tools/mdi/`.
+
+Pre-deploy verification: `npm run test -- --run` **50 passed** (2 files);
+frontend build succeeded (`index-C-IhR_fD.js` — 258.29 kB,
+`index-YEpmU4YE.css` — 46.08 kB); `rsync` exit code 0; dist not committed;
+`/api/mdi/version` → backend `2a44e4f`; usage **23 used / 477 remaining**;
+latest job `2fb89721-1eeb-42ab-bf3d-fd91891ddee1`, `status=done`,
+`action_in_progress=false`, `current_phase=null`; runtime/quota files unchanged
+during deploy.
+
+**MDI-67 browser/static smoke acceptance (2026-07-09):**
+
+GET/static only — no POST, no VT quota. Loaded
+`https://forgeforward.app/tools/mdi/?_deploy=mdi67&v=a761e14`; MDI-67 JS bundle
+`index-C-IhR_fD.js` confirmed. Job `2fb89721-1eeb-42ab-bf3d-fd91891ddee1`
+recovered (current latest; prior smoke job `181b4d9e-…` no longer latest).
+Recovery banner: `↩ Recovered previous job`. MDI-66 last-action line preserved:
+`Last action: Refresh complete — 1 completed.` Rows visible:
+`https://www.lotteryusa.com/kentucky/powerball/year`,
+`https://www.steven-pillow.com/`. API calls observed: GET `/api/mdi/usage`,
+GET `/api/mdi/jobs/latest` only. No action started. No live selected refresh or
+rescan performed.
+
+Post-deploy: `/tools/mdi/` → 200, references `index-C-IhR_fD.js` /
+`index-YEpmU4YE.css`; old JS `index-DKlAU_IN.js` references 0; usage unchanged
+**23/477** (`mutated=false`); VT quota consumed **0**; runtime metadata
+unchanged (`mdi_latest_job.json` 7427, `vt_usage.json` 52,
+`vt_usage_history.jsonl` 69494, `vt_daily_history.json` 4290,
+`vt_usage.lock` 0).
 
 **MDI-59B frontend-only deploy and browser/static smoke acceptance (2026-07-09):**
 
@@ -1514,6 +1595,11 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Duplicate phase text in VT Usage panel during manual actions | **Resolved by MDI-59B (2026-07-09)** — panel shows `Working…`; action banner remains primary phase surface |
 | Generic `refresh_report` label for stale scope (if used) | Acceptable — remains `Refreshing report…`; MDI-59B selected-scope refinements apply to selected refresh/rescan only |
 | Live selected-refresh/rescan phase banner copy (MDI-59B) | Source-verified only — not production-action-smoked in MDI-59B deploy |
+| No automated frontend tests for MDI-59/59B/65/66 display behavior | **Resolved by MDI-67 (2026-07-09)** — 50 Vitest tests in `mdiDisplay.test.js` and `ResultsJobContextBar.test.jsx`; no CI wiring in v1 |
+| No full `pollJob` / `pendingActionContextRef` integration test | Acceptable — MDI-67 v1 covers pure display helpers only |
+| No full `VtUsagePanel` / `TriageWorkspace` component tests | Acceptable — MDI-67 v1; status line and loading strip covered via helpers |
+| No Playwright/E2E frontend automation | Future backlog — not started |
+| No CI workflow for frontend tests | Future backlog — not started |
 | Progress phase (`current_phase`) is ephemeral — may be lost on backend restart or page reload mid-job/action | Acceptable — consistent with existing in-flight job behavior |
 | No per-row progress, ETA, or server completion counters in MDI-59 | **Resolved by MDI-65 (2026-07-09)** — server-side `last_action_summary` at action completion; no per-row progress/ETA in v1 |
 | Manual Request New Scan completedness on incomplete VT URL poll responses | **Resolved by MDI-62 (2026-07-09)** — URL scan polling applies MDI-57A completed-report gate; incomplete objects are pending/partial, not clean or `0/0` |
@@ -1604,17 +1690,21 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-65 | Server-side action completion counters (`last_action_summary`) | **Closed** — merged, full-stack deployed, live smoke-accepted (2026-07-09) |
 | MDI-66 | Cold-recovery last action summary UX | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09) |
 | MDI-59B | Progress phase label refinement | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
+| MDI-67 | Automated frontend UX regression tests | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 
-Production backend is at MDI-65 `2a44e4f`; production frontend is MDI-59B
-`index-DKlAU_IN.js` / `index-YEpmU4YE.css`. MDI-59B carryforward: no backend
-phase token changes; no per-row progress; no `current_phase_detail`;
+Production backend is at MDI-65 `2a44e4f`; production frontend is MDI-67
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-67 carryforward: no full
+`pollJob` / `pendingActionContextRef` integration test; no full `VtUsagePanel` or
+`TriageWorkspace` component tests; no Playwright/E2E; no CI wiring; no
+production-action smoke for selected refresh/rescan banners; `Working…` applies
+only when `current_phase` is an action phase token; cached browsers may require
+hard refresh (JS bundle hash changed). MDI-59B carryforward: no backend phase
+token changes; no per-row progress; no `current_phase_detail`;
 `refresh_report` for stale scope (if used) remains generic `Refreshing report…`;
-phases remain ephemeral on mid-action reload; no automated frontend tests; live
-selected-refresh/rescan banner behavior source-verified only, not
-production-action-smoked. MDI-66 carryforward: no interrupted/in-progress
-summaries; no automatic resume; no new backend schema; no automated frontend
-tests; cached browsers may require hard refresh (JS bundle hash changed). MDI-65
-carryforward:
+phases remain ephemeral on mid-action reload; live selected-refresh/rescan banner
+behavior source-verified only, not production-action-smoked. MDI-66
+carryforward: no interrupted/in-progress summaries; no automatic resume; no new
+backend schema; cached browsers may require hard refresh. MDI-65 carryforward:
 no `items_not_changed` or position lists; dashboard unchanged; client fallback
 when `last_action_summary` absent; `summary_items_completed` = completed VT
 evidence; legacy history `items_completed` = processed rows. MDI-64
@@ -1632,7 +1722,7 @@ MDI-65; prior MDI-57B/63 acceptances remain valid.
 - ~~Surface dashboard quota trends if still desired.~~ Addressed by VTFIX-02G.
 - Add searchable historical job/domain history if approved.
 - Add additional export scopes if needed.
-- Add more complete automated frontend tests if the project expands.
+- ~~Add more complete automated frontend tests if the project expands.~~ Partially addressed by MDI-67 (2026-07-09) — 50 Vitest tests for MDI-59/59B/65/66 display scope; CI/E2E/full-component coverage remain backlog.
 - Smoke failed/error job UI when a safe fixture/state is available.
 
 ## 12. Change Control
