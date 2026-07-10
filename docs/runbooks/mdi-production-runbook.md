@@ -47,8 +47,9 @@ sudo journalctl -u dns-tool-backend.service -n 100 --no-pager
 
 ### Rollback reminder
 
-- Frontend: restore from `mdi.bak-*` directory
-- Backend: restore systemd unit + rsync previous code to `/opt/mdi`
+- Frontend: restore from `mdi.bak-*` directory or `/root/backups/mdi-*-pre-deploy-frontend-*`
+- Backend: restore from `/opt/mdi/backups/*` or `/root/backups/mdi-*-pre-deploy-backend-*`
+- See §11 for rollback commands and §19 for backup inventory and pruning guidance
 - Coordinated quota-lock rollback: **both** MDI and VT Bulk services
 - **Do not edit** runtime file contents during rollback
 
@@ -88,6 +89,9 @@ Both MDI and VT Bulk Check share the **500/day** VirusTotal quota.
 | `/opt/mdi/backend` | **Production MDI backend** (systemd `WorkingDirectory`) |
 | `/root/mdi` | Dev/operator git clone — **not** the runtime service path |
 | `/var/www/html/tools/mdi/` | Deployed MDI frontend (static `dist/`) |
+| `/root/backups/mdi-*` | Ticket-scoped pre-deploy backups (frontend/backend; see §19) |
+| `/opt/mdi/backups/` | Older MDI and VTFIX deploy backups (backend trees; see §19) |
+| `/var/www/html/tools/mdi.bak-*` | Legacy/co-located frontend snapshots from §9 deploy pattern |
 | `/var/www/dns-tool/backend` | VT Bulk Check backend |
 | `/var/lib/dns-tool/` | Shared runtime directory |
 | `/etc/dns-tool/secrets.env` | API keys and env (never commit, never cat) |
@@ -596,3 +600,189 @@ code-level table and test matrix. Quick admin/operator cues:
 - ☐ Restart affected service(s)
 - ☐ Re-run smoke
 - ☐ Do not edit runtime contents
+
+---
+
+## 19. Backup inventory and manual pruning (MDI-68)
+
+**Purpose:** MDI deployment backups are rollback artifacts created before backend
+and frontend deploys. They support fast rollback and production recovery. Many
+timestamped backups accumulate during stabilization work. This section documents
+how to **inventory, review, classify, and manually prune** old backups safely.
+
+**MDI-68 scope:** documentation only. This runbook does **not** authorize
+automatic deletion, cron cleanup, or wildcard `rm` commands.
+
+### 19.1 Observed backup locations (metadata inventory)
+
+Use metadata-only listing (§19.5). Do **not** print backup file contents or read
+secrets.
+
+| Location | Typical content | Naming pattern |
+|---|---|---|
+| `/root/backups/mdi-*` | Ticket-scoped pre-deploy backups from recent AIPF deploys | `mdi-<ticket>-pre-deploy-frontend-YYYYMMDDTHHMMSSZ`, `mdi-<ticket>-pre-deploy-backend-YYYYMMDDTHHMMSSZ` |
+| `/opt/mdi/backups/` | Older full/partial backend trees; VTFIX deploy snapshots | `mdi54b-YYYYMMDD-HHMMSS`, `mdi59a-YYYYMMDD-HHMMSS`, `vtfix-02*-YYYYMMDD-HHMMSS` |
+| `/var/www/html/tools/mdi.bak-*` | Co-located frontend static snapshots (§9 legacy pattern) | `mdi.bak-YYYYMMDD-HHMMSS` or `mdi.bak-YYYYMMDDTHHMMSSZ` |
+
+**Inventory snapshot (2026-07-09, paths and sizes only):**
+
+| Surface | Count (approx.) | Notes |
+|---|---|---|
+| `/root/backups/mdi-*` | 14 directories | ~36K–316K each; latest frontend `mdi-67-pre-deploy-frontend-20260709T235325Z` |
+| `/opt/mdi/backups/*` | 12+ top-level trees | Mix of small VTFIX snapshots (~50–200K) and large legacy backend trees (~68–147M each) |
+| `/var/www/html/tools/mdi.bak-*` | 50 directories | ~14M total combined |
+
+Other hosts or paths may exist. If a path is absent, record it as absent and do
+not assume parity across environments.
+
+**Related but out of MDI deploy scope:** `/var/lib/dns-tool/backups/*` holds
+runtime-file backups (e.g. VTFIX-02H). Treat separately; do not conflate with MDI
+code/frontend deploy backups without explicit approval.
+
+### 19.2 What must never be deleted without explicit approval
+
+Do **not** delete any backup when any of the following apply:
+
+- It is the **latest known-good** backup for a deploy surface (§19.3)
+- It is referenced in the **latest accepted deployment report** or
+  [release-readiness handoff](../release-readiness-handoff.md) rollback instructions
+- It is needed for an **open rollback window** after a deploy
+- It is tied to a **not-yet-closed ticket**, failed deploy, partial rollback, or incident
+- Its purpose is **unclear** — classify first; do not delete
+- It is the only backup for a surface still in production use
+- Runtime/config backups may be required for quota or recovery investigations
+
+When uncertain, **retain** the backup.
+
+### 19.3 Latest known-good rule
+
+> **Never delete the latest known-good backup for each deploy surface:** frontend
+> static assets, backend application files, and any runtime/config backup if one
+> exists for that investigation.
+
+**Latest known-good** means one of:
+
+1. The backup immediately preceding the **currently accepted production version**, or
+2. The backup **explicitly named** in the latest accepted deployment report / handoff, or
+3. If uncertain, the **newest backup in that surface** until verified by an operator.
+
+**Current production reference (2026-07-09):**
+
+| Surface | Production state | Latest documented rollback backup |
+|---|---|---|
+| Frontend | `index-C-IhR_fD.js` / `index-YEpmU4YE.css` (MDI-67) | `/root/backups/mdi-67-pre-deploy-frontend-20260709T235325Z/` |
+| Backend | `2a44e4f` (MDI-65) | No single `/root/backups` entry after MDI-64; use `/opt/mdi/backups/` or ticket-specific path from handoff |
+
+Always re-check [release-readiness handoff](../release-readiness-handoff.md) before
+pruning — it records per-ticket backup paths and rollback `rsync` commands.
+
+### 19.4 Conservative manual retention baseline
+
+**Keep at minimum:**
+
+- Latest known-good frontend backup (§19.3)
+- Latest known-good backend backup (§19.3)
+- Last **3** frontend deploy backups per surface (`/root/backups` and/or `mdi.bak-*`)
+- Last **3** backend deploy backups per surface (`/root/backups` and/or `/opt/mdi/backups`)
+- All backups from the **last 30 days**
+- All backups tied to **open**, **failed**, or **partially rolled-back** tickets
+- All backups referenced in current release-readiness handoff or operator docs
+
+**Candidate for review** (not automatic deletion):
+
+- Older than 30 days
+- Not latest known-good
+- Not among last 3 per surface
+- Not referenced in current docs
+- Not tied to an open incident or ticket
+- Clearly superseded by later accepted deployments
+
+Retention is **manual**. MDI-68 does not approve automated pruning.
+
+### 19.5 Safe listing commands (metadata only)
+
+Directory inventory (timestamps and paths):
+
+```bash
+sudo find /root/backups -maxdepth 1 -type d -name 'mdi-*' \
+  -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
+
+sudo find /opt/mdi/backups -maxdepth 2 -type d \
+  -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
+
+sudo find /var/www/html/tools -maxdepth 1 -type d -name 'mdi.bak-*' \
+  -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort
+```
+
+Optional size review (paths and sizes only — still do not read file contents):
+
+```bash
+sudo du -sh /root/backups/mdi-* 2>/dev/null | sort -h
+sudo du -sh /opt/mdi/backups/* 2>/dev/null | sort -h
+sudo du -sh /var/www/html/tools/mdi.bak-* 2>/dev/null | sort -h
+```
+
+### 19.6 Manual review-before-delete checklist
+
+Before deleting **any** backup candidate:
+
+1. ☐ Confirm current production backend and frontend version (`/api/mdi/version`, `/tools/mdi/` bundle names)
+2. ☐ Confirm latest accepted deployment report / handoff rollback paths
+3. ☐ Confirm candidate is **not** latest known-good (§19.3)
+4. ☐ Confirm candidate is **not** referenced in rollback instructions
+5. ☐ Confirm candidate is **not** tied to an open ticket, failed deploy, incident, or partial rollback
+6. ☐ Confirm at least one **newer accepted** backup exists for the same deploy surface
+7. ☐ Record candidate path, reason, date, and approver in the cleanup ticket
+8. ☐ Prefer adding candidates to a dated review list before any deletion
+9. ☐ Obtain **explicit operator/project-owner approval** before any delete command
+
+### 19.7 Commands intentionally not included
+
+**Deletion commands are intentionally omitted** from normal runbook steps.
+
+Prepare a **separate approved cleanup ticket** that lists exact paths, current
+production version, latest known-good backups, rollback impact, and stop
+condition. **No wildcard deletion** without a reviewed candidate list.
+
+Example placeholder for a future cleanup ticket only — **do not run without
+explicit approval:**
+
+```bash
+# DO NOT RUN without approved cleanup ticket and exact path list
+# rm -rf /path/to/one/reviewed/backup
+```
+
+### 19.8 Approval model
+
+- Backup pruning requires **explicit operator/project-owner approval**
+- Deletion happens in a **separate cleanup ticket**, not during deploy smoke
+- Cleanup ticket must include: exact paths, production version, latest known-good
+  backups, rollback impact, and stop condition
+- Wildcard `rm` on `mdi-*` or `mdi.bak-*` is **prohibited** without enumerated paths
+
+### 19.9 Incident / deploy freeze rule
+
+Do **not** prune backups during:
+
+- Active deploy or rollback window
+- Failed smoke or unresolved version mismatch
+- Incident response or production uncertainty
+- Runtime/quota investigation
+- Before docs closure of the relevant ticket
+
+### 19.10 Future automation (backlog only — not approved in MDI-68)
+
+Possible future work (separate tickets):
+
+- Report-only backup inventory script (age/size summary)
+- No-delete dry-run report
+- Later approved pruning script with explicit path list input
+
+**No automation, cron, or deletion scripts are approved in MDI-68.**
+
+### 19.11 Rollback impact reminder
+
+Deleting a backup **removes** the ability to roll back to that exact pre-deploy
+state. Before any cleanup, verify that a newer accepted backup or git commit can
+restore equivalent production behavior. Frontend rollback examples remain in §11;
+ticket-specific `rsync` paths are in [release-readiness handoff](../release-readiness-handoff.md).

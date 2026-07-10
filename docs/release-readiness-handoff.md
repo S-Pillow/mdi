@@ -1555,7 +1555,7 @@ Frontend-only deploys do not require backend restart or nginx reload when only
 static files change. Roll back by rsyncing a prior `/var/www/html/tools/mdi.bak-*`
 directory back to `/var/www/html/tools/mdi/`.
 
-Old frontend backups accumulate. Prune only after an agreed stabilization window.
+Old frontend backups accumulate. Use [mdi-production-runbook.md §19](runbooks/mdi-production-runbook.md#19-backup-inventory-and-manual-pruning-mdi-68) for inventory and manual pruning; prune only after explicit approval and not during deploy/incident windows.
 
 ## 10. Known Limitations
 
@@ -1580,7 +1580,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Narrow/mobile use is not primary; desktop 1280+ smoke tested | Acceptable |
 | RDAP/WHOIS/live-check failures may occur due to upstream variability | Acceptable |
 | In-flight jobs across backend restart are limited; latest completed/error snapshot recovery is supported | Acceptable |
-| Old frontend backups accumulate until operator cleanup | Housekeeping |
+| Old frontend backups accumulate until operator cleanup | Housekeeping — see [mdi-production-runbook.md §19](runbooks/mdi-production-runbook.md#19-backup-inventory-and-manual-pruning-mdi-68) for inventory and manual pruning guidance (MDI-68); no automated deletion approved |
 | Failed/error job edge cases were not fully production-smoked during final UI smoke | Future test |
 | Current completed non-recovered job path was not live-smoked during MDI-38 because no live job was submitted | Future test |
 | Legacy wide ~39-column CSV consumers | **Breaking change (MDI-54A)** — use JSON evidence for full forensic fields; XLSX provides the 10-column analyst view with row coloring (MDI-54B), not the legacy wide field set |
@@ -1718,7 +1718,7 @@ MDI-65; prior MDI-57B/63 acceptances remain valid.
 ### Other non-blocking items
 
 - Add quota-cost hint parity for Request New Scan tooltip.
-- Add backup-pruning routine or runbook note.
+- ~~Add backup-pruning routine or runbook note.~~ Addressed by MDI-68 (2026-07-09) — see [mdi-production-runbook.md §19](runbooks/mdi-production-runbook.md#19-backup-inventory-and-manual-pruning-mdi-68); manual pruning only; no automation approved.
 - ~~Surface dashboard quota trends if still desired.~~ Addressed by VTFIX-02G.
 - Add searchable historical job/domain history if approved.
 - Add additional export scopes if needed.
