@@ -434,7 +434,7 @@ code-level table and test matrix. Quick admin/operator cues:
 | `quota_lock_timeout` | error | Lock contention — retry later; check both backends and `vt_usage.lock`; **not** daily quota exhaustion |
 | `quota_blocked` | skip | Daily quota exhausted — wait for UTC midnight; do not hand-edit `vt_usage.json` |
 | `auth_error` / `no_api_key` | error | **Admin** — verify `/etc/dns-tool/secrets.env` and service group membership; not analyst retry loops |
-| `whois_failed` / live-check warnings | warning | Partial evidence — VT triage may still stand; do not treat as incident |
+| `whois_failed` / live-check warnings | warning | Partial evidence — VT triage may still stand; do not treat as incident. For **`.vu`**, repeated `whois_failed` is a **known provider-stack limitation** (MDI-70): normalization to the registrable domain is correct; `rdap.org` often returns 404 and the current WHOIS library treats `.vu` as private/minimal registry behavior. Missing registrar/created/EPP/age does **not** invalidate VT classification and does **not** prove the domain is unregistered. |
 | `vt_scan_not_supported` | skip | Domain-report mode or ineligible row — Refresh only |
 | Export `no_flagged_rows` / `no_rows` | skip | Adjust export scope — **no new VT lookups** |
 | Persistence / recovery | n/a | Missing/corrupt `mdi_latest_job.json` → 404, no crash; operator runs new job |
@@ -566,6 +566,15 @@ code-level table and test matrix. Quick admin/operator cues:
 - Open in VirusTotal requires a saved `vt_report_url` on the row
 - Watchlist and Create Block Rule are **not implemented**
 - Mid-job restart loses in-progress work
+- **Known limitation (MDI-70):** `.vu` WHOIS/RDAP enrichment may fail under the
+  current provider stack. MDI correctly normalizes `.vu` URLs and subdomains to
+  the registrable domain, but `rdap.org` returned 404 for inspected `.vu`
+  domains and the current WHOIS library treats `.vu` as private/minimal registry
+  behavior. In these cases MDI records `whois_failed`, leaves
+  registrar/created/EPP/age fields unavailable, and continues VT-based triage
+  when applicable. This does not mean URL parsing failed, and it does not prove
+  the domain is unregistered. No `.vu` fallback provider is approved; optional
+  provider-check (`MDI-70A`) is required before any provider/fallback work.
 
 ---
 

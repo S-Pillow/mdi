@@ -84,8 +84,9 @@ to use per-status hold detection; keeps EPP status strings as returned.
 creation date was returned. URL path/subdomain normalization succeeded; upstream
 lookup returned no usable domain data.` — names registrable domain (e.g.
 `orlvexa.vu`), does not imply URL parsing failed, does not claim domain
-unregistered. `.vu` upstream RDAP/WHOIS availability remains unresolved; MDI-69C
-only clarifies the failure message. Guardrails: URL normalization, VT (except
+unregistered. `.vu` upstream RDAP/WHOIS availability under the current provider
+stack is a **documented known limitation (MDI-70)**; MDI-69C only clarifies the
+failure message. Guardrails: URL normalization, VT (except
 natural skip when hold now correctly detected before VT), Cloudflare, live-check
 (except natural skip for held domains), refresh/rescan semantics, initial-job
 WHOIS/RDAP enrichment, frontend, and export field names unchanged.
@@ -469,6 +470,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-59B | Progress phase label refinement — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live selected refresh/rescan smoke) |
 | MDI-67 | Automated frontend UX regression tests — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live action smoke) |
 | MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity — **merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted, closed** |
+| MDI-70 | `.vu` WHOIS/RDAP enrichment failure-pattern discovery — **docs-only known-limitation recorded, closed** (no code/provider change; provider-check not run) |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -493,6 +495,9 @@ MDI-59B commit on `main`: `2e49592` (refine progress phase labels).
 MDI-67 commit on `main`: `a761e14` (add frontend ux regression tests).
 
 MDI-69C commit on `main`: `7acb642` (fix: detect spaced hold statuses and clarify whois failures).
+
+MDI-70 docs note on `main`: records `.vu` enrichment as a known provider-stack
+limitation (no application commit beyond this docs update).
 
 ### MDI export contract series (MDI-54)
 
@@ -586,7 +591,8 @@ MDI currently supports:
 - domain hold detection (MDI-69C): spaced RDAP/WHOIS hold variants (`client hold`, `server hold`) detected via `detect_hold_from_epp_statuses()` alongside canonical `clientHold`/`serverHold`; transfer-prohibited/inactive/pending-transfer/standalone `hold` negatives preserved; EPP status strings preserved as returned
 - held-domain VT/live skip (natural skip when hold correctly detected before VT; unchanged semantics)
 - RDAP/WHOIS enrichment
-- clearer RDAP/WHOIS failed-enrichment messages (MDI-69C): `whois_failed` names registrable domain and states URL path/subdomain normalization succeeded; does not imply URL parsing failed; does not claim domain unregistered; `.vu` upstream availability unchanged
+- clearer RDAP/WHOIS failed-enrichment messages (MDI-69C): `whois_failed` names registrable domain and states URL path/subdomain normalization succeeded; does not imply URL parsing failed; does not claim domain unregistered
+- known `.vu` WHOIS/RDAP enrichment limitation (MDI-70): under the current provider stack, `.vu` domains may record `whois_failed` after correct URL/subdomain normalization; VT triage still proceeds when applicable (see Known Limitations)
 - live checks for eligible flagged items
 - triage buckets
 - recommended actions
@@ -1741,6 +1747,7 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Manual Request New Scan completedness check | **Resolved by MDI-62 (2026-07-09)** — backend-deployed, GET-verified, live smoke accepted (Outcome A) |
 | Pending URL rows require operator-initiated Refresh Report / Refresh Pending; no automatic promotion on job rerun | Acceptable — by design; prevents hidden quota consumption |
 | Refresh 404 on pending URL does not auto-submit | Acceptable — by design |
+| `.vu` WHOIS/RDAP enrichment may fail under the current provider stack (MDI-70) | **Acceptable known limitation** — discovery 2026-07-13. MDI correctly normalizes `.vu` URLs and subdomains to the registrable domain (`extract_registered_domain`), but `rdap.org` returned **404** for inspected `.vu` apex domains and the current WHOIS library (`whois==1.20240129.2` via `whois.query`) treats `.vu` as private/minimal registry behavior rather than a useful fallback. MDI records `whois_failed`, leaves registrar/created/EPP/age/hold unavailable, and continues VT-based triage when applicable. This does **not** mean URL parsing failed and does **not** prove the domain is unregistered. MDI-69C message wording is sufficient for analyst clarity. Jobs: `b49bd4a8-…` (5 `.vu` failures), `3266a499-…` (3 `.vu` failures, pre–MDI-69C wording). Domains: `orlvexa.vu`, `paperlessinvite.vu`, `specialinvitation.vu`, `ceucx.vu`, `seasonallydeevent.vu`, `kavlix.vu`. No timeout/outage/parser-body evidence for these failures. No `.vu` fallback provider approved; no code change from discovery alone. Optional provider-check required before any provider/fallback implementation. |
 
 ## 11. Future Backlog / Non-Blocking Items
 
@@ -1815,12 +1822,25 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-59B | Progress phase label refinement | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 | MDI-67 | Automated frontend UX regression tests | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 | MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity | **Closed** — merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted (2026-07-13); optional `.vu` clarity smoke not run |
+| MDI-70 | `.vu` WHOIS/RDAP enrichment failure-pattern discovery + docs known-limitation note | **Closed** — docs-only (2026-07-13); no code/provider change; provider-check not run |
+
+### MDI-70 `.vu` enrichment follow-on (optional — not started)
+
+| Ticket | Scope | Status |
+|---|---|---|
+| MDI-70 | Document `.vu` enrichment as known provider-stack limitation | **Closed** — docs-only (2026-07-13) |
+| MDI-70A (optional) | Provider-check: exact external RDAP/IANA/WHOIS probes for listed `.vu` domains; no VT, no MDI job, no POSTs | **Not started** — required before any `.vu` provider/fallback implementation |
+| Optional TLD wording | Clearer `.vu`/unsupported-TLD copy (e.g. `unsupported_tld`) only if operators want it | **Not started** |
+| Optional provider fallback | Add `.vu` WHOIS/RDAP source only if provider-check proves a stable, safe, useful source | **Not started** — no provider approved |
+| Optional error aggregation | Dashboard/ops visibility for TLD-level enrichment failure trends | **Not started** |
 
 Production backend is at MDI-69C `7acb642`; production frontend is MDI-67
-`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-69C carryforward: `.vu` upstream
-RDAP/WHOIS still fails — MDI-69C only clarifies `whois_failed` messages;
-optional `.vu` production message-clarity smoke not run; existing/recovered jobs
-not retroactively reclassified (new scans required for prior inputs such as
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-70 documents `.vu` WHOIS/RDAP
+enrichment failure as an **expected current provider-stack limitation** (see
+§10); no application code or provider was added. MDI-69C carryforward:
+optional `.vu` production message-clarity smoke not run (superseded for clarity
+purposes by MDI-69C deploy message + MDI-70 limitation note); existing/recovered
+jobs not retroactively reclassified (new scans required for prior inputs such as
 `ap-exdex.vip` in job `3266a499-…`); frontend relies on existing
 `errors[].message` rendering; other spaced non-hold EPP variants remain out of
 scope. MDI-67 carryforward: no full
