@@ -44,8 +44,79 @@ Taste-only changes without supporting evidence belong in backlog.
 | Component | Production state | Notes |
 |---|---|---|
 | Frontend | MDI-67: `a761e1406f52290af6a6f6a8108024ff3427b32d` | Static bundle: `index-C-IhR_fD.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | MDI-65: `2a44e4f9e3ff09fd90bab964213ae8f747a604e5` | `/opt/mdi/backend`; server-side action completion summaries (`last_action_summary`); unchanged by MDI-67 frontend-only deploy |
+| MDI backend | MDI-69C: `7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` | `/opt/mdi/backend`; spaced RDAP/WHOIS hold variant detection + clearer `whois_failed` enrichment messages; frontend unchanged (MDI-67) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-69C (2026-07-13T08:21:32Z) deployed **backend-only** from `main` @
+`7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` on host `srv766238`
+(`https://forgeforward.app/tools/mdi/`). Backend files copied:
+`services/hold_detection.py`, `services/domain_enrichment.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**
+(PID `3768918`); journal clean startup; frontend **unchanged** at MDI-67
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`; no frontend deploy; nginx **not**
+reloaded; VT Bulk Check **untouched**. Backup:
+`/root/backups/mdi-69c-pre-deploy-backend-20260713-082035/` (`hold_detection.py`,
+`domain_enrichment.py`, `build_info.json`; pre-deploy `644 mdi:mdi`; pre-deploy
+`build_info.json` commit `2a44e4f`). Previous production backend:
+`2a44e4f9e3ff09fd90bab964213ae8f747a604e5` (MDI-65). Test files not copied to
+production.
+
+Implementation/merge: branch `feature/mdi-69c-hold-and-whois-clarity`; commit
+`7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` (`fix: detect spaced hold statuses
+and clarify whois failures`); previous `main` before merge
+`7139881a53dbe4da95ccd1a094e52e03347f1ca7`; fast-forward merge; files changed:
+`backend/services/hold_detection.py`, `backend/services/domain_enrichment.py`,
+`backend/tests/test_hold_detection.py`,
+`backend/tests/test_mdi69c_hold_and_whois_clarity.py`,
+`backend/tests/test_domain_enrichment.py` only; no frontend, runtime, quota, VT
+Bulk, nginx, docs, or package files in implementation merge. Merge verification:
+required backend suite **274 passed**; optional VT regression **40 passed**; no
+frontend tests/build (no frontend files changed).
+
+MDI-69C fixes hold detection for spaced RDAP/WHOIS status variants (`client
+hold`, `server hold`) while preserving canonical `clientHold`/`serverHold`;
+adds per-status list detection via `detect_hold_from_epp_statuses()`; preserves
+negatives (`client transfer prohibited`, `server transfer prohibited`,
+`inactive`, `pending transfer`, standalone `hold`); updates RDAP/WHOIS enrichment
+to use per-status hold detection; keeps EPP status strings as returned.
+`whois_failed` error code unchanged; message now:
+`RDAP/WHOIS lookup failed for registrable domain {domain}; no registrar or
+creation date was returned. URL path/subdomain normalization succeeded; upstream
+lookup returned no usable domain data.` — names registrable domain (e.g.
+`orlvexa.vu`), does not imply URL parsing failed, does not claim domain
+unregistered. `.vu` upstream RDAP/WHOIS availability remains unresolved; MDI-69C
+only clarifies the failure message. Guardrails: URL normalization, VT (except
+natural skip when hold now correctly detected before VT), Cloudflare, live-check
+(except natural skip for held domains), refresh/rescan semantics, initial-job
+WHOIS/RDAP enrichment, frontend, and export field names unchanged.
+
+Deploy verification: source/prod SHA256 matched (`hold_detection.py` `e2cc9a32…`,
+`domain_enrichment.py` `8b524530…`); `py_compile` **PASS**; `/api/mdi/health` 200
+commit `7acb642`; `/api/mdi/version` 200 full commit `7acb642`; `/api/mdi/usage`
+unchanged **10 used / 490 remaining**; `/api/mdi/jobs/latest` job
+`3266a499-…`, `status=done`, `action_in_progress=false`; `/tools/mdi/` 200,
+frontend bundles unchanged. Runtime metadata unchanged during deploy
+(`mdi_latest_job.json`, `vt_usage.json`, `vt_usage_history.jsonl`,
+`vt_daily_history.json`, `vt_usage.lock`). No-quota deploy smoke **accepted**;
+live smoke deferred until separately approved. **Option A controlled live smoke
+accepted** (2026-07-13) — see smoke history below.
+
+Rollback (documented; not executed):
+
+```bash
+BACKUP=/root/backups/mdi-69c-pre-deploy-backend-20260713-082035
+cp -a "$BACKUP/hold_detection.py" /opt/mdi/backend/services/hold_detection.py
+cp -a "$BACKUP/domain_enrichment.py" /opt/mdi/backend/services/domain_enrichment.py
+cp -a "$BACKUP/build_info.json" /opt/mdi/backend/build_info.json
+chown mdi:mdi /opt/mdi/backend/services/hold_detection.py \
+  /opt/mdi/backend/services/domain_enrichment.py \
+  /opt/mdi/backend/build_info.json
+chmod 644 /opt/mdi/backend/services/hold_detection.py \
+  /opt/mdi/backend/services/domain_enrichment.py \
+  /opt/mdi/backend/build_info.json
+sudo systemctl restart mdi-backend.service
+# /api/mdi/version → 2a44e4f9e3ff09fd90bab964213ae8f747a604e5
+```
 
 MDI-67 (2026-07-09T23:53:35 UTC) deployed **frontend-only** from `main` @
 `a761e1406f52290af6a6f6a8108024ff3427b32d` on host `srv766238`
@@ -397,6 +468,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-66 | Cold-recovery last action summary UX — **merged, frontend-deployed, browser/static smoke-accepted, closed** |
 | MDI-59B | Progress phase label refinement — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live selected refresh/rescan smoke) |
 | MDI-67 | Automated frontend UX regression tests — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live action smoke) |
+| MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity — **merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -419,6 +491,8 @@ MDI-66 commit on `main`: `2b699be` (show recovered last action summary).
 MDI-59B commit on `main`: `2e49592` (refine progress phase labels).
 
 MDI-67 commit on `main`: `a761e14` (add frontend ux regression tests).
+
+MDI-69C commit on `main`: `7acb642` (fix: detect spaced hold statuses and clarify whois failures).
 
 ### MDI export contract series (MDI-54)
 
@@ -509,9 +583,10 @@ MDI currently supports:
 - explicit **Run MDI Check**
 - VirusTotal checks for eligible items
 - shared VT quota tracking
-- domain hold detection
-- held-domain VT/live skip
+- domain hold detection (MDI-69C): spaced RDAP/WHOIS hold variants (`client hold`, `server hold`) detected via `detect_hold_from_epp_statuses()` alongside canonical `clientHold`/`serverHold`; transfer-prohibited/inactive/pending-transfer/standalone `hold` negatives preserved; EPP status strings preserved as returned
+- held-domain VT/live skip (natural skip when hold correctly detected before VT; unchanged semantics)
 - RDAP/WHOIS enrichment
+- clearer RDAP/WHOIS failed-enrichment messages (MDI-69C): `whois_failed` names registrable domain and states URL path/subdomain normalization succeeded; does not imply URL parsing failed; does not claim domain unregistered; `.vu` upstream availability unchanged
 - live checks for eligible flagged items
 - triage buckets
 - recommended actions
@@ -610,6 +685,54 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38. MDI-67 adds `npm run test -- --run`
 | MDI-66 Cold-recovery last action summary UX | Accepted — frontend-deployed, **browser/static smoke accepted** (recovered job shows last-action line) |
 | MDI-59B Progress phase label refinement | Accepted — frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved; no live action smoke) |
 | MDI-67 Automated frontend UX regression tests | Accepted — merged, frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved on current latest job; no live action smoke) |
+| MDI-69C spaced hold variant detection + WHOIS/RDAP failure clarity | Accepted — merged, backend-deployed, no-quota deploy verified, **Option A live smoke accepted** (`ap-exdex.vip` held; spaced `client hold` → `clientHold`; VT/live skipped; quota delta 0); optional `.vu` clarity smoke **not run** |
+
+**MDI-69C backend-only deploy and no-quota verification (2026-07-13):**
+
+Backend-only deploy on `srv766238` at `2026-07-13T08:21:32Z`: backend `7acb642`
+→ `/opt/mdi/backend` (from `2a44e4f` / MDI-65). Frontend unchanged: MDI-67
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. Backend files copied:
+`services/hold_detection.py`, `services/domain_enrichment.py`; `build_info.json`
+updated; `mdi-backend.service` **restarted** and **active** (PID `3768918`);
+journal clean startup; nginx **not** reloaded; frontend **not** redeployed; VT
+Bulk Check **untouched**. Backup:
+`/root/backups/mdi-69c-pre-deploy-backend-20260713-082035/`.
+
+Pre-deploy verification: required backend suite **274 passed**; optional VT
+regression **40 passed**; source/prod SHA256 matched; `py_compile` **PASS**;
+`/api/mdi/version` → `7acb642`; usage **10 used / 490 remaining**; latest job
+`3266a499-1111-4d66-8e22-1a6ff6789af8`, `status=done`,
+`action_in_progress=false`; runtime/quota files unchanged during deploy.
+
+No-quota deploy smoke (GET/static only): production UI loaded; frontend bundle
+unchanged; latest job recoverable; no POSTs; usage unchanged **10/490**; live
+smoke skipped during deploy (not yet separately approved).
+
+**MDI-69C Option A controlled live smoke acceptance (2026-07-13):**
+
+Controlled live smoke — **PASS**. Input: `https://ap-exdex.vip` only (paste
+mode; `auto_rescan_stale=false`; `use_domain_reports=false`). Job
+`c9b554f0-4843-4e90-8e8d-367350f6bf89`, `status=done`, completed in ~1s.
+Backend `7acb642`; frontend `index-C-IhR_fD.js` / `index-YEpmU4YE.css`.
+
+Result for `https://ap-exdex.vip`: input original preserved; registered domain
+`ap-exdex.vip` (RDAP enriched; registrar Dynadot Inc); EPP status included
+spaced `client hold` in
+`['client transfer prohibited', 'client hold', 'server transfer prohibited', 'inactive']`;
+`client hold` mapped to `clientHold`; `domain_hold.has_hold=true`, source
+`rdap`; triage_bucket `held`; recommended_action `action_already_taken`;
+evidence_status `skipped_hold`; VT skipped (`vt_mode_used=skipped_hold`, no
+engine results); live check skipped (`live_status=not_checked`); VT ratio
+`None`; hold impact `unknown` (Cloudflare rank not enabled — acceptable; hold
+state shown). Job counters: `held_skipped=1`,
+`hold_detected_by_enrichment_count=1`, `rdap_enriched_count=1`,
+`live_check_skipped_count=1`, `vt_refresh_count=0`, `vt_scan_requested_count=0`,
+`lookups_used=0`. Usage before/after **10/490**; quota delta **0**. Runtime:
+`mdi_latest_job.json` and `vt_usage_history.jsonl` updated by legitimate job
+write/audit append only; `vt_usage.json`, `vt_daily_history.json`,
+`vt_usage.lock` unchanged. No refresh/rescan/manual action (`last_action_type=null`);
+no extra domains; VT Bulk Check untouched. Optional `.vu` clarity check
+(`https://orlvexa.vu/myparty`) **not run**.
 
 **MDI-67 frontend-only deploy and browser/static smoke acceptance (2026-07-09):**
 
@@ -1691,9 +1814,16 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-66 | Cold-recovery last action summary UX | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09) |
 | MDI-59B | Progress phase label refinement | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 | MDI-67 | Automated frontend UX regression tests | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
+| MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity | **Closed** — merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted (2026-07-13); optional `.vu` clarity smoke not run |
 
-Production backend is at MDI-65 `2a44e4f`; production frontend is MDI-67
-`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-67 carryforward: no full
+Production backend is at MDI-69C `7acb642`; production frontend is MDI-67
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-69C carryforward: `.vu` upstream
+RDAP/WHOIS still fails — MDI-69C only clarifies `whois_failed` messages;
+optional `.vu` production message-clarity smoke not run; existing/recovered jobs
+not retroactively reclassified (new scans required for prior inputs such as
+`ap-exdex.vip` in job `3266a499-…`); frontend relies on existing
+`errors[].message` rendering; other spaced non-hold EPP variants remain out of
+scope. MDI-67 carryforward: no full
 `pollJob` / `pendingActionContextRef` integration test; no full `VtUsagePanel` or
 `TriageWorkspace` component tests; no Playwright/E2E; no CI wiring; no
 production-action smoke for selected refresh/rescan banners; `Working…` applies
