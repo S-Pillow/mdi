@@ -71,7 +71,7 @@ UI control / feature status (MDI-32):
 | `vt_ratio` | `Optional[str]` | display | Human-readable string, e.g. `"3/72"`. Derived from `vt_hits`/`vt_total_engines`. |
 | `vt_scan_date` | `Optional[datetime]` | display, filtering, reporting | UTC timestamp of the VT scan used. Basis for `freshness`. |
 | `freshness` | `Freshness` | display, filtering, workflow | `fresh` (<5d), `stale` (5–30d), `very_stale` (>30d), `never_scanned`, `unknown`. Drives auto-rescan eligibility. |
-| `vt_engine_results` | `Optional[List[Dict]]` | display, reporting | Non-clean VT engine detections. **Excluded from CSV**; **included in JSON evidence** (`mdi-evidence-v1`). |
+| `vt_engine_results` | `Optional[List[Dict]]` | display, reporting | Non-clean VT engine detections. **Excluded from CSV** except summarized as `reported_abuse` (MDI-71); **included in JSON evidence** (`mdi-evidence-v1`). |
 | `vt_report_url` | `Optional[str]` | display, action link | Computed public VT GUI URL (MDI-34). Domain report → `/gui/domain/{domain}`; URL report → `/gui/url/{base64url}`. Browser only — no VT API, no quota. UI disabled when absent. |
 
 ### URL live activity
@@ -1277,21 +1277,24 @@ format; XLSX uses the same 10-column contract with result-based row coloring.
 They do **not** trigger VirusTotal, Cloudflare, WHOIS/RDAP, DNS, live-check,
 quota usage, runtime file writes, or usage-history append.
 
-#### Default CSV columns (MDI-54A — stable order)
+#### Default CSV columns (MDI-54A / MDI-71 — stable order)
 
-`input`, `checked_as`, `result`, `registrar`, `hold_status`, `domain_created`,
-`cloudflare_rank`, `detection_ratio`, `last_scanned`, `error`
+`input`, `checked_as`, `domain`, `registrar`, `domain_created`, `hold_status`,
+`cloudflare_rank`, `result`, `detection_ratio`, `reported_abuse`, `last_scanned`,
+`error`
 
 | Column | Source / meaning |
 |---|---|
 | `input` | `input_original` — operator-facing input string |
 | `checked_as` | Actual saved VT lookup method/target from `vt_mode_used` plus saved input fields (same target derivation as VT GUI URL behavior). **Not** parsed `input_type` alone. Examples: `url_report:http://example.com/`, `url_report:https://example.com/path`, `domain_report:example.com`, `skipped_on_hold`, `not_checked_quota_blocked`, `not_checked_error` |
-| `result` | Analyst summary: `flagged`, `clean`, `on_hold`, `unknown`, or `error` |
+| `domain` | Registrable domain (eTLD+1) extracted from saved `input_normalized` + `input_type` via `extract_registered_domain` — same helper as RDAP/WHOIS enrichment. Examples: `https://orlvexa.vu/myparty` → `orlvexa.vu`; `https://sub.test.example.co.uk/path` → `example.co.uk`; bare `example.com` → `example.com`. Blank when extraction unavailable (e.g. IP). Does not alter `input` or `checked_as`. |
 | `registrar` | Saved registrar; blank when unavailable |
 | `hold_status` | `clientHold`, `serverHold`, `clientHold + serverHold`, `unknown`, or blank when confirmed no hold (never `none`) |
 | `domain_created` | Saved domain creation date as `YYYY-MM-DD`; blank when unavailable |
 | `cloudflare_rank` | Cloudflare Radar **Popularity bucket** display value only (drawer-style), e.g. `>200000 / UNRANKED`. Not source, checked date, raw API object, or internal field names |
+| `result` | Analyst summary: `flagged`, `clean`, `on_hold`, `unknown`, or `error` |
 | `detection_ratio` | Saved VT ratio in slash form (e.g. `1/91`, `0/92`). Raw CSV cell is **tab-prefixed** so spreadsheet apps treat it as text and do not convert `1/91` to a date. Blank when VT skipped or unavailable; no misleading `0/0` |
+| `reported_abuse` | **MDI-71:** most common saved VT engine `result` label among malicious/suspicious engines in `vt_engine_results` (trim + lowercase for counting; tie → lexicographically smallest label). Uses saved job data only — **no new VT lookups**. Blank when no usable engine labels (clean, held, skipped, missing engines). Not the same as MDI `result` column. |
 | `last_scanned` | Saved VT scan timestamp (`YYYY-MM-DD HH:MM:SS UTC`); blank when VT skipped or unavailable |
 | `error` | Concise error codes/messages from saved `errors[]`; blank when none |
 
@@ -1322,9 +1325,9 @@ changed the **default CSV contract only**. MDI-54B adds optional **XLSX** with
 the same 10 columns, text-safe ratio/date cells, and full-row coloring by
 `result` (`flagged`, `clean`, `on_hold`, `unknown`, `error`).
 
-#### XLSX analyst export (MDI-54B)
+#### XLSX analyst export (MDI-54B / MDI-71)
 
-Same 10-column order as CSV. Row fill colors are supplemental; `result` text is
+Same 12-column order as CSV (MDI-71). Row fill colors are supplemental; `result` text is
 always present. UI default remains CSV; bulk actions include a Format selector
 (CSV / XLSX). JSON evidence export unchanged.
 

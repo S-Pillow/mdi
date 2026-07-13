@@ -10,10 +10,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-
-import re
 
 from models import (
     DomainHoldType,
@@ -27,6 +27,7 @@ from models import (
     TriageBucket,
     VtModeUsed,
 )
+from services.domain_enrichment import extract_registered_domain
 from services.job_store import InMemoryJob
 from services.pending_analysis import (
     has_completed_vt_scan,
@@ -37,12 +38,14 @@ from services.vt_gui_url import vt_lookup_target_for_item
 CSV_HEADERS: List[str] = [
     "input",
     "checked_as",
-    "result",
+    "domain",
     "registrar",
-    "hold_status",
     "domain_created",
+    "hold_status",
     "cloudflare_rank",
+    "result",
     "detection_ratio",
+    "reported_abuse",
     "last_scanned",
     "error",
 ]
@@ -209,6 +212,44 @@ def format_checked_as(result: MdiResultItem) -> str:
     return "not_checked_error"
 
 
+def format_export_domain(result: MdiResultItem) -> str:
+    """Registrable domain for export; blank when extraction is unavailable."""
+    domain = extract_registered_domain(result.input_normalized, result.input_type)
+    return domain or ""
+
+
+def dominant_vt_result_label(result: MdiResultItem) -> str:
+    """
+    Most common saved VT engine ``result`` label among malicious/suspicious engines.
+
+    Uses saved ``vt_engine_results`` only. Normalizes labels (trim + lowercase) for
+    counting. On count ties, returns the lexicographically smallest tied label.
+    """
+    engines = result.vt_engine_results
+    if not engines:
+        return ""
+    labels: List[str] = []
+    for det in engines:
+        if not isinstance(det, dict):
+            continue
+        raw = det.get("result")
+        if raw is None:
+            continue
+        text = str(raw).strip().lower()
+        if text:
+            labels.append(text)
+    if not labels:
+        return ""
+    counts = Counter(labels)
+    max_count = max(counts.values())
+    return min(label for label, count in counts.items() if count == max_count)
+
+
+def format_reported_abuse(result: MdiResultItem) -> str:
+    """Dominant VT engine result label from saved engine data; blank when unavailable."""
+    return dominant_vt_result_label(result)
+
+
 def format_export_result(result: MdiResultItem) -> str:
     if (
         result.processing_status == MdiProcessingStatus.HOLD_SKIPPED
@@ -341,17 +382,18 @@ def format_export_error(result: MdiResultItem) -> str:
 
 
 def _analyst_row_values(result: MdiResultItem) -> List[str]:
-    """Shared 10-column analyst contract values (plain text; no CSV tab prefix)."""
-    registrar = result.registrar or ""
+    """Shared analyst export contract values (plain text; no CSV tab prefix)."""
     return [
         result.input_original or "",
         format_checked_as(result),
-        format_export_result(result),
-        registrar,
-        format_hold_status(result),
+        format_export_domain(result),
+        result.registrar or "",
         format_domain_created(result),
+        format_hold_status(result),
         format_cloudflare_rank_popularity_bucket(result),
+        format_export_result(result),
         format_detection_ratio_plain(result),
+        format_reported_abuse(result),
         format_last_scanned(result),
         format_export_error(result),
     ]
@@ -359,18 +401,13 @@ def _analyst_row_values(result: MdiResultItem) -> List[str]:
 
 def _result_csv_row(result: MdiResultItem) -> List[str]:
     values = _analyst_row_values(result)
-    return [
-        sanitize_csv_cell(values[0]),
-        sanitize_csv_cell(values[1]),
-        sanitize_csv_cell(values[2]),
-        sanitize_csv_cell(values[3]),
-        sanitize_csv_cell(values[4]),
-        sanitize_csv_cell(values[5]),
-        sanitize_csv_cell(values[6]),
-        format_detection_ratio_cell(result),
-        sanitize_csv_cell(values[8]),
-        sanitize_csv_cell(values[9]),
-    ]
+    row: List[str] = []
+    for header, value in zip(CSV_HEADERS, values):
+        if header == "detection_ratio":
+            row.append(format_detection_ratio_cell(result))
+        else:
+            row.append(sanitize_csv_cell(value))
+    return row
 
 
 XLSX_RESULT_ROW_FILLS: Dict[str, str] = {
@@ -382,16 +419,18 @@ XLSX_RESULT_ROW_FILLS: Dict[str, str] = {
 }
 
 XLSX_HEADER_FILL = "FFF3F4F6"
-XLSX_TEXT_COLUMNS = frozenset({0, 1, 2, 3, 4, 5, 6, 7, 8, 9})
+XLSX_TEXT_COLUMNS = frozenset(range(len(CSV_HEADERS)))
 XLSX_COLUMN_WIDTHS = {
     "input": 28,
     "checked_as": 36,
-    "result": 12,
+    "domain": 22,
     "registrar": 22,
-    "hold_status": 18,
     "domain_created": 14,
+    "hold_status": 18,
     "cloudflare_rank": 22,
+    "result": 12,
     "detection_ratio": 14,
+    "reported_abuse": 18,
     "last_scanned": 24,
     "error": 32,
 }
@@ -446,7 +485,7 @@ def build_xlsx_export(
 
     for row_idx, result in enumerate(rows, start=2):
         values = _analyst_row_values(result)
-        row_fill = _xlsx_row_fill(values[2])
+        row_fill = _xlsx_row_fill(values[CSV_HEADERS.index("result")])
         for col_idx, value in enumerate(values, start=1):
             text = value if value else None
             cell = ws.cell(row=row_idx, column=col_idx, value=text)

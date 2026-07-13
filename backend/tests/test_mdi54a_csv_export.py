@@ -77,12 +77,14 @@ class TestCsvContractHeaders:
         assert CSV_HEADERS == [
             "input",
             "checked_as",
-            "result",
+            "domain",
             "registrar",
-            "hold_status",
             "domain_created",
+            "hold_status",
             "cloudflare_rank",
+            "result",
             "detection_ratio",
+            "reported_abuse",
             "last_scanned",
             "error",
         ]
@@ -245,12 +247,12 @@ class TestCsvExportIntegration:
         clear_all_jobs()
         _run(job_store.create_job(job))
 
-    def test_export_all_ten_columns(self):
+    def test_export_all_twelve_columns(self):
         scan_dt = datetime(2026, 6, 1, 15, 30, tzinfo=timezone.utc)
         created = datetime(2020, 3, 15, tzinfo=timezone.utc)
         row = MdiResultItem(
-            input_original="flagged.example",
-            input_normalized="flagged.example",
+            input_original="flagged.com",
+            input_normalized="flagged.com",
             input_type=InputType.DOMAIN,
             position=1,
             vt_mode_used=VtModeUsed.URL_REPORT,
@@ -275,15 +277,16 @@ class TestCsvExportIntegration:
         assert resp.status_code == 200
         rows = _parse_csv(resp.text)
         assert rows[0] == CSV_HEADERS
-        assert len(rows[1]) == 10
-        assert rows[1][0] == "flagged.example"
-        assert rows[1][1] == "url_report:http://flagged.example/"
-        assert rows[1][2] == "flagged"
+        assert len(rows[1]) == 12
+        assert rows[1][0] == "flagged.com"
+        assert rows[1][1] == "url_report:http://flagged.com/"
+        assert rows[1][2] == "flagged.com"
         assert rows[1][3] == "Example Registrar"
-        assert rows[1][5] == "2020-03-15"
+        assert rows[1][4] == "2020-03-15"
         assert rows[1][6] == ">200000 / UNRANKED"
-        assert rows[1][7] == "\t2/91"
-        assert rows[1][8] == "2026-06-01 15:30:00 UTC"
+        assert rows[1][7] == "flagged"
+        assert rows[1][8] == "\t2/91"
+        assert rows[1][10] == "2026-06-01 15:30:00 UTC"
 
     def test_export_flagged_scope_unchanged(self):
         clean = MdiResultItem(

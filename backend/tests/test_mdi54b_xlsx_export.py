@@ -94,14 +94,14 @@ class TestAnalystRowValues:
             vt_scan_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
         )
         values = _analyst_row_values(row)
-        assert values[7] == "1/91"
+        assert values[8] == "1/91"
         _register(_make_job([row]))
         csv_resp = client.post(
             "/api/mdi/jobs/mdi54b-test/export",
             json={"format": "csv", "scope": "all"},
         )
         csv_rows = _parse_csv(csv_resp.text)
-        assert csv_rows[1][7] == "\t1/91"
+        assert csv_rows[1][8] == "\t1/91"
 
 
 class TestXlsxContract:
@@ -138,8 +138,8 @@ class TestXlsxContract:
         scan_dt = datetime(2026, 6, 1, 15, 30, tzinfo=timezone.utc)
         created = datetime(2020, 3, 15, tzinfo=timezone.utc)
         row = MdiResultItem(
-            input_original="flagged.example",
-            input_normalized="flagged.example",
+            input_original="flagged.com",
+            input_normalized="flagged.com",
             input_type=InputType.DOMAIN,
             position=1,
             vt_mode_used=VtModeUsed.URL_REPORT,
@@ -168,14 +168,14 @@ class TestXlsxContract:
         csv_rows = _parse_csv(csv_resp.text)
         wb = _load_xlsx(xlsx_resp.content)
         ws = wb.active
-        assert [ws.cell(1, c).value for c in range(1, 11)] == CSV_HEADERS
-        xlsx_values = [ws.cell(2, c).value for c in range(1, 11)]
+        assert [ws.cell(1, c).value for c in range(1, len(CSV_HEADERS) + 1)] == CSV_HEADERS
+        xlsx_values = [ws.cell(2, c).value for c in range(1, len(CSV_HEADERS) + 1)]
         assert xlsx_values[0] == csv_rows[1][0]
         assert xlsx_values[1] == csv_rows[1][1]
         assert xlsx_values[2] == csv_rows[1][2]
-        assert csv_rows[1][7] == "\t2/91"
-        assert xlsx_values[7] == "2/91"
-        assert ws.cell(2, 8).number_format == "@"
+        assert csv_rows[1][8] == "\t2/91"
+        assert xlsx_values[8] == "2/91"
+        assert ws.cell(2, 9).number_format == "@"
 
     def test_detection_ratio_text_not_date(self):
         row = MdiResultItem(
@@ -195,7 +195,7 @@ class TestXlsxContract:
             json={"format": "xlsx", "scope": "all"},
         )
         ws = _load_xlsx(resp.content).active
-        cell = ws.cell(2, 8)
+        cell = ws.cell(2, 9)
         assert cell.value == "1/91"
         assert cell.number_format == "@"
         assert cell.data_type == "s"
@@ -237,8 +237,8 @@ class TestXlsxContract:
         clean_fill = ws.cell(3, 1).fill.fgColor.rgb
         assert flagged_fill == XLSX_RESULT_ROW_FILLS["flagged"]
         assert clean_fill == XLSX_RESULT_ROW_FILLS["clean"]
-        assert ws.cell(2, 3).value == "flagged"
-        assert ws.cell(3, 3).value == "clean"
+        assert ws.cell(2, 8).value == "flagged"
+        assert ws.cell(3, 8).value == "clean"
 
     def test_export_flagged_scope(self):
         clean = MdiResultItem(
@@ -318,7 +318,7 @@ class TestXlsxContract:
             json={"format": "xlsx", "scope": "all"},
         )
         ws = _load_xlsx(resp.content).active
-        assert ws.cell(2, 3).value == "on_hold"
+        assert ws.cell(2, 8).value == "on_hold"
         assert ws.cell(2, 1).fill.fgColor.rgb == XLSX_RESULT_ROW_FILLS["on_hold"]
 
     def test_no_external_calls(self):
@@ -391,4 +391,4 @@ class TestBuildXlsxExportUnit:
         payload = build_xlsx_export(job, [row], ExportScope.ALL)
         ws = _load_xlsx(payload).active
         assert ws.freeze_panes == "A2"
-        assert ws.auto_filter.ref == "A1:J2"
+        assert ws.auto_filter.ref == "A1:L2"
