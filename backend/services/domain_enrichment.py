@@ -63,7 +63,7 @@ from models import (
 )
 from services.age_bucket import compute_age_bucket
 from services.error_taxonomy import make_mdi_error
-from services.hold_detection import detect_hold
+from services.hold_detection import detect_hold_from_epp_statuses
 
 logger = logging.getLogger("mdi.domain_enrichment")
 
@@ -336,8 +336,8 @@ def _parse_rdap_response(data: Dict[str, Any], registered_domain: str) -> Enrich
         age_bkt = compute_age_bucket(created_at.date())
 
     # ── hold detection ────────────────────────────────────────────────────────
-    domain_hold = detect_hold(
-        " ".join(epp_status) if epp_status else None,
+    domain_hold = detect_hold_from_epp_statuses(
+        epp_status,
         source=DomainStatusSource.RDAP,
     )
 
@@ -380,8 +380,8 @@ def _parse_whois_result(
     if isinstance(created_at, datetime):
         age_bkt = compute_age_bucket(created_at.date())
 
-    domain_hold = detect_hold(
-        " ".join(epp_status) if epp_status else None,
+    domain_hold = detect_hold_from_epp_statuses(
+        epp_status,
         source=DomainStatusSource.WHOIS,
     )
 
@@ -396,6 +396,15 @@ def _parse_whois_result(
         domain_hold=domain_hold,
         error=None,
         whois_fallback_used=True,
+    )
+
+
+def _whois_failed_message(registered_domain: str) -> str:
+    """Operator-facing message when RDAP and WHOIS both fail for a registrable domain."""
+    return (
+        f"RDAP/WHOIS lookup failed for registrable domain {registered_domain}; "
+        "no registrar or creation date was returned. "
+        "URL path/subdomain normalization succeeded; upstream lookup returned no usable domain data."
     )
 
 
@@ -424,7 +433,7 @@ async def _whois_fallback(registered_domain: str) -> EnrichmentResult:
             ),
             error=_enrichment_error(
                 "whois_failed",
-                f"RDAP and WHOIS both failed for {registered_domain}.",
+                _whois_failed_message(registered_domain),
             ),
             whois_fallback_used=True,
         )

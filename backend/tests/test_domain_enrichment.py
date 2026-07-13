@@ -35,7 +35,7 @@ def _run(coro):
     """Run a coroutine in a new event loop (mirrors the pattern in test_jobs_submit.py)."""
     return asyncio.run(coro)
 
-from models import AgeBucket, DomainStatusSource, InputType, MdiProcessingStatus
+from models import AgeBucket, DomainHoldType, DomainStatusSource, InputType, MdiProcessingStatus
 from services import domain_enrichment
 from services.domain_enrichment import (
     EnrichmentResult,
@@ -289,6 +289,39 @@ class TestParseRdapResponse:
         result = _parse_rdap_response(data, "malicious.com")
         assert result.domain_hold.has_hold is True
         assert result.domain_hold.source == DomainStatusSource.RDAP
+
+    def test_spaced_client_hold_detected_from_rdap_list(self):
+        data = _make_rdap_200(statuses=[
+            "client transfer prohibited",
+            "client hold",
+            "server transfer prohibited",
+            "inactive",
+        ])
+        result = _parse_rdap_response(data, "ap-exdex.vip")
+        assert result.domain_hold.has_hold is True
+        assert DomainHoldType.CLIENT_HOLD in result.domain_hold.hold_types
+        assert DomainHoldType.SERVER_HOLD not in result.domain_hold.hold_types
+        assert result.epp_status == [
+            "client transfer prohibited",
+            "client hold",
+            "server transfer prohibited",
+            "inactive",
+        ]
+
+    def test_spaced_server_hold_detected(self):
+        data = _make_rdap_200(statuses=["server hold"])
+        result = _parse_rdap_response(data, "held.example")
+        assert result.domain_hold.has_hold is True
+        assert DomainHoldType.SERVER_HOLD in result.domain_hold.hold_types
+
+    def test_transfer_prohibited_only_not_hold(self):
+        data = _make_rdap_200(statuses=[
+            "client transfer prohibited",
+            "server transfer prohibited",
+            "inactive",
+        ])
+        result = _parse_rdap_response(data, "clean.example")
+        assert result.domain_hold.has_hold is False
 
     def test_server_hold_detected(self):
         data = _make_rdap_200(statuses=["serverHold"])
