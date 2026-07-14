@@ -1271,7 +1271,7 @@ Five explicit buttons above the table (vague Actions dropdown removed in MDI-30C
 Export Flagged, Export All, and Export Selected all use the same backend analyst
 export builders (`export_service.build_csv_export` or `build_xlsx_export`). Scope
 only changes which saved result rows are included. CSV remains the default UI
-format; XLSX uses the same 10-column contract with result-based row coloring.
+format; XLSX uses the same 12-column contract with result-based row coloring.
 
 **Read-only guarantee:** default CSV exports use **saved job/result data only**.
 They do **not** trigger VirusTotal, Cloudflare, WHOIS/RDAP, DNS, live-check,

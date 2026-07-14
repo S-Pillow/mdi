@@ -44,8 +44,84 @@ Taste-only changes without supporting evidence belong in backlog.
 | Component | Production state | Notes |
 |---|---|---|
 | Frontend | MDI-67: `a761e1406f52290af6a6f6a8108024ff3427b32d` | Static bundle: `index-C-IhR_fD.js`, `index-YEpmU4YE.css` at `/var/www/html/tools/mdi/` |
-| MDI backend | MDI-69C: `7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` | `/opt/mdi/backend`; spaced RDAP/WHOIS hold variant detection + clearer `whois_failed` enrichment messages; frontend unchanged (MDI-67) |
+| MDI backend | MDI-71: `9bcb5d86f8d4f7322f34350d5e68c16dfd6a878b` | `/opt/mdi/backend`; 12-column CSV/XLSX export contract (`domain`, `reported_abuse`); JSON evidence unchanged (`mdi-evidence-v1`); frontend unchanged (MDI-67) |
 | VT Bulk backend | VTFIX-02F: `413d6334d816724b0476562cdbc4fdb894187221` | `/var/www/dns-tool/backend`; shared `vt_usage.json` flock read-modify-write restored |
+
+MDI-71 (2026-07-14T00:01:13Z) deployed **backend-only** from `main` @
+`9bcb5d86f8d4f7322f34350d5e68c16dfd6a878b` on host `srv766238`
+(`https://forgeforward.app/tools/mdi/`). Build marker time `2026-07-14T00:01:07Z`.
+Backend file copied: `services/export_service.py` →
+`/opt/mdi/backend/services/export_service.py`; `build_info.json` updated to
+`9bcb5d8`; `mdi-backend.service` **restarted** and **active**; journal clean
+startup; frontend **unchanged** at MDI-67 `index-C-IhR_fD.js` /
+`index-YEpmU4YE.css`; no frontend deploy; nginx **not** reloaded; VT Bulk Check
+**untouched**. Backup:
+`/root/backups/mdi-71-pre-deploy-backend-20260714-000107/` (`export_service.py`,
+`build_info.json`). Previous production backend:
+`7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` (MDI-69C). Test files not copied to
+production.
+
+Implementation/merge: commit `9bcb5d86f8d4f7322f34350d5e68c16dfd6a878b`
+(`feat: update mdi csv export columns`); fast-forward merge on `main`; files
+changed: `backend/services/export_service.py`,
+`backend/tests/test_mdi71_csv_export_columns.py`,
+`backend/tests/test_mdi54a_csv_export.py`, `backend/tests/test_mdi54b_xlsx_export.py`,
+`docs/field-purpose-map.md` only in implementation merge. Merge verification:
+required backend suite **272 passed**; no frontend, runtime, quota, VT Bulk,
+nginx, or package files in implementation merge.
+
+MDI-71 updates CSV and XLSX to share the same **12-column** analyst export
+contract (breaking change from MDI-54A 10-column order). New columns:
+`domain` (registrable/apex domain via `extract_registered_domain`) and
+`reported_abuse` (dominant saved VT engine `result` label from
+`vt_engine_results`; raw VT labels, not normalized taxonomy). Exports use saved
+job data only — **no new VT/WHOIS/RDAP/Cloudflare/DNS/live lookups**. JSON
+evidence export remains unchanged as `mdi-evidence-v1`. Spreadsheet-safe
+`detection_ratio` tab-prefix formatting preserved.
+
+Deploy verification: source/prod SHA256 matched (`export_service.py`
+`48987174bb1e4debccf0b4e919ff9c24063b948f09487c952c6261a700a3743b`);
+`py_compile` **PASS**; `/api/mdi/health` 200 commit `9bcb5d8`;
+`/api/mdi/version` 200 full commit
+`9bcb5d86f8d4f7322f34350d5e68c16dfd6a878b`; `/api/mdi/usage` unchanged **0
+used / 500 remaining**; `/api/mdi/jobs/latest` recovered job
+`d739cccd-ff4d-4b88-983f-b88501bc7ba1`; `/tools/mdi/` 200, frontend bundles
+unchanged. Runtime metadata unchanged during deploy (`mdi_latest_job.json`,
+`vt_usage.json`, `vt_usage_history.jsonl`, `vt_daily_history.json`,
+`vt_usage.lock`).
+
+**Commit-marker verification:** prior deploy write-up typo `9acb5d8` is **not**
+a real git object; correct deployed/API/build marker commit is
+`9bcb5d86f8d4f7322f34350d5e68c16dfd6a878b` (`9bcb5d8`) everywhere.
+
+Export smoke (saved job `d739cccd-ff4d-4b88-983f-b88501bc7ba1`, 11 rows) —
+**accepted**:
+
+| Export | HTTP | Rows | Header |
+|---|---|---|---|
+| Export All CSV | 200 | 11 | 12-column matched |
+| Export Flagged CSV | 200 | 7 | 12-column matched |
+| Export Selected position 1 CSV | 200 | 1 | 12-column matched |
+| Export All XLSX | 200 | 11 | 12-column matched |
+| Export All JSON | 200 | — | `mdi-evidence-v1` unchanged |
+
+Observed CSV/XLSX header:
+`input,checked_as,domain,registrar,domain_created,hold_status,cloudflare_rank,result,detection_ratio,reported_abuse,last_scanned,error`
+
+Sample row: `domain=meranto.vu`, `result=flagged`, `detection_ratio=\t11/92`,
+`reported_abuse=malicious`.
+
+Rollback (documented; not executed):
+
+```bash
+BACKUP=/root/backups/mdi-71-pre-deploy-backend-20260714-000107
+cp -a "$BACKUP/export_service.py" /opt/mdi/backend/services/export_service.py
+cp -a "$BACKUP/build_info.json" /opt/mdi/backend/build_info.json
+chown mdi:mdi /opt/mdi/backend/services/export_service.py /opt/mdi/backend/build_info.json
+chmod 644 /opt/mdi/backend/services/export_service.py /opt/mdi/backend/build_info.json
+sudo systemctl restart mdi-backend.service
+# /api/mdi/version → 7acb642bdb9dc73f99ca39fdcc439a2de7e94de0
+```
 
 MDI-69C (2026-07-13T08:21:32Z) deployed **backend-only** from `main` @
 `7acb642bdb9dc73f99ca39fdcc439a2de7e94de0` on host `srv766238`
@@ -471,6 +547,7 @@ Prior deploy notes (MDI-54A backend-only, MDI-49, VTFIX-02G/02I) remain in secti
 | MDI-67 | Automated frontend UX regression tests — **merged, frontend-deployed, browser/static smoke-accepted, closed** (no live action smoke) |
 | MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity — **merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted, closed** |
 | MDI-70 | `.vu` WHOIS/RDAP enrichment failure-pattern discovery — **docs-only known-limitation recorded, closed** (no code/provider change; provider-check not run) |
+| MDI-71 | CSV/XLSX 12-column export contract (`domain`, `reported_abuse`) — **merged, backend-deployed, export-smoke-accepted, closed** |
 
 MDI-57A commit on `main`: `f886ceb8` (fix url pending analysis quota behavior).
 
@@ -499,12 +576,15 @@ MDI-69C commit on `main`: `7acb642` (fix: detect spaced hold statuses and clarif
 MDI-70 docs note on `main`: records `.vu` enrichment as a known provider-stack
 limitation (no application commit beyond this docs update).
 
-### MDI export contract series (MDI-54)
+MDI-71 commit on `main`: `9bcb5d8` (feat: update mdi csv export columns).
+
+### MDI export contract series (MDI-54 / MDI-71)
 
 | Ticket | Outcome |
 |---|---|
-| MDI-54A | Lean 10-column CSV export contract — **merged, backend-deployed, production-smoked, accepted** |
-| MDI-54B | XLSX export with result-based row coloring — **merged, full-stack deployed, production-smoked, accepted** |
+| MDI-54A | Lean 10-column CSV export contract — **merged, backend-deployed, production-smoked, accepted** (superseded by MDI-71 12-column contract) |
+| MDI-54B | XLSX export with result-based row coloring — **merged, full-stack deployed, production-smoked, accepted** (column order updated by MDI-71) |
+| MDI-71 | 12-column CSV/XLSX export contract (`domain`, `reported_abuse`) — **merged, backend-deployed, export-smoke-accepted, closed** |
 | MDI-59A | Stale `action_in_progress` persistence/recovery fix — **merged, backend-deployed, production-verified, accepted** (operator Start New Scan visual confirmation pending) |
 
 MDI-54A commits on `main`: `b1f9fa6` (fix mdi csv export contract),
@@ -514,22 +594,30 @@ MDI-54B commit on `main`: `1073bff` (add mdi xlsx export).
 
 MDI-59A commit on `main`: `32148c1` (fix mdi action flag persistence).
 
-**Release-note context (MDI-54A):** default MDI CSV export is a **breaking** 10-column
-analyst contract versus the legacy wide ~39-column CSV.
+**Release-note context (MDI-54A → MDI-71):** default MDI CSV/XLSX export is a
+**breaking** analyst contract versus the legacy wide ~39-column CSV. MDI-54A
+introduced a 10-column order; **MDI-71** updates CSV and XLSX to a shared
+**12-column** order (adds `domain`, `reported_abuse`; reorders columns). This is
+a **breaking change** for downstream consumers of the MDI-54A 10-column header.
 
-**Current export paths (MDI-54B):**
+**Current export paths (MDI-71):**
 
-- **CSV** — default bulk format; same 10-column contract; `detection_ratio` tab-prefixed in raw CSV
-- **XLSX** — optional bulk format; same 10 columns; result-based row coloring; plain-text ratio cells
-- **JSON evidence** — full forensic fields (`mdi-evidence-v1`); unchanged
+- **CSV** — default bulk format; 12-column contract; `detection_ratio` tab-prefixed in raw CSV
+- **XLSX** — optional bulk format; same 12 columns; result-based row coloring; plain-text ratio cells
+- **JSON evidence** — full forensic fields (`mdi-evidence-v1`); **unchanged**
+
+`domain` is the registrable/apex domain extracted from the checked target.
+`reported_abuse` is computed from saved VirusTotal engine `result` labels only
+(raw VT labels, not a normalized taxonomy). Exports use saved job data only and
+do not trigger new VT/WHOIS/RDAP/Cloudflare/DNS/live lookups.
 
 Consumers needing legacy wide spreadsheet fields should use **JSON evidence export**
-for full forensic review. XLSX provides the analyst 10-column view with coloring,
+for full forensic review. XLSX provides the analyst 12-column view with coloring,
 not the legacy wide field set.
 
-Exact production analyst export header (CSV and XLSX):
+Exact production analyst export header (CSV and XLSX, MDI-71):
 
-`input,checked_as,result,registrar,hold_status,domain_created,cloudflare_rank,detection_ratio,last_scanned,error`
+`input,checked_as,domain,registrar,domain_created,hold_status,cloudflare_rank,result,detection_ratio,reported_abuse,last_scanned,error`
 
 ### VTFIX-02 shared VT quota / dashboard attribution series
 
@@ -615,7 +703,7 @@ MDI currently supports:
 - Phase-aware progress UX (MDI-59; label refinement MDI-59B): backend `current_phase` / `current_phase_detail` on job status; phase labels for enrichment, VT, live-check, Cloudflare rank, finalization, and manual actions; honest indeterminate progress outside VT item-check phase; recovered terminal jobs do not show active phase; MDI-59B frontend-only copy refinements — `refresh_report` default `Refreshing report…`; selected-scope refresh `Refreshing selected report(s)…`; selected-scope rescan `Rescan Selected in progress…`; during manual actions VT Usage panel shows `Working…` (action banner remains primary phase surface); initial-job loading strip shows phase-aware copy such as `Checking VirusTotal…`; MDI-65/66 summaries unchanged; backend phase tokens unchanged
 - Automated frontend UX regression tests (MDI-67): Vitest/jsdom/React Testing Library; `frontend/src/mdiDisplay.js` pure helpers; 50 tests across `mdiDisplay.test.js` (47) and `ResultsJobContextBar.test.jsx` (3); covers MDI-59/59B phase labels and `Working…` rule, MDI-65 action summary formatter, MDI-66 recovered summary gating and banner DOM; run via `npm run test -- --run`; no Playwright; no CI wiring in v1
 - bulk actions
-- CSV export (10-column analyst contract; MDI-54A; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B) via bulk Format selector; JSON evidence export (full forensic fields; unchanged schema)
+- CSV export (12-column analyst contract; MDI-71; default bulk format) and XLSX export (same contract with result-based row coloring; MDI-54B/71) via bulk Format selector; `domain` and `reported_abuse` columns; JSON evidence export (full forensic fields; unchanged `mdi-evidence-v1` schema)
 - operational dashboard (metadata-only) with source filter: **MDI**, **All VT Tools**, **VT Bulk Check**
 - dashboard metric ownership: shared VT operational metrics vs MDI-only triage/enrichment
 - Run Options and Advanced Settings
@@ -678,8 +766,9 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38. MDI-67 adds `npm run test -- --run`
 | VTFIX-02H daily-history backfill dry-run tooling | Accepted |
 | VTFIX-02H-RUNTIME approved daily-history schema normalization | Accepted |
 | VTFIX-02I dashboard quota trend table column alignment | Accepted |
-| MDI-54A 10-column CSV export contract | Accepted |
-| MDI-54B XLSX export with result-based row coloring | Accepted |
+| MDI-54A 10-column CSV export contract | Accepted (superseded by MDI-71) |
+| MDI-54B XLSX export with result-based row coloring | Accepted (column order updated by MDI-71) |
+| MDI-71 12-column CSV/XLSX export contract (`domain`, `reported_abuse`) | Accepted — merged, backend-deployed, export-smoke-accepted (saved job `d739cccd-…`; usage unchanged 0/500) |
 | MDI-59A stale action flag persistence/recovery fix | Accepted (API-verified; operator Start New Scan visual confirmation pending) |
 | MDI-57A submit-only pending URL state, 30-day stale default, pending-analysis triage + export, updated estimate model | Accepted — full-stack deployed, production-verified, operator smoke-accepted |
 | MDI-57B Bulk Refresh Pending (`scope=pending`), Pending Analysis filter | Accepted — full-stack deployed, safe API/static verified, **live Refresh Pending smoke accepted** |
@@ -692,6 +781,31 @@ MDI-30C, MDI-33, MDI-35, MDI-36, and MDI-38. MDI-67 adds `npm run test -- --run`
 | MDI-59B Progress phase label refinement | Accepted — frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved; no live action smoke) |
 | MDI-67 Automated frontend UX regression tests | Accepted — merged, frontend-deployed, **browser/static smoke accepted** (MDI-66 last-action line preserved on current latest job; no live action smoke) |
 | MDI-69C spaced hold variant detection + WHOIS/RDAP failure clarity | Accepted — merged, backend-deployed, no-quota deploy verified, **Option A live smoke accepted** (`ap-exdex.vip` held; spaced `client hold` → `clientHold`; VT/live skipped; quota delta 0); optional `.vu` clarity smoke **not run** |
+
+**MDI-71 backend-only deploy and export smoke acceptance (2026-07-14):**
+
+Backend-only deploy on `srv766238` at `2026-07-14T00:01:13Z` (build marker
+`2026-07-14T00:01:07Z`): backend `9bcb5d8` → `/opt/mdi/backend` (from `7acb642`
+/ MDI-69C). Frontend unchanged: MDI-67 `index-C-IhR_fD.js` /
+`index-YEpmU4YE.css`. Backend file copied: `services/export_service.py`;
+`build_info.json` updated; `mdi-backend.service` **restarted** and **active**;
+nginx **not** reloaded; frontend **not** redeployed; VT Bulk Check **untouched**.
+Backup: `/root/backups/mdi-71-pre-deploy-backend-20260714-000107/`.
+
+Pre-deploy verification: required backend suite **272 passed**; source/prod
+SHA256 matched (`export_service.py` `48987174…`); `py_compile` **PASS**;
+`/api/mdi/health` → `9bcb5d8`; `/api/mdi/version` → full commit `9bcb5d8`;
+usage unchanged **0 used / 500 remaining**; latest job
+`d739cccd-ff4d-4b88-983f-b88501bc7ba1`; runtime/quota files unchanged during
+deploy. Commit-marker typo `9acb5d8` corrected — not a real git object.
+
+Export smoke (saved job `d739cccd-ff4d-4b88-983f-b88501bc7ba1`, 11 rows) —
+**accepted**: Export All CSV 200 (11 rows), Export Flagged CSV 200 (7 rows),
+Export Selected position 1 CSV 200 (1 row), Export All XLSX 200 (12-column
+header), Export All JSON 200 (`mdi-evidence-v1` unchanged). Header:
+`input,checked_as,domain,registrar,domain_created,hold_status,cloudflare_rank,result,detection_ratio,reported_abuse,last_scanned,error`.
+Sample: `domain=meranto.vu`, `result=flagged`, `detection_ratio=\t11/92`,
+`reported_abuse=malicious`. No new VT/WHOIS/RDAP/Cloudflare/DNS/live lookups.
 
 **MDI-69C backend-only deploy and no-quota verification (2026-07-13):**
 
@@ -1627,7 +1741,7 @@ consume shared VT quota.
 | Request New Scan | Consumes quota when confirmed; often more than Refresh |
 | Auto-rescan | OFF by default; quota-impacting when enabled |
 | Open in VirusTotal | Opens public VT GUI; no VT API quota |
-| Export actions | No VT quota; CSV (default) or XLSX bulk export — 10-column analyst contract (MDI-54A/54B); JSON evidence for full forensic fields |
+| Export actions | No VT quota; CSV (default) or XLSX bulk export — 12-column analyst contract (MDI-71; `domain`, `reported_abuse`); JSON evidence for full forensic fields (`mdi-evidence-v1` unchanged) |
 | Dashboard | No VT quota; read-only; source filter does not consume quota |
 | Start New Scan | No VT quota; clears displayed frontend results only |
 
@@ -1712,8 +1826,11 @@ Old frontend backups accumulate. Prune only after an agreed stabilization window
 | Old frontend backups accumulate until operator cleanup | Housekeeping |
 | Failed/error job edge cases were not fully production-smoked during final UI smoke | Future test |
 | Current completed non-recovered job path was not live-smoked during MDI-38 because no live job was submitted | Future test |
-| Legacy wide ~39-column CSV consumers | **Breaking change (MDI-54A)** — use JSON evidence for full forensic fields; XLSX provides the 10-column analyst view with row coloring (MDI-54B), not the legacy wide field set |
+| Legacy wide ~39-column CSV consumers | **Breaking change (MDI-54A)** — use JSON evidence for full forensic fields |
+| MDI-54A 10-column CSV/XLSX consumers | **Breaking change (MDI-71)** — CSV and XLSX now share a 12-column header with `domain` and `reported_abuse`; use JSON evidence for full forensic fields; XLSX provides the analyst 12-column view with row coloring (MDI-54B/71), not the legacy wide field set |
+| `reported_abuse` column semantics | Acceptable — raw saved VT engine `result` labels only; not a normalized taxonomy; blank when no usable engine labels |
 | MDI-54A/54B export smoke used single flagged saved row | Acceptable — contract verified on real production data; multi-row and non-flagged XLSX fills not re-smoked in production |
+| MDI-71 export smoke on saved job `d739cccd-…` | Acceptable — 12-column CSV/XLSX contract verified on 11-row saved job; JSON `mdi-evidence-v1` unchanged |
 | XLSX bulk export built in memory | Acceptable — very large exports may be slower/heavier than CSV |
 | XLSX result-based row fills | Acceptable — spreadsheet apps may render pastel fills slightly differently; `result` text remains the primary signal |
 | Pre–MDI-59A: completed recovered job with stale `action_in_progress=true` blocked Start New Scan | **Resolved** by MDI-59A (2026-07-02) — API recovery sanitization; future actions persist cleared flag |
@@ -1786,16 +1903,19 @@ Manual-review daily-history dates still open (not written): `2026-06-03` (total 
 JSONL sum 2) and `2026-06-07` (total 5, JSONL sum 3). Further backfill requires
 operator review and separate approval.
 
-### MDI-54 export follow-on
+### MDI-54 / MDI-71 export follow-on
 
 | Ticket | Scope | Status |
 |---|---|---|
-| MDI-54A | Lean 10-column CSV export contract | **Closed** — merged, backend-deployed, production-smoked, accepted (2026-06-25) |
-| MDI-54B | XLSX export with result-based row coloring | **Closed** — merged, full-stack deployed, production-smoked, accepted (2026-06-25) |
+| MDI-54A | Lean 10-column CSV export contract | **Closed** — merged, backend-deployed, production-smoked, accepted (2026-06-25); superseded by MDI-71 |
+| MDI-54B | XLSX export with result-based row coloring | **Closed** — merged, full-stack deployed, production-smoked, accepted (2026-06-25); column order updated by MDI-71 |
+| MDI-71 | 12-column CSV/XLSX export contract (`domain`, `reported_abuse`) | **Closed** — merged, backend-deployed, export-smoke-accepted (2026-07-14) |
 
-MDI-54 series complete. Legacy wide-CSV consumers should use **JSON evidence
-export** for full forensic fields. Bulk CSV (default) and XLSX share the 10-column
-analyst contract; XLSX adds result-based row coloring.
+MDI-54/71 export series complete. Legacy wide-CSV consumers and MDI-54A
+10-column consumers should use **JSON evidence export** for full forensic fields
+or update parsers for the MDI-71 12-column header. Bulk CSV (default) and XLSX
+share the 12-column analyst contract; XLSX adds result-based row coloring.
+JSON evidence (`mdi-evidence-v1`) unchanged.
 
 ### MDI-59A action flag persistence follow-on
 
@@ -1823,6 +1943,7 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | MDI-67 | Automated frontend UX regression tests | **Closed** — merged, frontend-deployed, browser/static smoke-accepted (2026-07-09); no live action smoke |
 | MDI-69C | Spaced RDAP/WHOIS hold variant detection + WHOIS/RDAP failure message clarity | **Closed** — merged, backend-deployed, no-quota deploy verified, Option A live-smoke-accepted (2026-07-13); optional `.vu` clarity smoke not run |
 | MDI-70 | `.vu` WHOIS/RDAP enrichment failure-pattern discovery + docs known-limitation note | **Closed** — docs-only (2026-07-13); no code/provider change; provider-check not run |
+| MDI-71 | CSV/XLSX 12-column export contract (`domain`, `reported_abuse`) | **Closed** — merged, backend-deployed, export-smoke-accepted (2026-07-14) |
 
 ### MDI-70 `.vu` enrichment follow-on (optional — not started)
 
@@ -1834,8 +1955,11 @@ MDI-57 and other tickets remain separate; do not conflate with MDI-59A closure.
 | Optional provider fallback | Add `.vu` WHOIS/RDAP source only if provider-check proves a stable, safe, useful source | **Not started** — no provider approved |
 | Optional error aggregation | Dashboard/ops visibility for TLD-level enrichment failure trends | **Not started** |
 
-Production backend is at MDI-69C `7acb642`; production frontend is MDI-67
-`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-70 documents `.vu` WHOIS/RDAP
+Production backend is at MDI-71 `9bcb5d8`; production frontend is MDI-67
+`index-C-IhR_fD.js` / `index-YEpmU4YE.css`. MDI-71 carryforward: **breaking**
+CSV/XLSX header change for MDI-54A 10-column consumers — update parsers or use
+JSON evidence; `reported_abuse` uses raw saved VT engine labels, not normalized
+taxonomy; exports remain saved-job read-only (no new lookups). MDI-70 documents `.vu` WHOIS/RDAP
 enrichment failure as an **expected current provider-stack limitation** (see
 §10); no application code or provider was added. MDI-69C carryforward:
 optional `.vu` production message-clarity smoke not run (superseded for clarity
