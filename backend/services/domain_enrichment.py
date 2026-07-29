@@ -178,6 +178,38 @@ async def _rdap_request(url: str, client: httpx.AsyncClient) -> httpx.Response:
     return await client.get(url, timeout=_RDAP_TIMEOUT_SECONDS, follow_redirects=True)
 
 
+def _clean_epp_status_token(raw: str) -> str:
+    """Strip trailing HTTP(S) URL suffixes from an EPP status string (RDAP/WHOIS)."""
+    return raw.split(" https://")[0].split(" http://")[0].strip()
+
+
+def _coerce_epp_status_list(raw: Any) -> List[str]:
+    """
+    Normalize an RDAP/WHOIS status value into a cleaned list of EPP labels.
+
+    Preserves multi-word statuses (e.g. "client hold") as single tokens.
+    Drops empty entries and strips ICANN/HTTP URL suffixes.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        items: List[Any] = [raw]
+    elif isinstance(raw, (list, tuple, set, frozenset)):
+        items = list(raw)
+    else:
+        items = [raw]
+
+    cleaned: List[str] = []
+    for item in items:
+        if item is None:
+            continue
+        text = item if isinstance(item, str) else str(item)
+        token = _clean_epp_status_token(text)
+        if token:
+            cleaned.append(token)
+    return cleaned
+
+
 def _whois_query_sync(domain: str) -> Optional[Dict[str, Any]]:
     """
     Single mockable, blocking WHOIS entry point.
@@ -190,6 +222,10 @@ def _whois_query_sync(domain: str) -> Optional[Dict[str, Any]]:
 
     Returns None if the lookup fails or the domain is not found.
     Intended to be called via asyncio.run_in_executor (blocking I/O).
+
+    Status collection prefers ``w.statuses`` (full multi-status list from
+    python-whois) over singular ``w.status``, which may omit clientHold /
+    serverHold when registries return multiple Domain Status lines.
     """
     try:
         import whois as whois_lib  # noqa: PLC0415
@@ -203,12 +239,11 @@ def _whois_query_sync(domain: str) -> Optional[Dict[str, Any]]:
         if isinstance(cd, list):
             cd = cd[0] if cd else None
 
-        # Normalize status (list, string, or None)
-        raw_status = getattr(w, "status", None) or []
-        if isinstance(raw_status, str):
-            raw_status = [s.strip() for s in raw_status.replace(",", " ").split() if s.strip()]
-        elif not isinstance(raw_status, list):
-            raw_status = []
+        # Prefer full statuses list; fall back to singular status.
+        raw_status = getattr(w, "statuses", None)
+        if not raw_status:
+            raw_status = getattr(w, "status", None)
+        status_list = _coerce_epp_status_list(raw_status)
 
         # Normalize name_servers (set, list, or None)
         ns = getattr(w, "name_servers", None) or []
@@ -219,7 +254,7 @@ def _whois_query_sync(domain: str) -> Optional[Dict[str, Any]]:
         return {
             "creation_date": cd,
             "registrar": getattr(w, "registrar", None),
-            "status": raw_status,
+            "status": status_list,
             "name_servers": ns,
         }
     except Exception as exc:  # noqa: BLE001
@@ -314,15 +349,7 @@ def _parse_rdap_response(data: Dict[str, Any], registered_domain: str) -> Enrich
             break
 
     # ── epp_status from status field ──────────────────────────────────────────
-    raw_statuses = data.get("status", [])
-    if isinstance(raw_statuses, list):
-        for s in raw_statuses:
-            if not isinstance(s, str):
-                s = str(s)
-            # Strip trailing ICANN URL suffixes (e.g. "clientHold https://icann.org/...")
-            clean = s.split(" https://")[0].split(" http://")[0].strip()
-            if clean:
-                epp_status.append(clean)
+    epp_status = _coerce_epp_status_list(data.get("status", []))
 
     # ── nameservers ───────────────────────────────────────────────────────────
     for ns_obj in data.get("nameservers", []):
@@ -373,7 +400,7 @@ def _parse_whois_result(
         created_at = created_at.replace(tzinfo=timezone.utc)
 
     registrar: Optional[str] = result_dict.get("registrar")
-    epp_status: List[str] = result_dict.get("status") or []
+    epp_status: List[str] = _coerce_epp_status_list(result_dict.get("status") or [])
     nameservers: List[str] = result_dict.get("name_servers") or []
 
     age_bkt = AgeBucket.UNKNOWN
