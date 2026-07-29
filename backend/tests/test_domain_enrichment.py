@@ -39,9 +39,11 @@ from models import AgeBucket, DomainHoldType, DomainStatusSource, InputType, Mdi
 from services import domain_enrichment
 from services.domain_enrichment import (
     EnrichmentResult,
+    _coerce_epp_status_list,
     _parse_rdap_response,
     _parse_retry_after,
     _parse_whois_result,
+    _whois_query_sync,
     enrich_domain,
     extract_registered_domain,
     _RDAP_MIN_INTERVAL_SECONDS,
@@ -381,6 +383,105 @@ class TestParseWhoisResult:
         )
         assert result.created_at is not None
         assert result.created_at.tzinfo is not None
+
+    def test_strips_icann_url_suffixes_from_whois_status(self):
+        result = _parse_whois_result(
+            {
+                "creation_date": None,
+                "registrar": None,
+                "status": [
+                    "clientHold https://icann.org/epp#clientHold",
+                    "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited",
+                ],
+                "name_servers": [],
+            },
+            "qbooksbc.us",
+        )
+        assert result.epp_status == ["clientHold", "clientDeleteProhibited"]
+        assert result.domain_hold.has_hold is True
+        assert DomainHoldType.CLIENT_HOLD in result.domain_hold.hold_types
+
+
+# ── _whois_query_sync status collection ───────────────────────────────────────
+
+class TestWhoisQuerySyncStatuses:
+    """Regression: prefer w.statuses over singular w.status (qbooksbc.us-style)."""
+
+    def test_prefers_statuses_list_over_singular_status(self):
+        fake = MagicMock()
+        fake.creation_date = datetime(2026, 1, 15, tzinfo=timezone.utc)
+        fake.registrar = "Example Registrar"
+        # Singular status omits clientHold (the bug that shipped for qbooksbc.us)
+        fake.status = "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited"
+        fake.statuses = [
+            "clientHold https://icann.org/epp#clientHold",
+            "clientDeleteProhibited https://icann.org/epp#clientDeleteProhibited",
+            "clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+            "clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited",
+            "clientRenewProhibited https://icann.org/epp#clientRenewProhibited",
+        ]
+        fake.name_servers = {"ns1.example.com", "ns2.example.com"}
+
+        with patch.dict("sys.modules", {"whois": MagicMock(query=MagicMock(return_value=fake))}):
+            # Force re-import path: call through the function which imports whois internally
+            result = _whois_query_sync("qbooksbc.us")
+
+        assert result is not None
+        assert "clientHold" in result["status"]
+        assert "clientDeleteProhibited" in result["status"]
+        assert len(result["status"]) == 5
+        assert all("http" not in s.lower() for s in result["status"])
+
+        parsed = _parse_whois_result(result, "qbooksbc.us")
+        assert parsed.domain_hold.has_hold is True
+        assert DomainHoldType.CLIENT_HOLD in parsed.domain_hold.hold_types
+
+    def test_falls_back_to_singular_status_when_statuses_missing(self):
+        class _WhoisObj:
+            creation_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            registrar = "Reg"
+            status = "clientHold https://icann.org/epp#clientHold"
+            name_servers = []
+
+        with patch.dict("sys.modules", {"whois": MagicMock(query=MagicMock(return_value=_WhoisObj()))}):
+            result = _whois_query_sync("held.example")
+
+        assert result is not None
+        assert result["status"] == ["clientHold"]
+
+    def test_rdap_404_whois_multi_status_hold_detected(self):
+        mock_404 = _make_rdap_response(404)
+        whois_dict = _make_whois_dict(
+            status=[
+                "clientHold",
+                "clientDeleteProhibited",
+                "clientTransferProhibited",
+                "clientUpdateProhibited",
+                "clientRenewProhibited",
+            ],
+        )
+
+        with (
+            patch.object(domain_enrichment, "_rdap_request", new=AsyncMock(return_value=mock_404)),
+            patch.object(domain_enrichment, "_whois_query_sync", return_value=whois_dict),
+        ):
+            result = _run(enrich_domain("qbooksbc.us"))
+
+        assert result.source == DomainStatusSource.WHOIS
+        assert result.whois_fallback_used is True
+        assert result.domain_hold.has_hold is True
+        assert DomainHoldType.CLIENT_HOLD in result.domain_hold.hold_types
+        assert "clientHold" in result.epp_status
+
+
+class TestCoerceEppStatusList:
+    def test_preserves_spaced_status(self):
+        assert _coerce_epp_status_list(["client hold", "inactive"]) == ["client hold", "inactive"]
+
+    def test_strips_urls_from_string(self):
+        assert _coerce_epp_status_list(
+            "clientHold https://icann.org/epp#clientHold"
+        ) == ["clientHold"]
 
 
 # ── enrich_domain (integration with mocked HTTP) ─────────────────────────────
